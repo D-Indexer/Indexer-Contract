@@ -14,7 +14,7 @@ impl TestEnv {
     fn new() -> Self {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, FolderContract);
+        let contract_id = env.register(FolderContract, ());
         let admin = Address::generate(&env);
         FolderContractClient::new(&env, &contract_id).initialize(&admin);
         TestEnv { env, admin, contract_id }
