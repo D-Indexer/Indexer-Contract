@@ -1,0 +1,5 @@
+/target
+.env
+*.wasm
+!*.optimized.wasm
+Cargo.lock
