@@ -58,13 +58,15 @@ These terms are consistent across all three repos.
 
 ## Features
 
-- **Template Registry**: On-chain mapping of Template IDs to user profile data (bio, links, work history)
-- **Portfolio NFTs**: Each portfolio is minted as an NFT with IPFS-backed metadata
-- **Access Control**: Only the owner can update their Folder; anyone can verify its authenticity
-- **Passkey Onboarding**: SEP-20 passkey support — sign up with thumbprint or FaceID, no seed phrases
-- **IPFS Integration**: Large assets (resumes, screenshots) stored off-chain; CID anchored on-chain
-- **Proof of Work**: Integrates Stellar payment history as verifiable work credentials
-- **Event Emission**: On-chain events for off-chain indexing and frontend reactivity
+- **Folder Identity**: One `.folder` name per owner address, with reverse lookup from owner to Folder name
+- **Template Registry**: Admin-managed mapping of non-zero Template IDs to IPFS metadata URIs
+- **Portfolio Records**: One portfolio record per owner, linking owner, selected template, IPFS CID, and mint timestamp
+- **Access Control**: Owner-only writes for user state and admin-only writes for template/admin management
+- **Input Validation**: Folder names, IPFS CIDs, metadata URIs, and template IDs are validated before storage
+- **IPFS Anchoring**: Portfolio/template metadata is stored off-chain; current CID/URI references are anchored on-chain
+- **Typed Event Emission**: Soroban `#[contractevent]` events support off-chain indexing and frontend reactivity
+
+Ecosystem-level features such as passkey onboarding, IPFS pinning, and proof-of-work enrichment are handled by the frontend/backend repos and must integrate with this contract surface.
 
 ## Architecture
 
@@ -141,12 +143,12 @@ graph TB
 | `src/template_registry.rs` | Template registration, listing, user assignment |
 | `src/nft_mint.rs` | Portfolio NFT minting, updating, verification |
 | `src/events.rs` | Event emission for all state changes |
-| `src/test.rs` | 12-case test suite |
+| `src/test.rs` | 43-case test suite |
 
 ### Storage Model
 
-- **Instance Storage**: Template definitions, platform config, admin list — shared contract-wide state
-- **Persistent Storage**: User identity mappings, minted NFT records, IPFS CID anchors — per-user data with ~1 year TTL bump on every access
+- **Instance Storage**: initialization flag, admin list, template definitions, and template ID list — shared contract-wide state
+- **Persistent Storage**: user identity mappings, selected templates, and portfolio records — per-user data with ~1 year TTL bump on access
 
 ## Contract Functions
 
@@ -158,10 +160,10 @@ graph TB
 
 ### Template Registry
 
-- `register_template(admin, template_id, metadata_uri)` — Add a new template (admin only)
+- `register_template(admin, template_id, metadata_uri)` — Add a new non-zero template ID (admin only; no duplicate IDs)
 - `get_template(template_id)` → `Template` — Fetch template metadata
 - `list_templates()` → `Vec<u32>` — All available Template IDs
-- `set_user_template(owner, template_id)` — Assign a template to a Folder (owner auth required)
+- `set_user_template(owner, template_id)` — Assign a template to a claimed Folder (owner auth required)
 - `get_user_template(owner)` → `Option<u32>` — Get the template currently assigned to a Folder
 
 ### Portfolio NFT
@@ -257,13 +259,14 @@ pub struct Template     { pub template_id, pub metadata_uri, pub creator }
 
 See [Security Notes](docs/SECURITY.md) for authorization and state invariants.
 
-1. **Owner-Only Writes**: All portfolio mutations require the owner's Stellar signature
-2. **Folder-First Minting**: A Folder name must be claimed before a portfolio can be minted
+1. **Owner-Only Writes**: User state mutations require the owner's Stellar signature
+2. **Folder-First User Actions**: A Folder name must be claimed before portfolio minting or template selection
 3. **No Double-Mint**: A second `mint_portfolio` call returns `PortfolioAlreadyMinted`; use `update_portfolio`
 4. **Public Verification**: Anyone can read and verify portfolio authenticity without permission
-5. **Immutable CID Anchoring**: IPFS CIDs stored on-chain cannot be silently swapped
-6. **Admin Role Guards**: Template registration gated behind admin authorization
-7. **TTL Management**: Persistent storage entries are bumped ~1 year on every access to prevent expiry
+5. **Auditable CID Updates**: CID changes require owner authorization and emit update events
+6. **Admin Role Guards**: Template registration and admin management are gated behind admin authorization
+7. **Storage Invariants**: Duplicate template IDs, duplicate Folder claims, and template ID `0` are rejected
+8. **TTL Management**: Persistent storage entries are bumped ~1 year on access to prevent expiry
 
 ## Why Stellar
 
@@ -276,12 +279,14 @@ See [Security Notes](docs/SECURITY.md) for authorization and state invariants.
 
 ## Roadmap
 
-| Phase | Goal | Key Tech |
-|---|---|---|
-| Phase 1 | The Identity | Users create a Stellar address (Freighter / Passkeys) and claim their Folder name |
-| Phase 2 | Template Engine | 3–5 Rust-based templates for Dev, Design, Admin industries |
-| Phase 3 | Verification | Link GitHub, LinkedIn, or on-chain credentials to a Folder |
-| Phase 4 | The Marketplace | Designers create and sell new portfolio templates as digital assets |
+| Phase | Status | Goal | Contract scope | Cross-repo dependencies |
+|---|---|---|---|---|
+| Phase 1 | Implemented in contract | Folder identity | `initialize`, admin controls, one Folder claim per owner, Folder lookup, validation, events | Frontend wallet/passkey UX and backend identity indexing |
+| Phase 2 | Implemented in contract foundation | Template registry | non-zero template IDs, duplicate rejection, template metadata URI anchoring, user template selection for claimed Folders | Frontend template picker and backend template cache |
+| Phase 3 | Implemented in contract foundation | Portfolio records | one mint per owner, owner-only CID updates, template requirement, public verification, TTL bumps, events | Backend IPFS pinning/indexing and frontend portfolio rendering |
+| Phase 4 | Next | Production deployment | verified optimized WASM, deployed `CONTRACT_ID`, network-specific env values | Stellar CLI install, funded deployer, frontend/backend env rollout |
+| Phase 5 | Next | Stronger verification | full CID parsing, optional credential linkage primitives, cross-repo event compatibility tests | Backend credential/indexing services and frontend verification UI |
+| Phase 6 | Future | Marketplace | designer ownership/payment mechanics and template sale flows | Marketplace UI, payment/indexing backend, economic policy |
 
 ## Quick Start
 
@@ -347,6 +352,7 @@ stellar contract invoke \
 STELLAR_NETWORK=testnet
 STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 DEPLOYER_SECRET=S...
+ADMIN_ADDRESS=G...
 CONTRACT_ID=C...
 ```
 
@@ -372,8 +378,11 @@ NEXT_PUBLIC_BACKEND_URL=https://api.folder.xyz
 ## Testing
 
 ```bash
+make check
 cargo test --locked
 ```
+
+Use `make check` for the full local gate. Use `cargo test --locked` when you only need the contract test suite.
 
 ## Local Quality Gates
 
@@ -389,14 +398,16 @@ Tests cover:
 - ✅ Contract initialization and double-init rejection
 - ✅ Folder name claiming and collision prevention
 - ✅ Mint rejected without a claimed Folder name
-- ✅ Template registration and retrieval
+- ✅ Template registration, retrieval, duplicate rejection, and non-zero template IDs
 - ✅ Portfolio NFT minting and CID anchoring
 - ✅ Double-mint rejection
 - ✅ Portfolio update authorization
 - ✅ Public verification reads
 - ✅ Admin role management
 - ✅ Unauthorized access rejection
-- ✅ User template assignment and retrieval
+- ✅ User template assignment, retrieval, Folder-first enforcement, and unknown-template rejection
+- ✅ Folder/CID/metadata validation bounds and format rules
+- ✅ Missing read paths and exact contract errors
 
 ## Error Codes
 
@@ -452,7 +463,7 @@ When a new event is added:
 
 ## Dependencies
 
-- `soroban-sdk = "25.3.1"`
+- `soroban-sdk = "=25.3.1"`
 
 ## License
 
@@ -465,7 +476,7 @@ Contributions are welcome!
 See [Development Workflow](docs/DEVELOPMENT.md) for local tooling and quality gates.
 
 Quick checklist:
-- All tests pass: `cargo test`
+- All checks pass: `make check`
 - New features include tests
 - Documentation is updated
 - Contract function changes are reflected in all three repos (see checklist above)
