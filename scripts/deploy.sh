@@ -34,7 +34,7 @@ require_env DEPLOYER_SECRET
 require_env ADMIN_ADDRESS
 
 echo "==> Building WASM..."
-cargo build --target wasm32v1-none --release
+make build-wasm
 
 echo "==> Optimizing WASM..."
 stellar contract optimize \
