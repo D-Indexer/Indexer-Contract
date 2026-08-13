@@ -396,6 +396,8 @@ Input validation limits are documented in [Validation Policy](docs/VALIDATION.md
 
 ## Events
 
+Typed event definitions and indexer-facing schema are documented in [Contract Events](docs/EVENTS.md).
+
 | Symbol | Emitted When | Payload |
 |---|---|---|
 | `folder_cl` | A user claims a Folder name | `(owner, folder_name)` |
