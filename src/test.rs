@@ -225,10 +225,7 @@ fn test_double_mint_rejected() {
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::PortfolioAlreadyMinted))
-    );
+    expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
 }
 
 #[test]
@@ -268,10 +265,7 @@ fn test_get_missing_portfolio_rejected() {
     let user = Address::generate(&t.env);
 
     let res = t.client().try_get_portfolio(&user);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::PortfolioNotFound))
-    );
+    expect_contract_error(res, ContractError::PortfolioNotFound);
 }
 
 #[test]
@@ -356,7 +350,7 @@ fn test_short_ipfs_cid_rejected() {
     t.client().claim_folder(&user, &name);
 
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidCID)));
+    expect_contract_error(res, ContractError::InvalidCID);
 }
 
 #[test]
