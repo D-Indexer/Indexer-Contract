@@ -199,6 +199,16 @@ fn test_add_and_remove_admin() {
 }
 
 #[test]
+fn test_duplicate_admin_add_rejected() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+
+    t.client().add_admin(&t.admin, &new_admin);
+    let res = t.client().try_add_admin(&t.admin, &new_admin);
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_cannot_remove_last_admin() {
     let t = TestEnv::new();
     let res = t.client().try_remove_admin(&t.admin, &t.admin);
