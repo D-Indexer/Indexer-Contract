@@ -4,13 +4,12 @@ use crate::access_control::require_owner;
 use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
+use crate::validation;
 
 pub fn claim_folder(env: &Env, owner: &Address, folder_name: &String) -> Result<(), ContractError> {
     require_owner(env, owner)?;
 
-    if folder_name.is_empty() {
-        return Err(ContractError::InvalidFolderName);
-    }
+    validation::require_valid_folder_name(folder_name)?;
     if storage::get_folder_owner(env, folder_name).is_some() {
         return Err(ContractError::FolderNameTaken);
     }

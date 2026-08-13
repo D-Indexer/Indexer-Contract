@@ -16,4 +16,5 @@ pub enum ContractError {
     AdminNotFound = 11,
     CannotRemoveLastAdmin = 12,
     PortfolioAlreadyMinted = 13,
+    InvalidMetadataURI = 14,
 }

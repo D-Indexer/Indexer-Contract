@@ -5,6 +5,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
 use crate::types::Template;
+use crate::validation;
 
 pub fn register_template(
     env: &Env,
@@ -13,6 +14,7 @@ pub fn register_template(
     metadata_uri: &String,
 ) -> Result<(), ContractError> {
     require_admin(env, admin)?;
+    validation::require_valid_metadata_uri(metadata_uri)?;
 
     let template = Template {
         template_id,

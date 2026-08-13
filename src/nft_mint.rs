@@ -5,6 +5,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
 use crate::types::PortfolioNFT;
+use crate::validation;
 
 pub fn mint_portfolio(
     env: &Env,
@@ -22,9 +23,7 @@ pub fn mint_portfolio(
         return Err(ContractError::PortfolioAlreadyMinted);
     }
 
-    if ipfs_cid.is_empty() {
-        return Err(ContractError::InvalidCID);
-    }
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
 
     let nft = PortfolioNFT {
@@ -45,9 +44,7 @@ pub fn update_portfolio(
 ) -> Result<(), ContractError> {
     require_owner(env, owner)?;
 
-    if ipfs_cid.is_empty() {
-        return Err(ContractError::InvalidCID);
-    }
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
     let mut nft = storage::get_portfolio(env, owner)?;
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);

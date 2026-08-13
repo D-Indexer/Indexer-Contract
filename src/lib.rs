@@ -1,6 +1,7 @@
 #![no_std]
 
 mod access_control;
+mod constants;
 mod errors;
 mod events;
 mod identity_map;
@@ -8,6 +9,7 @@ mod nft_mint;
 mod storage;
 mod template_registry;
 mod types;
+mod validation;
 
 #[cfg(test)]
 mod test;

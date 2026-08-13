@@ -1,11 +1,8 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
+use crate::constants::{PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD};
 use crate::errors::ContractError;
 use crate::types::{DataKey, PortfolioNFT, Template};
-
-// Persistent storage TTL: ~1 year in ledgers (5s per ledger)
-const PERSISTENT_BUMP_AMOUNT: u32 = 6_312_000;
-const PERSISTENT_LIFETIME_THRESHOLD: u32 = 6_312_000 - 100_000;
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
