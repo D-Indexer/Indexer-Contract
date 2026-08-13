@@ -13,7 +13,7 @@ test:
 	cargo test
 
 build-wasm:
-	cargo build --target wasm32-unknown-unknown --release
+	cargo build --target wasm32v1-none --release
 
 check: fmt-check clippy test build-wasm
 

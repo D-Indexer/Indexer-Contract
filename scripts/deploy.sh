@@ -6,15 +6,15 @@ set -euo pipefail
 NETWORK="${1:-testnet}"
 
 echo "==> Building WASM..."
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 
 echo "==> Optimizing WASM..."
 stellar contract optimize \
-  --wasm target/wasm32-unknown-unknown/release/indexer_contract.wasm
+  --wasm target/wasm32v1-none/release/indexer_contract.wasm
 
 echo "==> Deploying to $NETWORK..."
 CONTRACT_ID=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/indexer_contract.optimized.wasm \
+  --wasm target/wasm32v1-none/release/indexer_contract.optimized.wasm \
   --source "${DEPLOYER_SECRET}" \
   --network "$NETWORK")
 

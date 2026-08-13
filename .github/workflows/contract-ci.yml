@@ -20,7 +20,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -44,7 +44,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -56,7 +56,7 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32v1-none --release
 
       - name: Install Stellar CLI
         run: cargo install --locked stellar-cli --features opt
@@ -64,10 +64,10 @@ jobs:
       - name: Optimize WASM
         run: |
           stellar contract optimize \
-            --wasm target/wasm32-unknown-unknown/release/indexer_contract.wasm
+            --wasm target/wasm32v1-none/release/indexer_contract.wasm
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: indexer_contract.optimized.wasm
-          path: target/wasm32-unknown-unknown/release/indexer_contract.optimized.wasm
+          path: target/wasm32v1-none/release/indexer_contract.optimized.wasm

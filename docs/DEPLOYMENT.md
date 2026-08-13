@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Rust + `wasm32-unknown-unknown` target
+- Rust stable + `wasm32v1-none` target
 - [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)
 - A funded Stellar keypair for deployment
 

@@ -261,15 +261,15 @@ pub struct Template     { pub template_id, pub metadata_uri, pub creator }
 ### 1. Build the Contract
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
-stellar contract optimize --wasm target/wasm32-unknown-unknown/release/indexer_contract.wasm
+cargo build --target wasm32v1-none --release
+stellar contract optimize --wasm target/wasm32v1-none/release/indexer_contract.wasm
 ```
 
 ### 2. Deploy to Testnet
 
 ```bash
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/indexer_contract.optimized.wasm \
+  --wasm target/wasm32v1-none/release/indexer_contract.optimized.wasm \
   --source deployer \
   --network testnet
 ```
