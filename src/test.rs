@@ -29,6 +29,18 @@ impl TestEnv {
     }
 }
 
+fn uninitialized_env() -> TestEnv {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FolderContract, ());
+    let admin = Address::generate(&env);
+    TestEnv {
+        env,
+        admin,
+        contract_id,
+    }
+}
+
 #[test]
 fn test_initialize() {
     let t = TestEnv::new();
@@ -37,6 +49,35 @@ fn test_initialize() {
         res,
         Err(Ok(crate::errors::ContractError::AlreadyInitialized))
     );
+}
+
+#[test]
+fn test_claim_requires_initialization() {
+    let t = uninitialized_env();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "init.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
+}
+
+#[test]
+fn test_template_registration_requires_initialization() {
+    let t = uninitialized_env();
+    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
+}
+
+#[test]
+fn test_mint_requires_initialization() {
+    let t = uninitialized_env();
+    let user = Address::generate(&t.env);
+    let cid = String::from_str(&t.env, "bafybeig_init");
+
+    let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
 }
 
 #[test]
