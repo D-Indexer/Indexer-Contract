@@ -21,3 +21,10 @@
 ## Input handling
 
 User-provided strings are bounded and format-checked before storage. See `docs/VALIDATION.md`.
+
+## Operational controls
+
+- Do not commit deployer secrets or funded key material.
+- Use a dedicated deployment key instead of a personal wallet.
+- After deployment, keep at least two admin addresses where governance requires continuity.
+- Rotate admin access with `add_admin` before `remove_admin` to avoid losing control.
