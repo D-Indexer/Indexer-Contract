@@ -216,6 +216,17 @@ fn test_cannot_remove_last_admin() {
 }
 
 #[test]
+fn test_remove_unknown_admin_rejected() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+    let unknown = Address::generate(&t.env);
+
+    t.client().add_admin(&t.admin, &new_admin);
+    let res = t.client().try_remove_admin(&t.admin, &unknown);
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_unauthorized_template_registration() {
     let t = TestEnv::new();
     let rando = Address::generate(&t.env);
