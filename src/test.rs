@@ -288,6 +288,16 @@ fn test_update_portfolio_invalid_cid_rejected() {
 }
 
 #[test]
+fn test_update_missing_portfolio_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let cid = String::from_str(&t.env, "bafybeig_missing_update");
+
+    let res = t.client().try_update_portfolio(&user, &cid);
+    expect_contract_error(res, ContractError::PortfolioNotFound);
+}
+
+#[test]
 fn test_verify_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
