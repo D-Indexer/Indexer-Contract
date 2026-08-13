@@ -2,7 +2,7 @@
 
 ## In progress
 
-- [ ] Fix senior audit findings where feasible in the current time box.
+- [x] Fix senior audit findings where feasible in the current time box.
 - [x] Add organization repo linkage to README through the requested migration workflow.
 
 ## Audit findings to address
