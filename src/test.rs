@@ -108,7 +108,10 @@ fn test_duplicate_template_rejected() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::TemplateAlreadyExists))
+    );
 }
 
 #[test]
@@ -117,7 +120,10 @@ fn test_short_template_metadata_rejected() {
     let uri = String::from_str(&t.env, "ipfs://x");
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::InvalidMetadataURI))
+    );
 }
 
 #[test]
