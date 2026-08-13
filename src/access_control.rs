@@ -35,7 +35,7 @@ pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(),
     let mut admins = storage::get_admins(env);
     let mut found_index: Option<u32> = None;
     for i in 0..admins.len() {
-        if admins.get(i).unwrap() == *target {
+        if admins.get(i) == Some(target.clone()) {
             found_index = Some(i);
             break;
         }
