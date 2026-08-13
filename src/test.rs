@@ -105,7 +105,7 @@ fn test_claim_folder_collision() {
 
     t.client().claim_folder(&user1, &name);
     let res = t.client().try_claim_folder(&user2, &name);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNameTaken)));
+    expect_contract_error(res, ContractError::FolderNameTaken);
 }
 
 #[test]
@@ -117,10 +117,7 @@ fn test_owner_cannot_claim_second_folder() {
 
     t.client().claim_folder(&user, &first);
     let res = t.client().try_claim_folder(&user, &second);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::FolderAlreadyClaimed))
-    );
+    expect_contract_error(res, ContractError::FolderAlreadyClaimed);
 }
 
 #[test]
@@ -130,10 +127,7 @@ fn test_short_folder_name_rejected() {
     let name = String::from_str(&t.env, "ab");
 
     let res = t.client().try_claim_folder(&user, &name);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::InvalidFolderName))
-    );
+    expect_contract_error(res, ContractError::InvalidFolderName);
 }
 
 #[test]
@@ -142,7 +136,7 @@ fn test_get_missing_folder_rejected() {
     let name = String::from_str(&t.env, "missing.folder");
 
     let res = t.client().try_get_folder(&name);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
+    expect_contract_error(res, ContractError::FolderNotFound);
 }
 
 #[test]
@@ -151,7 +145,7 @@ fn test_get_missing_identity_rejected() {
     let user = Address::generate(&t.env);
 
     let res = t.client().try_get_identity(&user);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
+    expect_contract_error(res, ContractError::FolderNotFound);
 }
 
 #[test]
@@ -353,7 +347,7 @@ fn test_mint_without_folder_rejected() {
     t.client().register_template(&t.admin, &1u32, &uri);
     // user has not claimed a folder — must fail
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
+    expect_contract_error(res, ContractError::FolderNotFound);
 }
 
 #[test]
