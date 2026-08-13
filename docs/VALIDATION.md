@@ -12,6 +12,8 @@ The contract rejects unbounded user input before writing to ledger storage.
 
 ## Notes
 
-- These checks are intentionally conservative length bounds.
+- Folder names must use lowercase ASCII letters, digits, dots, or hyphens and must end with `.folder`.
+- IPFS CIDs must start with `bafy` or `Qm`.
+- Template metadata URIs must start with `ipfs://`.
 - Frontend and backend validation should mirror these limits before submitting transactions.
-- Future hardening should validate allowed folder-name characters and CID structure.
+- Future hardening should validate full CIDv0/CIDv1 structure rather than prefix only.

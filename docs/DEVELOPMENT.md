@@ -19,3 +19,7 @@ make check
 ```
 
 `make check` is the local pre-PR gate. It intentionally does not run `make optimize-wasm` because Stellar CLI installation can be slow and deployment-specific.
+
+## Test snapshots
+
+Soroban auth snapshots under `test_snapshots/` are intentionally tracked. They make authorization behavior reviewable when contract tests change.

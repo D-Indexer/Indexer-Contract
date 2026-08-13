@@ -23,6 +23,7 @@ pub fn mint_portfolio(
         return Err(ContractError::PortfolioAlreadyMinted);
     }
 
+    validation::require_valid_template_id(template_id)?;
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
 
@@ -57,5 +58,9 @@ pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, Contrac
 }
 
 pub fn verify_portfolio(env: &Env, owner: &Address) -> Result<bool, ContractError> {
-    Ok(storage::portfolio_exists(env, owner))
+    match storage::get_portfolio(env, owner) {
+        Ok(_) => Ok(true),
+        Err(ContractError::PortfolioNotFound) => Ok(false),
+        Err(err) => Err(err),
+    }
 }

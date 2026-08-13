@@ -18,6 +18,31 @@ This contract is one of three repositories in the Folder organisation.
 | `Indexer-Frontend` | User-facing portfolio UI and passkey auth | TypeScript / React |
 | `Indexer-Backend` | Off-chain indexer, API, IPFS pinning, event listener | TypeScript / Node.js |
 
+### Repository Integration Map
+
+The Folder product is split across three repositories that must stay aligned:
+
+| Repository | Responsibility | Primary consumers |
+|---|---|---|
+| `Indexer-Contract` | Soroban smart contract for Folder identity, template registry, portfolio NFT state, events, and admin controls. | Frontend, backend indexer, deployment automation |
+| `Indexer-Frontend` | User interface for claiming Folder names, selecting templates, authenticating users, and minting/updating portfolios. | End users, wallet/passkey flows |
+| `Indexer-Backend` | Off-chain indexer/API layer for Soroban events, IPFS pinning, cached portfolio/template data, and frontend API responses. | Frontend, ops, analytics |
+
+Cross-repo contract points:
+
+- Contract function names and argument order must match frontend contract clients.
+- Contract events must match backend event indexer subscriptions.
+- Contract error codes must match frontend/backend user-facing error handling.
+- Validation limits should be mirrored client-side before submitting transactions.
+- `CONTRACT_ID`, Stellar network, and RPC URL must be coordinated across all repos after every deployment.
+
+When changing this contract:
+
+1. Update `Indexer-Frontend` contract call wrappers and validation.
+2. Update `Indexer-Backend` event parsing, API schemas, and validation.
+3. Update deployment environment values after redeploy.
+4. Update this repository's README, events, errors, and validation docs.
+
 ## Domain Vocabulary
 
 These terms are consistent across all three repos.
@@ -397,6 +422,7 @@ Input validation limits are documented in [Validation Policy](docs/VALIDATION.md
 | 14 | InvalidMetadataURI | Template metadata URI is empty, malformed, or too long | Reject template registration before tx |
 | 15 | TemplateAlreadyExists | Template ID already registered | Ask admin to choose a new template ID |
 | 16 | FolderAlreadyClaimed | Address already owns a Folder name | Show existing Folder and disable new claim |
+| 17 | InvalidTemplateID | Template ID is invalid | Use a positive non-zero template ID |
 
 ## Events
 

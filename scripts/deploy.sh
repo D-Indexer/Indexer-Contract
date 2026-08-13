@@ -21,6 +21,7 @@ require_cmd() {
 }
 
 require_cmd cargo
+require_cmd make
 require_cmd stellar
 
 require_env() {

@@ -144,6 +144,26 @@ fn test_long_folder_name_rejected() {
 }
 
 #[test]
+fn test_invalid_folder_characters_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "Bad_Name.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_folder_suffix_required() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "alice");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
 fn test_get_missing_folder_rejected() {
     let t = TestEnv::new();
     let name = String::from_str(&t.env, "missing.folder");
@@ -210,6 +230,24 @@ fn test_long_template_metadata_rejected() {
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::InvalidMetadataURI);
+}
+
+#[test]
+fn test_template_metadata_ipfs_scheme_required() {
+    let t = TestEnv::new();
+    let uri = String::from_str(&t.env, "https://bafybeig_template");
+
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    expect_contract_error(res, ContractError::InvalidMetadataURI);
+}
+
+#[test]
+fn test_template_id_zero_rejected() {
+    let t = TestEnv::new();
+    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+
+    let res = t.client().try_register_template(&t.admin, &0u32, &uri);
+    expect_contract_error(res, ContractError::InvalidTemplateID);
 }
 
 #[test]
@@ -421,6 +459,21 @@ fn test_short_ipfs_cid_rejected() {
 }
 
 #[test]
+fn test_invalid_ipfs_cid_prefix_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let cid = String::from_str(&t.env, "invalidcidvalue");
+    let name = String::from_str(&t.env, "bad-cid-prefix.folder");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+
+    let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
+    expect_contract_error(res, ContractError::InvalidCID);
+}
+
+#[test]
 fn test_long_ipfs_cid_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
@@ -443,8 +496,10 @@ fn test_get_user_template() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
     let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let name = String::from_str(&t.env, "template-user.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
     t.client().set_user_template(&user, &1u32);
     assert_eq!(t.client().get_user_template(&user), Some(1u32));
 }
@@ -454,9 +509,11 @@ fn test_user_template_can_be_changed() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
     let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let name = String::from_str(&t.env, "template-change.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().register_template(&t.admin, &2u32, &uri);
+    t.client().claim_folder(&user, &name);
     t.client().set_user_template(&user, &1u32);
     t.client().set_user_template(&user, &2u32);
 
@@ -467,7 +524,20 @@ fn test_user_template_can_be_changed() {
 fn test_set_unknown_user_template_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "unknown-user-template.folder");
 
+    t.client().claim_folder(&user, &name);
     let res = t.client().try_set_user_template(&user, &404u32);
     expect_contract_error(res, ContractError::TemplateNotFound);
+}
+
+#[test]
+fn test_set_user_template_without_folder_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let res = t.client().try_set_user_template(&user, &1u32);
+    expect_contract_error(res, ContractError::FolderNotFound);
 }

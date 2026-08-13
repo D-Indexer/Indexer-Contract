@@ -14,6 +14,7 @@ pub fn register_template(
     metadata_uri: &String,
 ) -> Result<(), ContractError> {
     require_admin(env, admin)?;
+    validation::require_valid_template_id(template_id)?;
     validation::require_valid_metadata_uri(metadata_uri)?;
     if storage::get_template(env, template_id).is_some() {
         return Err(ContractError::TemplateAlreadyExists);
@@ -30,6 +31,7 @@ pub fn register_template(
 }
 
 pub fn get_template(env: &Env, template_id: u32) -> Result<Template, ContractError> {
+    validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)
 }
 
@@ -43,6 +45,8 @@ pub fn set_user_template(
     template_id: u32,
 ) -> Result<(), ContractError> {
     require_owner(env, owner)?;
+    storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
     storage::set_user_template(env, owner, template_id);
     events::template_assigned(env, owner, template_id);

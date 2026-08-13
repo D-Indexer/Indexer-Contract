@@ -19,4 +19,5 @@ pub enum ContractError {
     InvalidMetadataURI = 14,
     TemplateAlreadyExists = 15,
     FolderAlreadyClaimed = 16,
+    InvalidTemplateID = 17,
 }

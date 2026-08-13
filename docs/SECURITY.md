@@ -15,7 +15,9 @@
 - One Folder name can be claimed by at most one address.
 - A portfolio can be minted at most once per owner.
 - A template ID can be registered at most once.
+- Template IDs must be non-zero.
+- User template selection requires a claimed Folder.
 
 ## Input handling
 
-User-provided strings are length-bounded before storage. See `docs/VALIDATION.md`.
+User-provided strings are bounded and format-checked before storage. See `docs/VALIDATION.md`.

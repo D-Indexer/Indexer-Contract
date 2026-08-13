@@ -33,9 +33,6 @@ pub fn add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(),
 pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(), ContractError> {
     require_admin(env, caller)?;
     let mut admins = storage::get_admins(env);
-    if admins.len() == 1 {
-        return Err(ContractError::CannotRemoveLastAdmin);
-    }
     let mut found_index: Option<u32> = None;
     for i in 0..admins.len() {
         if admins.get(i).unwrap() == *target {
@@ -45,6 +42,9 @@ pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(),
     }
     match found_index {
         Some(i) => {
+            if admins.len() == 1 {
+                return Err(ContractError::CannotRemoveLastAdmin);
+            }
             admins.remove(i);
             storage::save_admins(env, &admins);
             Ok(())

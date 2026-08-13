@@ -74,6 +74,9 @@ jobs:
       - name: Build WASM
         run: make build-wasm
 
+      - name: Install Stellar CLI native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config build-essential
+
       - name: Install Stellar CLI
         run: cargo install --locked stellar-cli
 
