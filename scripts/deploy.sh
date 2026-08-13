@@ -5,6 +5,14 @@ set -euo pipefail
 
 NETWORK="${1:-testnet}"
 
+case "$NETWORK" in
+  testnet | mainnet) ;;
+  *)
+    echo "Unsupported network: $NETWORK. Expected 'testnet' or 'mainnet'." >&2
+    exit 1
+    ;;
+esac
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
