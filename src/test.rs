@@ -91,6 +91,24 @@ fn test_short_folder_name_rejected() {
 }
 
 #[test]
+fn test_get_missing_folder_rejected() {
+    let t = TestEnv::new();
+    let name = String::from_str(&t.env, "missing.folder");
+
+    let res = t.client().try_get_folder(&name);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
+}
+
+#[test]
+fn test_get_missing_identity_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+
+    let res = t.client().try_get_identity(&user);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
+}
+
+#[test]
 fn test_register_and_get_template() {
     let t = TestEnv::new();
     let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
@@ -99,6 +117,14 @@ fn test_register_and_get_template() {
     let tmpl = t.client().get_template(&1u32);
     assert_eq!(tmpl.metadata_uri, uri);
     assert_eq!(tmpl.template_id, 1u32);
+}
+
+#[test]
+fn test_get_missing_template_rejected() {
+    let t = TestEnv::new();
+
+    let res = t.client().try_get_template(&404u32);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::TemplateNotFound)));
 }
 
 #[test]
@@ -200,6 +226,18 @@ fn test_verify_portfolio() {
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
     assert!(t.client().verify_portfolio(&user));
+}
+
+#[test]
+fn test_get_missing_portfolio_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+
+    let res = t.client().try_get_portfolio(&user);
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::PortfolioNotFound))
+    );
 }
 
 #[test]
