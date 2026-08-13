@@ -2,6 +2,7 @@
 
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
+use crate::errors::ContractError;
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -41,14 +42,18 @@ fn uninitialized_env() -> TestEnv {
     }
 }
 
+fn expect_contract_error<T>(
+    result: Result<T, Result<ContractError, soroban_sdk::InvokeError>>,
+    expected: ContractError,
+) {
+    assert_eq!(result.err(), Some(Ok(expected)));
+}
+
 #[test]
 fn test_initialize() {
     let t = TestEnv::new();
     let res = t.client().try_initialize(&t.admin);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::AlreadyInitialized))
-    );
+    expect_contract_error(res, ContractError::AlreadyInitialized);
 }
 
 #[test]
@@ -58,7 +63,7 @@ fn test_claim_requires_initialization() {
     let name = String::from_str(&t.env, "init.folder");
 
     let res = t.client().try_claim_folder(&user, &name);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
+    expect_contract_error(res, ContractError::NotInitialized);
 }
 
 #[test]
@@ -67,7 +72,7 @@ fn test_template_registration_requires_initialization() {
     let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
+    expect_contract_error(res, ContractError::NotInitialized);
 }
 
 #[test]
@@ -77,7 +82,7 @@ fn test_mint_requires_initialization() {
     let cid = String::from_str(&t.env, "bafybeig_init");
 
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::NotInitialized)));
+    expect_contract_error(res, ContractError::NotInitialized);
 }
 
 #[test]
