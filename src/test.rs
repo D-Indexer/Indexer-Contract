@@ -271,6 +271,23 @@ fn test_update_portfolio() {
 }
 
 #[test]
+fn test_update_portfolio_invalid_cid_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let cid = String::from_str(&t.env, "bafybeig_v1");
+    let invalid = String::from_str(&t.env, "short");
+    let name = String::from_str(&t.env, "bad-update.folder");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let res = t.client().try_update_portfolio(&user, &invalid);
+    expect_contract_error(res, ContractError::InvalidCID);
+}
+
+#[test]
 fn test_verify_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
