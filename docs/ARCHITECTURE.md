@@ -15,6 +15,8 @@ Each `src/` module owns one concern. `lib.rs` is the only public surface — it 
 
 ## Storage Strategy
 
+See [Storage Model](STORAGE.md) for the current key layout.
+
 - **Instance storage** for shared/global state (admin list, template registry, config). Cheap, no TTL concern.
 - **Persistent storage** for per-user data (identity, portfolio, template selection). Every read/write bumps TTL ~1 year to prevent expiry.
 
