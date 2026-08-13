@@ -4,6 +4,7 @@
 set -euo pipefail
 
 NETWORK="${1:-testnet}"
+EXTRA_ARGS=()
 
 case "$NETWORK" in
   testnet | mainnet) ;;
@@ -34,6 +35,10 @@ require_env() {
 require_env DEPLOYER_SECRET
 require_env ADMIN_ADDRESS
 
+if [[ -n "${STELLAR_RPC_URL:-}" ]]; then
+  EXTRA_ARGS+=(--rpc-url "$STELLAR_RPC_URL")
+fi
+
 echo "==> Building WASM..."
 make build-wasm
 
@@ -44,7 +49,8 @@ echo "==> Deploying to $NETWORK..."
 CONTRACT_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/indexer_contract.optimized.wasm \
   --source "${DEPLOYER_SECRET}" \
-  --network "$NETWORK")
+  --network "$NETWORK" \
+  "${EXTRA_ARGS[@]}")
 
 echo "Contract deployed: $CONTRACT_ID"
 
@@ -53,6 +59,7 @@ stellar contract invoke \
   --id "$CONTRACT_ID" \
   --source "${DEPLOYER_SECRET}" \
   --network "$NETWORK" \
+  "${EXTRA_ARGS[@]}" \
   -- initialize \
   --admin "${ADMIN_ADDRESS}"
 
