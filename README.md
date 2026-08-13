@@ -144,7 +144,7 @@ graph TB
 - `mint_portfolio(owner, template_id, ipfs_cid)` — Mint a portfolio NFT (owner must have a Folder name; one mint per address)
 - `update_portfolio(owner, ipfs_cid)` — Update the IPFS CID (owner auth required)
 - `get_portfolio(owner)` → `PortfolioNFT` — Retrieve portfolio details
-- `verify_portfolio(owner)` → `bool` — Public read — confirm authenticity
+- `verify_portfolio(owner)` → `bool` — Public read — `true` when a portfolio exists, `false` otherwise
 
 ### Admin
 
