@@ -426,6 +426,8 @@ MIT
 
 Contributions are welcome!
 
+See [Development Workflow](docs/DEVELOPMENT.md) for local tooling and quality gates.
+
 Quick checklist:
 - All tests pass: `cargo test`
 - New features include tests
