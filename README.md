@@ -343,7 +343,7 @@ NEXT_PUBLIC_BACKEND_URL=https://api.folder.xyz
 ## Testing
 
 ```bash
-cargo test
+cargo test --locked
 ```
 
 ## Local Quality Gates
