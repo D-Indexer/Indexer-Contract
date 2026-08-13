@@ -17,7 +17,11 @@ impl TestEnv {
         let contract_id = env.register(FolderContract, ());
         let admin = Address::generate(&env);
         FolderContractClient::new(&env, &contract_id).initialize(&admin);
-        TestEnv { env, admin, contract_id }
+        TestEnv {
+            env,
+            admin,
+            contract_id,
+        }
     }
 
     fn client(&self) -> FolderContractClient {
