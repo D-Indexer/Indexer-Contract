@@ -15,6 +15,16 @@ require_cmd() {
 require_cmd cargo
 require_cmd stellar
 
+require_env() {
+  if [[ -z "${!1:-}" ]]; then
+    echo "Missing required environment variable: $1" >&2
+    exit 1
+  fi
+}
+
+require_env DEPLOYER_SECRET
+require_env ADMIN_ADDRESS
+
 echo "==> Building WASM..."
 cargo build --target wasm32v1-none --release
 
