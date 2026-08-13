@@ -31,6 +31,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
       - name: Check formatting
         run: make fmt-check
 
