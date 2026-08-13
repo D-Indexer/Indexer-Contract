@@ -31,8 +31,8 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests
-        run: cargo test
+      - name: Run checks
+        run: make check
 
   build:
     name: Build WASM
@@ -56,10 +56,10 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build WASM
-        run: cargo build --target wasm32v1-none --release
+        run: make build-wasm
 
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli --features opt
+        run: cargo install --locked stellar-cli
 
       - name: Optimize WASM
         run: |

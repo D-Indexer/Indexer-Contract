@@ -7,13 +7,13 @@ fmt-check:
 	cargo fmt -- --check
 
 clippy:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --locked -- -D warnings
 
 test:
-	cargo test
+	cargo test --locked
 
 build-wasm:
-	cargo build --target wasm32v1-none --release
+	cargo build --target wasm32v1-none --release --locked
 
 check: fmt-check clippy test build-wasm
 
