@@ -165,7 +165,10 @@ fn test_double_mint_rejected() {
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::PortfolioAlreadyMinted))
+    );
 }
 
 #[test]
@@ -210,7 +213,7 @@ fn test_add_and_remove_admin() {
 
     t.client().remove_admin(&t.admin, &new_admin);
     let res = t.client().try_register_template(&new_admin, &2u32, &uri);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::Unauthorized)));
 }
 
 #[test]
@@ -220,14 +223,20 @@ fn test_duplicate_admin_add_rejected() {
 
     t.client().add_admin(&t.admin, &new_admin);
     let res = t.client().try_add_admin(&t.admin, &new_admin);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::AdminAlreadyExists))
+    );
 }
 
 #[test]
 fn test_cannot_remove_last_admin() {
     let t = TestEnv::new();
     let res = t.client().try_remove_admin(&t.admin, &t.admin);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::CannotRemoveLastAdmin))
+    );
 }
 
 #[test]
@@ -238,7 +247,7 @@ fn test_remove_unknown_admin_rejected() {
 
     t.client().add_admin(&t.admin, &new_admin);
     let res = t.client().try_remove_admin(&t.admin, &unknown);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::AdminNotFound)));
 }
 
 #[test]
@@ -247,7 +256,7 @@ fn test_unauthorized_template_registration() {
     let rando = Address::generate(&t.env);
     let uri = String::from_str(&t.env, "ipfs://tmpl");
     let res = t.client().try_register_template(&rando, &1u32, &uri);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::Unauthorized)));
 }
 
 #[test]
@@ -260,7 +269,7 @@ fn test_mint_without_folder_rejected() {
     t.client().register_template(&t.admin, &1u32, &uri);
     // user has not claimed a folder — must fail
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNotFound)));
 }
 
 #[test]
@@ -275,7 +284,7 @@ fn test_short_ipfs_cid_rejected() {
     t.client().claim_folder(&user, &name);
 
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidCID)));
 }
 
 #[test]
