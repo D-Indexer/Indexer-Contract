@@ -279,7 +279,7 @@ fn test_add_and_remove_admin() {
 
     t.client().remove_admin(&t.admin, &new_admin);
     let res = t.client().try_register_template(&new_admin, &2u32, &uri);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::Unauthorized)));
+    expect_contract_error(res, ContractError::Unauthorized);
 }
 
 #[test]
@@ -289,20 +289,14 @@ fn test_duplicate_admin_add_rejected() {
 
     t.client().add_admin(&t.admin, &new_admin);
     let res = t.client().try_add_admin(&t.admin, &new_admin);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::AdminAlreadyExists))
-    );
+    expect_contract_error(res, ContractError::AdminAlreadyExists);
 }
 
 #[test]
 fn test_cannot_remove_last_admin() {
     let t = TestEnv::new();
     let res = t.client().try_remove_admin(&t.admin, &t.admin);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::CannotRemoveLastAdmin))
-    );
+    expect_contract_error(res, ContractError::CannotRemoveLastAdmin);
 }
 
 #[test]
@@ -313,7 +307,7 @@ fn test_remove_unknown_admin_rejected() {
 
     t.client().add_admin(&t.admin, &new_admin);
     let res = t.client().try_remove_admin(&t.admin, &unknown);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::AdminNotFound)));
+    expect_contract_error(res, ContractError::AdminNotFound);
 }
 
 #[test]
@@ -322,7 +316,7 @@ fn test_unauthorized_template_registration() {
     let rando = Address::generate(&t.env);
     let uri = String::from_str(&t.env, "ipfs://tmpl");
     let res = t.client().try_register_template(&rando, &1u32, &uri);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::Unauthorized)));
+    expect_contract_error(res, ContractError::Unauthorized);
 }
 
 #[test]
