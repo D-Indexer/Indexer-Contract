@@ -392,7 +392,7 @@ Run the same checks locally before opening a PR:
 make check
 ```
 
-This runs formatting, `cargo check`, clippy with warnings denied, the unit test suite, and the release WASM build.
+This runs formatting, `cargo check`, clippy with warnings denied, the unit test suite, the release WASM build, and shell-script syntax validation.
 
 Tests cover:
 - ✅ Contract initialization and double-init rejection
@@ -414,6 +414,8 @@ Tests cover:
 See [Error Reference](docs/ERRORS.md) for compatibility rules when adding or handling errors.
 
 Input validation limits are documented in [Validation Policy](docs/VALIDATION.md).
+
+Deployment handoffs should follow the [Release Checklist](docs/RELEASE_CHECKLIST.md).
 
 | Code | Error | Description | Frontend / Backend Handling |
 |---|---|---|---|
