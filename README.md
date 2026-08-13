@@ -265,6 +265,8 @@ cargo build --target wasm32v1-none --release
 stellar contract optimize --wasm target/wasm32v1-none/release/indexer_contract.wasm
 ```
 
+Soroban SDK 25 uses `wasm32v1-none` for modern Rust toolchains. The target is declared in `rust-toolchain.toml`.
+
 ### 2. Deploy to Testnet
 
 ```bash
