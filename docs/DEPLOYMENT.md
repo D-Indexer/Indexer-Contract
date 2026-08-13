@@ -6,6 +6,12 @@
 - [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)
 - A funded Stellar keypair for deployment
 
+Validate local contract readiness before deploying:
+
+```bash
+make check
+```
+
 ## Steps
 
 1. Copy `.env.example` to `.env` and fill in `DEPLOYER_SECRET` and `ADMIN_ADDRESS`.
