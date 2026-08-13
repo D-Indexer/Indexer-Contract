@@ -333,6 +333,18 @@ fn test_mint_without_folder_rejected() {
 }
 
 #[test]
+fn test_mint_unknown_template_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let cid = String::from_str(&t.env, "bafybeig_unknown_template");
+    let name = String::from_str(&t.env, "unknown-template.folder");
+
+    t.client().claim_folder(&user, &name);
+    let res = t.client().try_mint_portfolio(&user, &404u32, &cid);
+    expect_contract_error(res, ContractError::TemplateNotFound);
+}
+
+#[test]
 fn test_short_ipfs_cid_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
@@ -356,4 +368,13 @@ fn test_get_user_template() {
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().set_user_template(&user, &1u32);
     assert_eq!(t.client().get_user_template(&user), Some(1u32));
+}
+
+#[test]
+fn test_set_unknown_user_template_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+
+    let res = t.client().try_set_user_template(&user, &404u32);
+    expect_contract_error(res, ContractError::TemplateNotFound);
 }
