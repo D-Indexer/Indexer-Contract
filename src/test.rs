@@ -450,6 +450,20 @@ fn test_get_user_template() {
 }
 
 #[test]
+fn test_user_template_can_be_changed() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().register_template(&t.admin, &2u32, &uri);
+    t.client().set_user_template(&user, &1u32);
+    t.client().set_user_template(&user, &2u32);
+
+    assert_eq!(t.client().get_user_template(&user), Some(2u32));
+}
+
+#[test]
 fn test_set_unknown_user_template_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
