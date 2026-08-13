@@ -371,6 +371,8 @@ Tests cover:
 
 ## Error Codes
 
+Input validation limits are documented in [Validation Policy](docs/VALIDATION.md).
+
 | Code | Error | Description | Frontend / Backend Handling |
 |---|---|---|---|
 | 1 | AlreadyInitialized | Contract already initialized | Ignore on deploy retry |
