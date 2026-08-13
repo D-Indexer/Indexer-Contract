@@ -131,6 +131,19 @@ fn test_short_folder_name_rejected() {
 }
 
 #[test]
+fn test_long_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(
+        &t.env,
+        "this-folder-name-is-intentionally-longer-than-sixty-four-characters.folder",
+    );
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
 fn test_get_missing_folder_rejected() {
     let t = TestEnv::new();
     let name = String::from_str(&t.env, "missing.folder");
@@ -181,6 +194,18 @@ fn test_duplicate_template_rejected() {
 fn test_short_template_metadata_rejected() {
     let t = TestEnv::new();
     let uri = String::from_str(&t.env, "ipfs://x");
+
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    expect_contract_error(res, ContractError::InvalidMetadataURI);
+}
+
+#[test]
+fn test_long_template_metadata_rejected() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation",
+    );
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::InvalidMetadataURI);
@@ -351,6 +376,24 @@ fn test_short_ipfs_cid_rejected() {
     let uri = String::from_str(&t.env, "ipfs://tmpl");
     let cid = String::from_str(&t.env, "short");
     let name = String::from_str(&t.env, "cid.folder");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+
+    let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
+    expect_contract_error(res, ContractError::InvalidCID);
+}
+
+#[test]
+fn test_long_ipfs_cid_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let cid = String::from_str(
+        &t.env,
+        "bafybeig_portfolio_cid_that_is_intentionally_long_for_contract_validation_bafybeig_portfolio_cid_that_is_intentionally_long_for_contract_validation",
+    );
+    let name = String::from_str(&t.env, "long-cid.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().claim_folder(&user, &name);
