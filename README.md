@@ -449,6 +449,18 @@ Typed event definitions and indexer-facing schema are documented in [Contract Ev
 | `tmpl_reg` | A new template is added to the registry | `(template_id, metadata_uri)` |
 | `tmpl_set` | A user selects a template for their Folder | `(owner, template_id)` |
 
+## Documentation Index
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Development Workflow](docs/DEVELOPMENT.md)
+- [Error Reference](docs/ERRORS.md)
+- [Contract Events](docs/EVENTS.md)
+- [Release Checklist](docs/RELEASE_CHECKLIST.md)
+- [Security Notes](docs/SECURITY.md)
+- [Storage Model](docs/STORAGE.md)
+- [Validation Policy](docs/VALIDATION.md)
+
 ## Cross-Repo Change Checklist
 
 When a contract function signature changes:
