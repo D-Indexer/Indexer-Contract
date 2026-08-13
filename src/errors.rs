@@ -18,4 +18,5 @@ pub enum ContractError {
     PortfolioAlreadyMinted = 13,
     InvalidMetadataURI = 14,
     TemplateAlreadyExists = 15,
+    FolderAlreadyClaimed = 16,
 }

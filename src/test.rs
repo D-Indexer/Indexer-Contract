@@ -60,6 +60,18 @@ fn test_claim_folder_collision() {
 }
 
 #[test]
+fn test_owner_cannot_claim_second_folder() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let first = String::from_str(&t.env, "first.folder");
+    let second = String::from_str(&t.env, "second.folder");
+
+    t.client().claim_folder(&user, &first);
+    let res = t.client().try_claim_folder(&user, &second);
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_short_folder_name_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);

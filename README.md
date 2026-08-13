@@ -378,6 +378,7 @@ Tests cover:
 | 13 | PortfolioAlreadyMinted | Portfolio already minted | Direct user to `update_portfolio` |
 | 14 | InvalidMetadataURI | Template metadata URI is empty, malformed, or too long | Reject template registration before tx |
 | 15 | TemplateAlreadyExists | Template ID already registered | Ask admin to choose a new template ID |
+| 16 | FolderAlreadyClaimed | Address already owns a Folder name | Show existing Folder and disable new claim |
 
 ## Events
 

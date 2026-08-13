@@ -10,6 +10,9 @@ pub fn claim_folder(env: &Env, owner: &Address, folder_name: &String) -> Result<
     require_owner(env, owner)?;
 
     validation::require_valid_folder_name(folder_name)?;
+    if storage::get_owner_folder(env, owner).is_some() {
+        return Err(ContractError::FolderAlreadyClaimed);
+    }
     if storage::get_folder_owner(env, folder_name).is_some() {
         return Err(ContractError::FolderNameTaken);
     }
