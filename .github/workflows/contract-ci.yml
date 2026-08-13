@@ -31,8 +31,14 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run checks
-        run: make check
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Run clippy
+        run: make clippy
+
+      - name: Run tests
+        run: make test
 
   build:
     name: Build WASM
