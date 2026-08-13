@@ -33,7 +33,10 @@ impl TestEnv {
 fn test_initialize() {
     let t = TestEnv::new();
     let res = t.client().try_initialize(&t.admin);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::AlreadyInitialized))
+    );
 }
 
 #[test]
@@ -56,7 +59,7 @@ fn test_claim_folder_collision() {
 
     t.client().claim_folder(&user1, &name);
     let res = t.client().try_claim_folder(&user2, &name);
-    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::FolderNameTaken)));
 }
 
 #[test]
@@ -68,7 +71,10 @@ fn test_owner_cannot_claim_second_folder() {
 
     t.client().claim_folder(&user, &first);
     let res = t.client().try_claim_folder(&user, &second);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::FolderAlreadyClaimed))
+    );
 }
 
 #[test]
@@ -78,7 +84,10 @@ fn test_short_folder_name_rejected() {
     let name = String::from_str(&t.env, "ab");
 
     let res = t.client().try_claim_folder(&user, &name);
-    assert!(res.is_err());
+    assert_eq!(
+        res,
+        Err(Ok(crate::errors::ContractError::InvalidFolderName))
+    );
 }
 
 #[test]
