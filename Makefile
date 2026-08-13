@@ -1,4 +1,16 @@
-.PHONY: fmt fmt-check cargo-check clippy test build-wasm optimize-wasm check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm optimize-wasm check clean
+
+help:
+	@echo "Available targets:"
+	@echo "  fmt           Format Rust sources"
+	@echo "  fmt-check     Check Rust formatting"
+	@echo "  cargo-check   Type-check the contract"
+	@echo "  clippy        Run clippy with warnings denied"
+	@echo "  test          Run unit tests"
+	@echo "  build-wasm    Build release WASM"
+	@echo "  optimize-wasm Optimize release WASM with Stellar CLI"
+	@echo "  check         Run local pre-PR gates"
+	@echo "  clean         Remove Cargo build artifacts"
 
 fmt:
 	cargo fmt
