@@ -22,7 +22,7 @@ pub fn mint_portfolio(
         return Err(ContractError::PortfolioAlreadyMinted);
     }
 
-    if ipfs_cid.len() == 0 {
+    if ipfs_cid.is_empty() {
         return Err(ContractError::InvalidCID);
     }
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
@@ -45,7 +45,7 @@ pub fn update_portfolio(
 ) -> Result<(), ContractError> {
     require_owner(env, owner)?;
 
-    if ipfs_cid.len() == 0 {
+    if ipfs_cid.is_empty() {
         return Err(ContractError::InvalidCID);
     }
     let mut nft = storage::get_portfolio(env, owner)?;

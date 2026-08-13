@@ -8,7 +8,7 @@ use crate::storage;
 pub fn claim_folder(env: &Env, owner: &Address, folder_name: &String) -> Result<(), ContractError> {
     require_owner(env, owner)?;
 
-    if folder_name.len() == 0 {
+    if folder_name.is_empty() {
         return Err(ContractError::InvalidFolderName);
     }
     if storage::get_folder_owner(env, folder_name).is_some() {

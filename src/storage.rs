@@ -98,7 +98,7 @@ pub fn save_template(env: &Env, template: &Template) {
         .instance()
         .get(&DataKey::TemplateList)
         .unwrap_or(Vec::new(env));
-    if !list.contains(&id) {
+    if !list.contains(id) {
         list.push_back(id);
         env.storage().instance().set(&DataKey::TemplateList, &list);
     }

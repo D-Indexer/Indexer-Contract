@@ -24,7 +24,7 @@ impl TestEnv {
         }
     }
 
-    fn client(&self) -> FolderContractClient {
+    fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
     }
 }
