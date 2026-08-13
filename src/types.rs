@@ -1,7 +1,7 @@
 use soroban_sdk::{contracttype, Address, String};
 
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortfolioNFT {
     pub owner: Address,
     pub template_id: u32,
@@ -10,7 +10,7 @@ pub struct PortfolioNFT {
 }
 
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
     pub template_id: u32,
     pub metadata_uri: String,
