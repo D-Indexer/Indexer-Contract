@@ -188,6 +188,7 @@ fn test_duplicate_template_rejected() {
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::TemplateAlreadyExists);
+    assert_eq!(t.client().list_templates().len(), 1);
 }
 
 #[test]
