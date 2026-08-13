@@ -375,6 +375,8 @@ Tests cover:
 
 ## Error Codes
 
+See [Error Reference](docs/ERRORS.md) for compatibility rules when adding or handling errors.
+
 Input validation limits are documented in [Validation Policy](docs/VALIDATION.md).
 
 | Code | Error | Description | Frontend / Backend Handling |
