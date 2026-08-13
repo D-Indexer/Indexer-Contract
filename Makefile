@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check cargo-check clippy test build-wasm check clean
+.PHONY: fmt fmt-check cargo-check clippy test build-wasm optimize-wasm check clean
 
 fmt:
 	cargo fmt
@@ -17,6 +17,9 @@ test:
 
 build-wasm:
 	cargo build --target wasm32v1-none --release --locked
+
+optimize-wasm: build-wasm
+	stellar contract optimize --wasm target/wasm32v1-none/release/indexer_contract.wasm
 
 check: fmt-check cargo-check clippy test build-wasm
 

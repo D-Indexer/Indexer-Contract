@@ -37,8 +37,7 @@ echo "==> Building WASM..."
 make build-wasm
 
 echo "==> Optimizing WASM..."
-stellar contract optimize \
-  --wasm target/wasm32v1-none/release/indexer_contract.wasm
+make optimize-wasm
 
 echo "==> Deploying to $NETWORK..."
 CONTRACT_ID=$(stellar contract deploy \
