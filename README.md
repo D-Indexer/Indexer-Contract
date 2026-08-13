@@ -346,6 +346,16 @@ NEXT_PUBLIC_BACKEND_URL=https://api.folder.xyz
 cargo test
 ```
 
+## Local Quality Gates
+
+Run the same checks locally before opening a PR:
+
+```bash
+make check
+```
+
+This runs formatting, `cargo check`, clippy with warnings denied, the unit test suite, and the release WASM build.
+
 Tests cover:
 - ✅ Contract initialization and double-init rejection
 - ✅ Folder name claiming and collision prevention
