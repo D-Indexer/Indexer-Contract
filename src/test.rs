@@ -164,7 +164,7 @@ fn test_get_missing_template_rejected() {
     let t = TestEnv::new();
 
     let res = t.client().try_get_template(&404u32);
-    assert_eq!(res, Err(Ok(crate::errors::ContractError::TemplateNotFound)));
+    expect_contract_error(res, ContractError::TemplateNotFound);
 }
 
 #[test]
@@ -174,10 +174,7 @@ fn test_duplicate_template_rejected() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::TemplateAlreadyExists))
-    );
+    expect_contract_error(res, ContractError::TemplateAlreadyExists);
 }
 
 #[test]
@@ -186,10 +183,7 @@ fn test_short_template_metadata_rejected() {
     let uri = String::from_str(&t.env, "ipfs://x");
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
-    assert_eq!(
-        res,
-        Err(Ok(crate::errors::ContractError::InvalidMetadataURI))
-    );
+    expect_contract_error(res, ContractError::InvalidMetadataURI);
 }
 
 #[test]
