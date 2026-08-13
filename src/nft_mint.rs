@@ -57,5 +57,5 @@ pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, Contrac
 }
 
 pub fn verify_portfolio(env: &Env, owner: &Address) -> Result<bool, ContractError> {
-    storage::get_portfolio(env, owner).map(|_| true)
+    Ok(storage::portfolio_exists(env, owner))
 }

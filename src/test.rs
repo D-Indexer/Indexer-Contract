@@ -312,6 +312,14 @@ fn test_verify_portfolio() {
 }
 
 #[test]
+fn test_verify_missing_portfolio_returns_false() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+
+    assert!(!t.client().verify_portfolio(&user));
+}
+
+#[test]
 fn test_get_missing_portfolio_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
