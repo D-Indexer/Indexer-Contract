@@ -230,6 +230,8 @@ pub struct Template     { pub template_id, pub metadata_uri, pub creator }
 
 ## Security Features
 
+See [Security Notes](docs/SECURITY.md) for authorization and state invariants.
+
 1. **Owner-Only Writes**: All portfolio mutations require the owner's Stellar signature
 2. **Folder-First Minting**: A Folder name must be claimed before a portfolio can be minted
 3. **No Double-Mint**: A second `mint_portfolio` call returns `PortfolioAlreadyMinted`; use `update_portfolio`
