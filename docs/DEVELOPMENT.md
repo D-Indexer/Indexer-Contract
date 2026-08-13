@@ -15,10 +15,12 @@ make cargo-check
 make clippy
 make test
 make build-wasm
+make script-check
+make snapshot-list
 make check
 ```
 
-`make check` is the local pre-PR gate. It intentionally does not run `make optimize-wasm` because Stellar CLI installation can be slow and deployment-specific.
+`make check` is the local pre-PR gate. It runs formatting, `cargo check`, clippy, tests, release WASM build, and shell syntax validation. It intentionally does not run `make optimize-wasm` because Stellar CLI installation can be slow and deployment-specific.
 
 ## Test snapshots
 
