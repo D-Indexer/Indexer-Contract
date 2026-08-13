@@ -15,6 +15,9 @@ pub fn register_template(
 ) -> Result<(), ContractError> {
     require_admin(env, admin)?;
     validation::require_valid_metadata_uri(metadata_uri)?;
+    if storage::get_template(env, template_id).is_some() {
+        return Err(ContractError::TemplateAlreadyExists);
+    }
 
     let template = Template {
         template_id,

@@ -377,6 +377,7 @@ Tests cover:
 | 12 | CannotRemoveLastAdmin | Cannot remove the last remaining admin | Disable remove button when only 1 admin |
 | 13 | PortfolioAlreadyMinted | Portfolio already minted | Direct user to `update_portfolio` |
 | 14 | InvalidMetadataURI | Template metadata URI is empty, malformed, or too long | Reject template registration before tx |
+| 15 | TemplateAlreadyExists | Template ID already registered | Ask admin to choose a new template ID |
 
 ## Events
 

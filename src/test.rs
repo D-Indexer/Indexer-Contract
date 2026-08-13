@@ -81,6 +81,16 @@ fn test_register_and_get_template() {
 }
 
 #[test]
+fn test_duplicate_template_rejected() {
+    let t = TestEnv::new();
+    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_short_template_metadata_rejected() {
     let t = TestEnv::new();
     let uri = String::from_str(&t.env, "ipfs://x");

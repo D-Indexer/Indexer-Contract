@@ -17,4 +17,5 @@ pub enum ContractError {
     CannotRemoveLastAdmin = 12,
     PortfolioAlreadyMinted = 13,
     InvalidMetadataURI = 14,
+    TemplateAlreadyExists = 15,
 }
