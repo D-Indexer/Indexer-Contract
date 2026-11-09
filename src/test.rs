@@ -4,7 +4,7 @@ extern crate std;
 use soroban_sdk::{
     testutils::{
         storage::{Instance as _, Persistent as _},
-        Address as _, Events as _, Ledger as _,
+        Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
     Address, Env, Event as _, String,
 };
@@ -1046,4 +1046,86 @@ fn test_metadata_uri_format_rules() {
         t.client()
             .register_template(&t.admin, &(i as u32 + 100), &String::from_str(&t.env, uri));
     }
+}
+
+// ── Authorization ───────────────────────────────────────────────────────────
+
+/// Asserts the last invocation required exactly one signature, from `who`,
+/// for `function` on this contract.
+fn assert_single_auth(t: &TestEnv, who: &Address, function: &str) {
+    let auths = t.env.auths();
+    assert_eq!(auths.len(), 1, "expected exactly one authorizer");
+    let (addr, invocation) = &auths[0];
+    assert_eq!(addr, who);
+    match &invocation.function {
+        AuthorizedFunction::Contract((contract, name, _)) => {
+            assert_eq!(contract, &t.contract_id);
+            assert_eq!(name, &soroban_sdk::Symbol::new(&t.env, function));
+        }
+        _ => panic!("unexpected authorized function"),
+    }
+}
+
+#[test]
+fn test_each_write_requires_the_right_signer() {
+    let t = uninitialized_env();
+    t.client().initialize(&t.admin);
+    assert_single_auth(&t, &t.admin, "initialize");
+
+    let other_admin = Address::generate(&t.env);
+    t.client().add_admin(&t.admin, &other_admin);
+    assert_single_auth(&t, &t.admin, "add_admin");
+    t.client().remove_admin(&other_admin, &t.admin);
+    assert_single_auth(&t, &other_admin, "remove_admin");
+
+    let uri = String::from_str(
+        &t.env,
+        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
+    );
+    t.client().register_template(&other_admin, &1u32, &uri);
+    assert_single_auth(&t, &other_admin, "register_template");
+
+    let user = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "signer.folder"));
+    assert_single_auth(&t, &user, "claim_folder");
+    t.client().set_user_template(&user, &1u32);
+    assert_single_auth(&t, &user, "set_user_template");
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    assert_single_auth(&t, &user, "mint_portfolio");
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
+    assert_single_auth(&t, &user, "update_portfolio");
+}
+
+#[test]
+fn test_writes_fail_without_signature() {
+    let (t, user) = minted_env();
+    t.env.set_auths(&[]);
+
+    let name = String::from_str(&t.env, "nosig.folder");
+    let cid = String::from_str(&t.env, VALID_CIDV0);
+    let uri = String::from_str(
+        &t.env,
+        &(std::string::String::from("ipfs://") + VALID_CIDV0),
+    );
+    assert!(t
+        .client()
+        .try_claim_folder(&Address::generate(&t.env), &name)
+        .is_err());
+    assert!(t.client().try_update_portfolio(&user, &cid).is_err());
+    assert!(t.client().try_set_user_template(&user, &1u32).is_err());
+    assert!(t
+        .client()
+        .try_register_template(&t.admin, &2u32, &uri)
+        .is_err());
+    assert!(t
+        .client()
+        .try_add_admin(&t.admin, &Address::generate(&t.env))
+        .is_err());
+    assert_eq!(
+        t.client().get_portfolio(&user).ipfs_cid,
+        String::from_str(&t.env, VALID_CIDV1_RAW)
+    );
 }
