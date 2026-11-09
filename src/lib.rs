@@ -43,11 +43,17 @@ impl FolderContract {
             return Err(ContractError::AlreadyInitialized);
         }
         let mut admins = soroban_sdk::Vec::new(&env);
-        admins.push_back(admin);
+        admins.push_back(admin.clone());
         storage::save_admins(&env, &admins);
         storage::set_initialized(&env);
         storage::extend_instance(&env);
+        events::contract_initialized(&env, &admin);
         Ok(())
+    }
+
+    /// Returns the current admin list (empty before initialization).
+    pub fn get_admins(env: Env) -> Vec<Address> {
+        storage::get_admins(&env)
     }
 
     pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), ContractError> {

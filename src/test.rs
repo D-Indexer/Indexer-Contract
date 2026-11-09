@@ -3,16 +3,17 @@
 use soroban_sdk::{
     testutils::{
         storage::{Instance as _, Persistent as _},
-        Address as _, Ledger as _,
+        Address as _, Events as _, Ledger as _,
     },
-    Address, Env, String,
+    Address, Env, Event as _, String,
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_TEMPLATES,
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
+use crate::events::{AdminAdded, AdminRemoved, ContractInitialized};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -667,4 +668,84 @@ fn test_template_registry_is_bounded() {
     let res = client.try_register_template(&admin, &(MAX_TEMPLATES + 1), &uri);
     expect_contract_error(res, ContractError::TemplateLimitReached);
     assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
+}
+
+// ── Admin management ────────────────────────────────────────────────────────
+
+#[test]
+fn test_initialize_emits_event_and_exposes_admins() {
+    let t = uninitialized_env();
+    assert_eq!(t.client().get_admins().len(), 0);
+
+    t.client().initialize(&t.admin);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [ContractInitialized {
+            admin: t.admin.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    assert_eq!(
+        t.client().get_admins(),
+        soroban_sdk::vec![&t.env, t.admin.clone()]
+    );
+}
+
+#[test]
+fn test_admin_changes_emit_events() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+
+    t.client().add_admin(&t.admin, &new_admin);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [AdminAdded {
+            admin: t.admin.clone(),
+            new_admin: new_admin.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+
+    t.client().remove_admin(&new_admin, &t.admin);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [AdminRemoved {
+            admin: new_admin.clone(),
+            target: t.admin.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    assert_eq!(
+        t.client().get_admins(),
+        soroban_sdk::vec![&t.env, new_admin]
+    );
+}
+
+#[test]
+fn test_admin_list_is_bounded() {
+    let t = TestEnv::new();
+    for _ in 1..MAX_ADMINS {
+        t.client().add_admin(&t.admin, &Address::generate(&t.env));
+    }
+    assert_eq!(t.client().get_admins().len(), MAX_ADMINS);
+
+    let res = t
+        .client()
+        .try_add_admin(&t.admin, &Address::generate(&t.env));
+    expect_contract_error(res, ContractError::TooManyAdmins);
+}
+
+#[test]
+fn test_removed_admin_loses_admin_rights() {
+    let t = TestEnv::new();
+    let other = Address::generate(&t.env);
+    t.client().add_admin(&t.admin, &other);
+    t.client().remove_admin(&t.admin, &t.admin);
+
+    let res = t
+        .client()
+        .try_add_admin(&t.admin, &Address::generate(&t.env));
+    expect_contract_error(res, ContractError::Unauthorized);
+    let res = t.client().try_remove_admin(&t.admin, &other);
+    expect_contract_error(res, ContractError::Unauthorized);
 }

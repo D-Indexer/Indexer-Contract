@@ -30,3 +30,7 @@ pub const MAX_METADATA_URI_LEN: u32 = 256;
 /// Maximum number of registered templates. Bounds the size of the
 /// persistent template ID list returned by `list_templates`.
 pub const MAX_TEMPLATES: u32 = 256;
+
+/// Maximum number of admins. The admin list lives in instance storage, which
+/// is loaded on every invocation, so it must stay small.
+pub const MAX_ADMINS: u32 = 10;

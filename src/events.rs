@@ -31,6 +31,46 @@ pub struct TemplateAssigned {
     pub template_id: u32,
 }
 
+#[contractevent(topics = ["init"], data_format = "vec")]
+pub struct ContractInitialized {
+    pub admin: Address,
+}
+
+#[contractevent(topics = ["adm_add"], data_format = "vec")]
+pub struct AdminAdded {
+    pub admin: Address,
+    pub new_admin: Address,
+}
+
+#[contractevent(topics = ["adm_rm"], data_format = "vec")]
+pub struct AdminRemoved {
+    pub admin: Address,
+    pub target: Address,
+}
+
+pub fn contract_initialized(env: &Env, admin: &Address) {
+    ContractInitialized {
+        admin: admin.clone(),
+    }
+    .publish(env);
+}
+
+pub fn admin_added(env: &Env, admin: &Address, new_admin: &Address) {
+    AdminAdded {
+        admin: admin.clone(),
+        new_admin: new_admin.clone(),
+    }
+    .publish(env);
+}
+
+pub fn admin_removed(env: &Env, admin: &Address, target: &Address) {
+    AdminRemoved {
+        admin: admin.clone(),
+        target: target.clone(),
+    }
+    .publish(env);
+}
+
 pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String) {
     FolderClaimed {
         owner: owner.clone(),
