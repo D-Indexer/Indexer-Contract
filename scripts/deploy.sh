@@ -53,8 +53,10 @@ for cmd in stellar cargo make jq python3 sha256sum; do
 done
 
 # Runs a stellar CLI command, echoes stdout, and stores the tx hash (if any)
-# in LAST_TX. stderr is kept so failures are shown in full.
-LAST_TX=""
+# for last_tx. stderr is kept so failures are shown in full.
+# Command substitution runs in a subshell, so the last tx hash is passed
+# through a file rather than a variable.
+last_tx() { cat "$LOG_DIR/last_tx" 2>/dev/null || true; }
 run_stellar() {
   local err="$LOG_DIR/stderr"
   local out
@@ -63,8 +65,8 @@ run_stellar() {
     die "stellar $1 $2 failed"
   fi
   # The CLI logs "Signing transaction: <hash>" for every submitted tx. A wasm
-  # upload that is already on-chain submits nothing, leaving LAST_TX empty.
-  LAST_TX="$(grep -oE '(Signing transaction: |tx/)[0-9a-f]{64}' "$err" | tail -1 | grep -oE '[0-9a-f]{64}' || true)"
+  # upload that is already on-chain submits nothing, leaving last_tx empty.
+  { grep -oE '(Signing transaction: |tx/)[0-9a-f]{64}' "$err" | tail -1 | grep -oE '[0-9a-f]{64}' || true; } >"$LOG_DIR/last_tx"
   printf '%s' "$out"
 }
 
@@ -99,12 +101,13 @@ fi
 echo "==> Uploading WASM to $NETWORK"
 WASM_HASH="$(run_stellar contract upload --wasm "$WASM" --source "$IDENTITY" "${NET_ARGS[@]}")"
 [[ "$WASM_HASH" == "$LOCAL_HASH" ]] || die "uploaded wasm hash $WASM_HASH != local $LOCAL_HASH"
-UPLOAD_TX="${LAST_TX:-already-uploaded}"
+UPLOAD_TX="$(last_tx)"
+[[ -n "$UPLOAD_TX" ]] || UPLOAD_TX="already-uploaded"
 
 echo "==> Deploying contract"
 CONTRACT_ID="$(run_stellar contract deploy --wasm-hash "$WASM_HASH" --source "$IDENTITY" "${NET_ARGS[@]}")"
 [[ "$CONTRACT_ID" =~ ^C[A-Z2-7]{55}$ ]] || die "unexpected contract id: $CONTRACT_ID"
-DEPLOY_TX="$LAST_TX"
+DEPLOY_TX="$(last_tx)"
 echo "    contract id: $CONTRACT_ID"
 
 invoke() {
@@ -115,7 +118,7 @@ echo "==> Initializing with admin $ADMIN_ADDRESS"
 # initialize is a separate transaction from deploy. If anyone front-runs it,
 # this call fails with AlreadyInitialized (#1) and the admin check below fails.
 invoke initialize --admin "$ADMIN_ADDRESS" >/dev/null
-INIT_TX="$LAST_TX"
+INIT_TX="$(last_tx)"
 ADMINS="$(invoke get_admins)"
 [[ "$(jq -c . <<<"$ADMINS")" == "$(jq -cn --arg a "$ADMIN_ADDRESS" '[$a]')" ]] \
   || die "admin check failed: expected [$ADMIN_ADDRESS], got $ADMINS — do not use this contract"
@@ -125,8 +128,8 @@ if [[ -n "$MANIFEST" ]]; then
   echo "==> Registering templates from $MANIFEST"
   while IFS=$'\t' read -r id uri; do
     invoke register_template --admin "$ADMIN_ADDRESS" --template_id "$id" --metadata_uri "$uri" >/dev/null
-    echo "    template $id -> $uri (tx $LAST_TX)"
-    TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg tx "$LAST_TX" \
+    echo "    template $id -> $uri (tx $(last_tx))"
+    TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg tx "$(last_tx)" \
       '. + [{template_id: $id, metadata_uri: $uri, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
   done < <(jq -r '.[] | [.template_id, .metadata_uri] | @tsv' "$MANIFEST")
   ON_CHAIN="$(invoke list_templates)"
