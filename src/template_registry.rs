@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
+use crate::constants::MAX_TEMPLATES;
 use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
@@ -18,6 +19,9 @@ pub fn register_template(
     validation::require_valid_metadata_uri(metadata_uri)?;
     if storage::get_template(env, template_id).is_some() {
         return Err(ContractError::TemplateAlreadyExists);
+    }
+    if storage::get_template_list(env).len() >= MAX_TEMPLATES {
+        return Err(ContractError::TemplateLimitReached);
     }
 
     let template = Template {

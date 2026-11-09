@@ -26,3 +26,7 @@ pub const MAX_IPFS_CID_LEN: u32 = 128;
 pub const MIN_METADATA_URI_LEN: u32 = 10;
 /// Maximum accepted template metadata URI length.
 pub const MAX_METADATA_URI_LEN: u32 = 256;
+
+/// Maximum number of registered templates. Bounds the size of the
+/// persistent template ID list returned by `list_templates`.
+pub const MAX_TEMPLATES: u32 = 256;

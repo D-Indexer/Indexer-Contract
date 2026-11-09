@@ -9,7 +9,8 @@ use soroban_sdk::{
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_TEMPLATES,
+    PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
 use crate::types::DataKey;
@@ -623,4 +624,47 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
         t.persistent_ttl(&DataKey::FolderOwner(name)),
         PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
     );
+}
+
+// ── Template storage ────────────────────────────────────────────────────────
+
+#[test]
+fn test_templates_stored_in_persistent_storage() {
+    let t = TestEnv::new();
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    t.env.as_contract(&t.contract_id, || {
+        let instance = t.env.storage().instance();
+        let persistent = t.env.storage().persistent();
+        assert!(!instance.has(&DataKey::Template(1)));
+        assert!(!instance.has(&DataKey::TemplateList));
+        assert!(persistent.has(&DataKey::Template(1)));
+        assert!(persistent.has(&DataKey::TemplateList));
+    });
+    assert_eq!(
+        t.persistent_ttl(&DataKey::Template(1)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+}
+
+#[test]
+fn test_template_registry_is_bounded() {
+    let env = Env::new_with_config(soroban_sdk::testutils::EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    });
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let contract_id = env.register(FolderContract, ());
+    let client = FolderContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let uri = String::from_str(&env, "ipfs://tmpl");
+
+    for id in 1..=MAX_TEMPLATES {
+        client.register_template(&admin, &id, &uri);
+    }
+    let res = client.try_register_template(&admin, &(MAX_TEMPLATES + 1), &uri);
+    expect_contract_error(res, ContractError::TemplateLimitReached);
+    assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
 }

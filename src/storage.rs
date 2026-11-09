@@ -89,34 +89,50 @@ pub fn get_owner_folder(env: &Env, owner: &Address) -> Option<String> {
 
 // ── Template Registry ─────────────────────────────────────────────────────────
 
+fn extend_persistent(env: &Env, key: &DataKey) {
+    env.storage().persistent().extend_ttl(
+        key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
+
+/// Templates live in persistent storage so the registry cannot grow the
+/// contract instance entry, which is loaded on every invocation.
 pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
-    env.storage()
-        .instance()
-        .get(&DataKey::Template(template_id))
+    let key = DataKey::Template(template_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
 }
 
 pub fn save_template(env: &Env, template: &Template) {
     let id = template.template_id;
-    env.storage()
-        .instance()
-        .set(&DataKey::Template(id), template);
+    let key = DataKey::Template(id);
+    env.storage().persistent().set(&key, template);
+    extend_persistent(env, &key);
 
-    let mut list: Vec<u32> = env
-        .storage()
-        .instance()
-        .get(&DataKey::TemplateList)
-        .unwrap_or(Vec::new(env));
+    let mut list = get_template_list(env);
     if !list.contains(id) {
         list.push_back(id);
-        env.storage().instance().set(&DataKey::TemplateList, &list);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TemplateList, &list);
     }
+    extend_persistent(env, &DataKey::TemplateList);
 }
 
 pub fn get_template_list(env: &Env) -> Vec<u32> {
-    env.storage()
-        .instance()
-        .get(&DataKey::TemplateList)
-        .unwrap_or(Vec::new(env))
+    let key = DataKey::TemplateList;
+    match env.storage().persistent().get(&key) {
+        Some(list) => {
+            extend_persistent(env, &key);
+            list
+        }
+        None => Vec::new(env),
+    }
 }
 
 pub fn get_user_template(env: &Env, owner: &Address) -> Option<u32> {
