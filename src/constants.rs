@@ -1,7 +1,18 @@
-/// Ledger TTL bump policy: roughly one year at about five seconds per ledger.
-pub const PERSISTENT_BUMP_AMOUNT: u32 = 6_312_000;
-/// Ledger TTL threshold used before extending persistent entries.
-pub const PERSISTENT_LIFETIME_THRESHOLD: u32 = PERSISTENT_BUMP_AMOUNT - 100_000;
+/// Approximate number of ledgers per day at ~5 seconds per ledger.
+pub const DAY_IN_LEDGERS: u32 = 17_280;
+
+/// Persistent entries are extended to ~120 days. This stays below the
+/// testnet/mainnet `max_entry_ttl` (~180 days, 3_110_400 ledgers), so the
+/// host never has to clamp the request.
+pub const PERSISTENT_BUMP_AMOUNT: u32 = 120 * DAY_IN_LEDGERS;
+/// Persistent entries are only re-extended once their remaining TTL drops
+/// below ~90 days, i.e. at most once every ~30 days per entry.
+pub const PERSISTENT_LIFETIME_THRESHOLD: u32 = 90 * DAY_IN_LEDGERS;
+
+/// Contract instance (and code) TTL policy, applied on every state-changing call.
+pub const INSTANCE_BUMP_AMOUNT: u32 = 120 * DAY_IN_LEDGERS;
+/// Instance TTL threshold below which the instance is re-extended.
+pub const INSTANCE_LIFETIME_THRESHOLD: u32 = 90 * DAY_IN_LEDGERS;
 
 /// Minimum accepted Folder name length.
 pub const MIN_FOLDER_NAME_LEN: u32 = 3;

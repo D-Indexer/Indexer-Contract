@@ -1,6 +1,9 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
-use crate::constants::{PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD};
+use crate::constants::{
+    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    PERSISTENT_LIFETIME_THRESHOLD,
+};
 use crate::errors::ContractError;
 use crate::types::{DataKey, PortfolioNFT, Template};
 
@@ -12,6 +15,14 @@ pub fn is_initialized(env: &Env) -> bool {
 
 pub fn set_initialized(env: &Env) {
     env.storage().instance().set(&DataKey::Initialized, &true);
+}
+
+/// Extends the contract instance and code TTL. Instance storage (admins,
+/// initialization flag) lives and dies with the instance entry.
+pub fn extend_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

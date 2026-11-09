@@ -23,6 +23,16 @@ use crate::types::Template;
 #[contract]
 pub struct FolderContract;
 
+/// Guards state-changing entry points: fails before initialization and keeps
+/// the contract instance alive afterwards.
+fn require_initialized(env: &Env) -> Result<(), ContractError> {
+    if !storage::is_initialized(env) {
+        return Err(ContractError::NotInitialized);
+    }
+    storage::extend_instance(env);
+    Ok(())
+}
+
 #[contractimpl]
 impl FolderContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
@@ -36,20 +46,17 @@ impl FolderContract {
         admins.push_back(admin);
         storage::save_admins(&env, &admins);
         storage::set_initialized(&env);
+        storage::extend_instance(&env);
         Ok(())
     }
 
     pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         access_control::add_admin(&env, &admin, &new_admin)
     }
 
     pub fn remove_admin(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         access_control::remove_admin(&env, &admin, &target)
     }
 
@@ -60,9 +67,7 @@ impl FolderContract {
         owner: Address,
         folder_name: String,
     ) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
     }
 
@@ -82,9 +87,7 @@ impl FolderContract {
         template_id: u32,
         metadata_uri: String,
     ) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         template_registry::register_template(&env, &admin, template_id, &metadata_uri)
     }
 
@@ -101,9 +104,7 @@ impl FolderContract {
         owner: Address,
         template_id: u32,
     ) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         template_registry::set_user_template(&env, &owner, template_id)
     }
 
@@ -120,9 +121,7 @@ impl FolderContract {
         template_id: u32,
         ipfs_cid: String,
     ) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         nft_mint::mint_portfolio(&env, &owner, template_id, &ipfs_cid)
     }
 
@@ -131,9 +130,7 @@ impl FolderContract {
         owner: Address,
         ipfs_cid: String,
     ) -> Result<(), ContractError> {
-        if !storage::is_initialized(&env) {
-            return Err(ContractError::NotInitialized);
-        }
+        require_initialized(&env)?;
         nft_mint::update_portfolio(&env, &owner, &ipfs_cid)
     }
 

@@ -1,8 +1,18 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{
+    testutils::{
+        storage::{Instance as _, Persistent as _},
+        Address as _, Ledger as _,
+    },
+    Address, Env, String,
+};
 
+use crate::constants::{
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+};
 use crate::errors::ContractError;
+use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -540,4 +550,77 @@ fn test_set_user_template_without_folder_rejected() {
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_set_user_template(&user, &1u32);
     expect_contract_error(res, ContractError::FolderNotFound);
+}
+
+// ── TTL policy ──────────────────────────────────────────────────────────────
+
+/// Testnet/mainnet `max_entry_ttl` (~180 days).
+const NETWORK_MAX_ENTRY_TTL: u32 = 3_110_400;
+const _: () = assert!(PERSISTENT_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
+const _: () = assert!(INSTANCE_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
+
+impl TestEnv {
+    fn instance_ttl(&self) -> u32 {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().instance().get_ttl()
+        })
+    }
+
+    fn persistent_ttl(&self, key: &DataKey) -> u32 {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().get_ttl(key)
+        })
+    }
+
+    fn advance_ledgers(&self, ledgers: u32) {
+        self.env.ledger().with_mut(|l| {
+            l.sequence_number += ledgers;
+        });
+    }
+}
+
+#[test]
+fn test_instance_ttl_extended_on_initialize_and_writes() {
+    let t = TestEnv::new();
+    assert_eq!(t.instance_ttl(), INSTANCE_BUMP_AMOUNT);
+
+    // Let the instance TTL fall below the threshold, then perform a write.
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert!(t.instance_ttl() < INSTANCE_LIFETIME_THRESHOLD);
+
+    let user = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "ttl.folder"));
+    assert_eq!(t.instance_ttl(), INSTANCE_BUMP_AMOUNT);
+}
+
+#[test]
+fn test_persistent_ttl_fits_network_max_entry_ttl() {
+    let t = TestEnv::new();
+    t.env.ledger().with_mut(|l| {
+        l.max_entry_ttl = NETWORK_MAX_ENTRY_TTL;
+    });
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-max.folder");
+    t.client().claim_folder(&user, &name);
+
+    // The requested extension is applied exactly, not clamped by the host.
+    let ttl = t.persistent_ttl(&DataKey::FolderOwner(name));
+    assert_eq!(ttl, PERSISTENT_BUMP_AMOUNT);
+}
+
+#[test]
+fn test_persistent_ttl_not_rebumped_above_threshold() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-read.folder");
+    t.client().claim_folder(&user, &name);
+
+    t.advance_ledgers(10 * DAY_IN_LEDGERS);
+    t.client().get_folder(&name);
+    // Still above the threshold, so no rent is spent re-extending it.
+    assert_eq!(
+        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
+    );
 }
