@@ -62,7 +62,9 @@ run_stellar() {
     cat "$err" >&2
     die "stellar $1 $2 failed"
   fi
-  LAST_TX="$(grep -oE 'tx/[0-9a-f]{64}' "$err" | tail -1 | cut -d/ -f2 || true)"
+  # The CLI logs "Signing transaction: <hash>" for every submitted tx. A wasm
+  # upload that is already on-chain submits nothing, leaving LAST_TX empty.
+  LAST_TX="$(grep -oE '(Signing transaction: |tx/)[0-9a-f]{64}' "$err" | tail -1 | grep -oE '[0-9a-f]{64}' || true)"
   printf '%s' "$out"
 }
 
@@ -97,7 +99,7 @@ fi
 echo "==> Uploading WASM to $NETWORK"
 WASM_HASH="$(run_stellar contract upload --wasm "$WASM" --source "$IDENTITY" "${NET_ARGS[@]}")"
 [[ "$WASM_HASH" == "$LOCAL_HASH" ]] || die "uploaded wasm hash $WASM_HASH != local $LOCAL_HASH"
-UPLOAD_TX="$LAST_TX"
+UPLOAD_TX="${LAST_TX:-already-uploaded}"
 
 echo "==> Deploying contract"
 CONTRACT_ID="$(run_stellar contract deploy --wasm-hash "$WASM_HASH" --source "$IDENTITY" "${NET_ARGS[@]}")"
