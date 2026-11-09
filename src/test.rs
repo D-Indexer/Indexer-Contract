@@ -766,3 +766,40 @@ fn test_template_registered_event_includes_creator() {
         .to_xdr(&t.env, &t.contract_id)]
     );
 }
+
+// ── Template selection consistency ──────────────────────────────────────────
+
+#[test]
+fn test_mint_sets_user_template() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    t.client().register_template(&t.admin, &3u32, &uri);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "consistent.folder"));
+    assert_eq!(t.client().get_user_template(&user), None);
+
+    t.client().mint_portfolio(
+        &user,
+        &3u32,
+        &String::from_str(&t.env, "bafybeig_consistent"),
+    );
+    assert_eq!(t.client().get_user_template(&user), Some(3u32));
+}
+
+#[test]
+fn test_set_user_template_updates_minted_portfolio() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().register_template(&t.admin, &2u32, &uri);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "switch.folder"));
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, "bafybeig_switch"));
+
+    t.client().set_user_template(&user, &2u32);
+    assert_eq!(t.client().get_portfolio(&user).template_id, 2u32);
+    assert_eq!(t.client().get_user_template(&user), Some(2u32));
+}

@@ -53,6 +53,11 @@ pub fn set_user_template(
     validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
     storage::set_user_template(env, owner, template_id);
+    // A minted portfolio always renders with the owner's current template.
+    if let Ok(mut nft) = storage::get_portfolio(env, owner) {
+        nft.template_id = template_id;
+        storage::save_portfolio(env, &nft);
+    }
     events::template_assigned(env, owner, template_id);
     Ok(())
 }
