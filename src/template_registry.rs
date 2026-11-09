@@ -30,7 +30,7 @@ pub fn register_template(
         creator: admin.clone(),
     };
     storage::save_template(env, &template);
-    events::template_registered(env, template_id, metadata_uri);
+    events::template_registered(env, template_id, metadata_uri, admin);
     Ok(())
 }
 

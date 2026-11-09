@@ -13,7 +13,7 @@ use crate::constants::{
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized};
+use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -748,4 +748,21 @@ fn test_removed_admin_loses_admin_rights() {
     expect_contract_error(res, ContractError::Unauthorized);
     let res = t.client().try_remove_admin(&t.admin, &other);
     expect_contract_error(res, ContractError::Unauthorized);
+}
+
+#[test]
+fn test_template_registered_event_includes_creator() {
+    let t = TestEnv::new();
+    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    t.client().register_template(&t.admin, &7u32, &uri);
+
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [TemplateRegistered {
+            template_id: 7,
+            metadata_uri: uri,
+            creator: t.admin.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
 }

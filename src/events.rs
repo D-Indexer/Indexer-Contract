@@ -23,6 +23,8 @@ pub struct PortfolioUpdated {
 pub struct TemplateRegistered {
     pub template_id: u32,
     pub metadata_uri: String,
+    /// Appended field: the admin that registered the template.
+    pub creator: Address,
 }
 
 #[contractevent(topics = ["tmpl_set"], data_format = "vec")]
@@ -96,10 +98,11 @@ pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
     .publish(env);
 }
 
-pub fn template_registered(env: &Env, template_id: u32, metadata_uri: &String) {
+pub fn template_registered(env: &Env, template_id: u32, metadata_uri: &String, creator: &Address) {
     TemplateRegistered {
         template_id,
         metadata_uri: metadata_uri.clone(),
+        creator: creator.clone(),
     }
     .publish(env);
 }
