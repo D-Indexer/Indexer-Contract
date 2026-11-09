@@ -14,16 +14,20 @@ pub const INSTANCE_BUMP_AMOUNT: u32 = 120 * DAY_IN_LEDGERS;
 /// Instance TTL threshold below which the instance is re-extended.
 pub const INSTANCE_LIFETIME_THRESHOLD: u32 = 90 * DAY_IN_LEDGERS;
 
-/// Minimum accepted Folder name length.
-pub const MIN_FOLDER_NAME_LEN: u32 = 3;
-/// Maximum accepted Folder name length.
+/// Required Folder name suffix.
+pub const FOLDER_SUFFIX: &[u8] = b".folder";
+/// Minimum length of the label before `.folder` (e.g. `bob` in `bob.folder`).
+pub const MIN_FOLDER_LABEL_LEN: u32 = 3;
+/// Maximum accepted Folder name length, suffix included.
 pub const MAX_FOLDER_NAME_LEN: u32 = 64;
+/// Exact length of a CIDv0 (`Qm...`, base58btc sha2-256).
+pub const CIDV0_LEN: u32 = 46;
 /// Minimum accepted IPFS CID length.
-pub const MIN_IPFS_CID_LEN: u32 = 10;
+pub const MIN_IPFS_CID_LEN: u32 = 46;
 /// Maximum accepted IPFS CID length.
 pub const MAX_IPFS_CID_LEN: u32 = 128;
-/// Minimum accepted template metadata URI length.
-pub const MIN_METADATA_URI_LEN: u32 = 10;
+/// Required template metadata URI scheme.
+pub const METADATA_URI_SCHEME: &[u8] = b"ipfs://";
 /// Maximum accepted template metadata URI length.
 pub const MAX_METADATA_URI_LEN: u32 = 256;
 

@@ -41,7 +41,7 @@
                   "u32": 1
                 },
                 {
-                  "string": "ipfs://bafybeig_template"
+                  "string": "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json"
                 }
               ]
             }
@@ -95,7 +95,7 @@
                       "symbol": "metadata_uri"
                     },
                     "val": {
-                      "string": "ipfs://bafybeig_template"
+                      "string": "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json"
                     }
                   },
                   {

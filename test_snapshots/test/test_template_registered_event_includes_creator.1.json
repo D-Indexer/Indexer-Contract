@@ -41,7 +41,7 @@
                   "u32": 7
                 },
                 {
-                  "string": "ipfs://tmpl"
+                  "string": "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety"
                 }
               ]
             }
@@ -94,7 +94,7 @@
                       "symbol": "metadata_uri"
                     },
                     "val": {
-                      "string": "ipfs://tmpl"
+                      "string": "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety"
                     }
                   },
                   {
@@ -268,7 +268,7 @@
                   "u32": 7
                 },
                 {
-                  "string": "ipfs://tmpl"
+                  "string": "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"

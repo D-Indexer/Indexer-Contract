@@ -1,16 +1,10 @@
 use soroban_sdk::{Bytes, String};
 
 use crate::constants::{
-    MAX_FOLDER_NAME_LEN, MAX_IPFS_CID_LEN, MAX_METADATA_URI_LEN, MIN_FOLDER_NAME_LEN,
-    MIN_IPFS_CID_LEN, MIN_METADATA_URI_LEN,
+    CIDV0_LEN, FOLDER_SUFFIX, MAX_FOLDER_NAME_LEN, MAX_IPFS_CID_LEN, MAX_METADATA_URI_LEN,
+    METADATA_URI_SCHEME, MIN_FOLDER_LABEL_LEN, MIN_IPFS_CID_LEN,
 };
 use crate::errors::ContractError;
-
-/// Returns true when a Soroban string is within the inclusive length range.
-fn validate_len(value: &String, min: u32, max: u32) -> bool {
-    let len = value.len();
-    len >= min && len <= max
-}
 
 fn starts_with(bytes: &Bytes, prefix: &[u8]) -> bool {
     if bytes.len() < prefix.len() as u32 {
@@ -43,51 +37,95 @@ fn ends_with(bytes: &Bytes, suffix: &[u8]) -> bool {
     true
 }
 
-fn is_folder_byte(byte: u8) -> bool {
-    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
-}
-
-fn has_only_folder_bytes(value: &String) -> bool {
-    let bytes = value.to_bytes();
+fn all_bytes(bytes: &Bytes, pred: fn(u8) -> bool) -> bool {
     for byte in bytes.iter() {
-        if !is_folder_byte(byte) {
+        if !pred(byte) {
             return false;
         }
     }
     true
 }
 
-/// Validates a Folder name before it is stored.
-pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractError> {
-    let bytes = folder_name.to_bytes();
-    if validate_len(folder_name, MIN_FOLDER_NAME_LEN, MAX_FOLDER_NAME_LEN)
-        && ends_with(&bytes, b".folder")
-        && has_only_folder_bytes(folder_name)
-    {
-        Ok(())
-    } else {
-        Err(ContractError::InvalidFolderName)
-    }
+fn is_label_byte(byte: u8) -> bool {
+    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
 }
 
-/// Validates an IPFS CID before it is anchored on-chain.
-pub fn require_valid_ipfs_cid(ipfs_cid: &String) -> Result<(), ContractError> {
-    let bytes = ipfs_cid.to_bytes();
-    if validate_len(ipfs_cid, MIN_IPFS_CID_LEN, MAX_IPFS_CID_LEN)
-        && (starts_with(&bytes, b"bafy") || starts_with(&bytes, b"Qm"))
+/// base58btc alphabet used by CIDv0 (no `0`, `O`, `I`, `l`).
+fn is_base58_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() && !matches!(byte, b'0' | b'O' | b'I' | b'l')
+}
+
+/// RFC 4648 lowercase base32 alphabet used by CIDv1 multibase prefix `b`.
+fn is_base32_lower_byte(byte: u8) -> bool {
+    byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte)
+}
+
+fn is_path_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/')
+}
+
+/// Checks the textual shape of a CIDv0 (`Qm` + base58btc, 46 chars) or a
+/// base32 CIDv1 (`ba` + lowercase base32).
+fn is_valid_cid(bytes: &Bytes) -> bool {
+    let len = bytes.len();
+    if starts_with(bytes, b"Qm") {
+        return len == CIDV0_LEN && all_bytes(bytes, is_base58_byte);
+    }
+    if starts_with(bytes, b"ba") {
+        return (MIN_IPFS_CID_LEN..=MAX_IPFS_CID_LEN).contains(&len)
+            && all_bytes(bytes, is_base32_lower_byte);
+    }
+    false
+}
+
+/// Validates a Folder name: `<label>.folder`, where the label is at least
+/// `MIN_FOLDER_LABEL_LEN` bytes of `[a-z0-9-]` and does not start or end with
+/// a hyphen. The whole name is at most `MAX_FOLDER_NAME_LEN` bytes.
+pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractError> {
+    let bytes = folder_name.to_bytes();
+    let len = bytes.len();
+    let suffix_len = FOLDER_SUFFIX.len() as u32;
+    if len > MAX_FOLDER_NAME_LEN
+        || len < MIN_FOLDER_LABEL_LEN + suffix_len
+        || !ends_with(&bytes, FOLDER_SUFFIX)
     {
+        return Err(ContractError::InvalidFolderName);
+    }
+    let label = bytes.slice(0..len - suffix_len);
+    if !all_bytes(&label, is_label_byte)
+        || label.first() == Some(b'-')
+        || label.last() == Some(b'-')
+    {
+        return Err(ContractError::InvalidFolderName);
+    }
+    Ok(())
+}
+
+/// Validates an IPFS CID (CIDv0 or base32 CIDv1) before it is anchored on-chain.
+pub fn require_valid_ipfs_cid(ipfs_cid: &String) -> Result<(), ContractError> {
+    if is_valid_cid(&ipfs_cid.to_bytes()) {
         Ok(())
     } else {
         Err(ContractError::InvalidCID)
     }
 }
 
-/// Validates template metadata URI length before registration.
+/// Validates a template metadata URI: `ipfs://<cid>` optionally followed by
+/// `/<path>` made of URL-safe characters, at most `MAX_METADATA_URI_LEN` bytes.
 pub fn require_valid_metadata_uri(metadata_uri: &String) -> Result<(), ContractError> {
     let bytes = metadata_uri.to_bytes();
-    if validate_len(metadata_uri, MIN_METADATA_URI_LEN, MAX_METADATA_URI_LEN)
-        && starts_with(&bytes, b"ipfs://")
-    {
+    let len = bytes.len();
+    let scheme_len = METADATA_URI_SCHEME.len() as u32;
+    if len > MAX_METADATA_URI_LEN || !starts_with(&bytes, METADATA_URI_SCHEME) {
+        return Err(ContractError::InvalidMetadataURI);
+    }
+    let rest = bytes.slice(scheme_len..len);
+    let cid_end = rest.iter().position(|b| b == b'/').map(|p| p as u32);
+    let (cid, path) = match cid_end {
+        Some(end) => (rest.slice(0..end), rest.slice(end..rest.len())),
+        None => (rest.clone(), Bytes::new(bytes.env())),
+    };
+    if is_valid_cid(&cid) && all_bytes(&path, is_path_byte) {
         Ok(())
     } else {
         Err(ContractError::InvalidMetadataURI)

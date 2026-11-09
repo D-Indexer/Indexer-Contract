@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate std;
 
 use soroban_sdk::{
     testutils::{
@@ -81,7 +82,10 @@ fn test_claim_requires_initialization() {
 #[test]
 fn test_template_registration_requires_initialization() {
     let t = uninitialized_env();
-    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::NotInitialized);
@@ -91,7 +95,10 @@ fn test_template_registration_requires_initialization() {
 fn test_mint_requires_initialization() {
     let t = uninitialized_env();
     let user = Address::generate(&t.env);
-    let cid = String::from_str(&t.env, "bafybeig_init");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
 
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
     expect_contract_error(res, ContractError::NotInitialized);
@@ -196,7 +203,10 @@ fn test_get_missing_identity_rejected() {
 #[test]
 fn test_register_and_get_template() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let tmpl = t.client().get_template(&1u32);
@@ -215,7 +225,10 @@ fn test_get_missing_template_rejected() {
 #[test]
 fn test_duplicate_template_rejected() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
@@ -237,7 +250,7 @@ fn test_long_template_metadata_rejected() {
     let t = TestEnv::new();
     let uri = String::from_str(
         &t.env,
-        "ipfs://bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation_bafybeig_template_metadata_uri_that_is_intentionally_long_for_contract_validation",
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
@@ -247,7 +260,10 @@ fn test_long_template_metadata_rejected() {
 #[test]
 fn test_template_metadata_ipfs_scheme_required() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "https://bafybeig_template");
+    let uri = String::from_str(
+        &t.env,
+        "https://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia",
+    );
 
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::InvalidMetadataURI);
@@ -256,7 +272,10 @@ fn test_template_metadata_ipfs_scheme_required() {
 #[test]
 fn test_template_id_zero_rejected() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://bafybeig_template");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
 
     let res = t.client().try_register_template(&t.admin, &0u32, &uri);
     expect_contract_error(res, ContractError::InvalidTemplateID);
@@ -265,7 +284,10 @@ fn test_template_id_zero_rejected() {
 #[test]
 fn test_list_templates() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().register_template(&t.admin, &2u32, &uri);
     assert_eq!(t.client().list_templates().len(), 2);
@@ -275,8 +297,14 @@ fn test_list_templates() {
 fn test_mint_and_get_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid = String::from_str(&t.env, "bafybeig_portfolio");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "bafkreiaonkhaxbe63gygjrnclypokwjpij7d5ooskdsca2ooiykh2ahi2q",
+    );
     let name = String::from_str(&t.env, "user.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -293,8 +321,14 @@ fn test_mint_and_get_portfolio() {
 fn test_double_mint_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid = String::from_str(&t.env, "bafybeig_v1");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y",
+    );
     let name = String::from_str(&t.env, "double.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -308,9 +342,18 @@ fn test_double_mint_rejected() {
 fn test_update_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid1 = String::from_str(&t.env, "bafybeig_v1");
-    let cid2 = String::from_str(&t.env, "bafybeig_v2");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid1 = String::from_str(
+        &t.env,
+        "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y",
+    );
+    let cid2 = String::from_str(
+        &t.env,
+        "bafkreih3atolnfyojq6rq466kh6vuugxxndlgobrcnqcmzodkdwebnpzsa",
+    );
     let name = String::from_str(&t.env, "update.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -325,8 +368,14 @@ fn test_update_portfolio() {
 fn test_update_portfolio_invalid_cid_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid = String::from_str(&t.env, "bafybeig_v1");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y",
+    );
     let invalid = String::from_str(&t.env, "short");
     let name = String::from_str(&t.env, "bad-update.folder");
 
@@ -342,7 +391,10 @@ fn test_update_portfolio_invalid_cid_rejected() {
 fn test_update_missing_portfolio_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let cid = String::from_str(&t.env, "bafybeig_missing_update");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreic7cazv5ta3crsj75lxe76qj2ewoigi3k6t4e4vntzvyr7kvpkjyy",
+    );
 
     let res = t.client().try_update_portfolio(&user, &cid);
     expect_contract_error(res, ContractError::PortfolioNotFound);
@@ -352,8 +404,14 @@ fn test_update_missing_portfolio_rejected() {
 fn test_verify_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid = String::from_str(&t.env, "bafybeig_verify");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "bafkreifbfxj2p7jsaosff2zu3enjxyqfnhk6gn5dhbbuobuisxah6pqmli",
+    );
     let name = String::from_str(&t.env, "verify.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -383,7 +441,10 @@ fn test_get_missing_portfolio_rejected() {
 fn test_add_and_remove_admin() {
     let t = TestEnv::new();
     let new_admin = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
 
     t.client().add_admin(&t.admin, &new_admin);
     t.client().register_template(&new_admin, &1u32, &uri);
@@ -425,7 +486,10 @@ fn test_remove_unknown_admin_rejected() {
 fn test_unauthorized_template_registration() {
     let t = TestEnv::new();
     let rando = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let res = t.client().try_register_template(&rando, &1u32, &uri);
     expect_contract_error(res, ContractError::Unauthorized);
 }
@@ -434,8 +498,14 @@ fn test_unauthorized_template_registration() {
 fn test_mint_without_folder_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
-    let cid = String::from_str(&t.env, "bafybeig_nofolder");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "bafkreibmxd3f27mt5a7oxrw7oquokicti5bohljkssnxyotxg4qqghr664",
+    );
 
     t.client().register_template(&t.admin, &1u32, &uri);
     // user has not claimed a folder — must fail
@@ -447,7 +517,10 @@ fn test_mint_without_folder_rejected() {
 fn test_mint_unknown_template_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let cid = String::from_str(&t.env, "bafybeig_unknown_template");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreicivmwnppyl74s6tw3357w3z7diihc73d2jph3qf26duumf6olkaq",
+    );
     let name = String::from_str(&t.env, "unknown-template.folder");
 
     t.client().claim_folder(&user, &name);
@@ -459,7 +532,10 @@ fn test_mint_unknown_template_rejected() {
 fn test_short_ipfs_cid_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let cid = String::from_str(&t.env, "short");
     let name = String::from_str(&t.env, "cid.folder");
 
@@ -474,7 +550,10 @@ fn test_short_ipfs_cid_rejected() {
 fn test_invalid_ipfs_cid_prefix_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let cid = String::from_str(&t.env, "invalidcidvalue");
     let name = String::from_str(&t.env, "bad-cid-prefix.folder");
 
@@ -489,10 +568,13 @@ fn test_invalid_ipfs_cid_prefix_rejected() {
 fn test_long_ipfs_cid_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let cid = String::from_str(
         &t.env,
-        "bafybeig_portfolio_cid_that_is_intentionally_long_for_contract_validation_bafybeig_portfolio_cid_that_is_intentionally_long_for_contract_validation",
+        "bafkreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
     let name = String::from_str(&t.env, "long-cid.folder");
 
@@ -507,7 +589,10 @@ fn test_long_ipfs_cid_rejected() {
 fn test_get_user_template() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let name = String::from_str(&t.env, "template-user.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -520,7 +605,10 @@ fn test_get_user_template() {
 fn test_user_template_can_be_changed() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     let name = String::from_str(&t.env, "template-change.folder");
 
     t.client().register_template(&t.admin, &1u32, &uri);
@@ -547,7 +635,10 @@ fn test_set_unknown_user_template_rejected() {
 fn test_set_user_template_without_folder_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let res = t.client().try_set_user_template(&user, &1u32);
@@ -632,7 +723,10 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
 #[test]
 fn test_templates_stored_in_persistent_storage() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     t.client().register_template(&t.admin, &1u32, &uri);
 
     t.env.as_contract(&t.contract_id, || {
@@ -660,7 +754,10 @@ fn test_template_registry_is_bounded() {
     let client = FolderContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     client.initialize(&admin);
-    let uri = String::from_str(&env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
 
     for id in 1..=MAX_TEMPLATES {
         client.register_template(&admin, &id, &uri);
@@ -753,7 +850,10 @@ fn test_removed_admin_loses_admin_rights() {
 #[test]
 fn test_template_registered_event_includes_creator() {
     let t = TestEnv::new();
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     t.client().register_template(&t.admin, &7u32, &uri);
 
     assert_eq!(
@@ -773,7 +873,10 @@ fn test_template_registered_event_includes_creator() {
 fn test_mint_sets_user_template() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     t.client().register_template(&t.admin, &3u32, &uri);
     t.client()
         .claim_folder(&user, &String::from_str(&t.env, "consistent.folder"));
@@ -782,7 +885,10 @@ fn test_mint_sets_user_template() {
     t.client().mint_portfolio(
         &user,
         &3u32,
-        &String::from_str(&t.env, "bafybeig_consistent"),
+        &String::from_str(
+            &t.env,
+            "bafkreibannpmoq7uysdrxrc6vd4te4x6cywyugvk23diikm4zx4bggb4cq",
+        ),
     );
     assert_eq!(t.client().get_user_template(&user), Some(3u32));
 }
@@ -791,15 +897,153 @@ fn test_mint_sets_user_template() {
 fn test_set_user_template_updates_minted_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let uri = String::from_str(&t.env, "ipfs://tmpl");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().register_template(&t.admin, &2u32, &uri);
     t.client()
         .claim_folder(&user, &String::from_str(&t.env, "switch.folder"));
-    t.client()
-        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, "bafybeig_switch"));
+    t.client().mint_portfolio(
+        &user,
+        &1u32,
+        &String::from_str(
+            &t.env,
+            "bafkreidywsp3ftbnf3lmdo4dqoz5ez5txrrdvcqpwsx7jks5hw3uyo2jm4",
+        ),
+    );
 
     t.client().set_user_template(&user, &2u32);
     assert_eq!(t.client().get_portfolio(&user).template_id, 2u32);
     assert_eq!(t.client().get_user_template(&user), Some(2u32));
+}
+
+// ── Validation hardening ────────────────────────────────────────────────────
+
+const VALID_CIDV1_RAW: &str = "bafkreicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
+const VALID_CIDV1_DAG_PB: &str = "bafybeicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
+const VALID_CIDV0: &str = "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce";
+
+#[test]
+fn test_folder_label_rules() {
+    let t = TestEnv::new();
+    for bad in [
+        ".folder",
+        "ab.folder",
+        "-abc.folder",
+        "abc-.folder",
+        "a..folder",
+        "a.b.folder",
+        "abc.folder.folder",
+        "ab c.folder",
+        "abc.Folder",
+    ] {
+        let user = Address::generate(&t.env);
+        let res = t
+            .client()
+            .try_claim_folder(&user, &String::from_str(&t.env, bad));
+        expect_contract_error(res, ContractError::InvalidFolderName);
+    }
+    for good in [
+        "abc.folder",
+        "a-b.folder",
+        "007.folder",
+        "jane-doe-2.folder",
+    ] {
+        let user = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, good));
+    }
+}
+
+#[test]
+fn test_folder_name_max_length_boundary() {
+    let t = TestEnv::new();
+    // 57-byte label + ".folder" = 64 bytes (accepted); one more byte is rejected.
+    let ok = "a".repeat(57) + ".folder";
+    let too_long = "a".repeat(58) + ".folder";
+    t.client()
+        .claim_folder(&Address::generate(&t.env), &String::from_str(&t.env, &ok));
+    let res = t.client().try_claim_folder(
+        &Address::generate(&t.env),
+        &String::from_str(&t.env, &too_long),
+    );
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+fn minted_env() -> (TestEnv, Address) {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let uri = String::from_str(
+        &t.env,
+        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "cidcheck.folder"));
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    (t, user)
+}
+
+#[test]
+fn test_cid_format_rules() {
+    let (t, user) = minted_env();
+    let bad_charset = std::string::String::from("bafy") + &"_".repeat(55);
+    let upper_v1 = VALID_CIDV1_RAW.to_uppercase();
+    let short_v0 = &VALID_CIDV0[..45];
+    let long_v0 = std::string::String::from(VALID_CIDV0) + "a";
+    let v0_bad_alphabet = std::string::String::from("Qm") + &"0".repeat(44);
+    let spaced = std::string::String::from(&VALID_CIDV1_RAW[..58]) + " ";
+    for bad in [
+        bad_charset.as_str(),
+        upper_v1.as_str(),
+        short_v0,
+        long_v0.as_str(),
+        v0_bad_alphabet.as_str(),
+        spaced.as_str(),
+        "bafy",
+    ] {
+        let res = t
+            .client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, bad));
+        expect_contract_error(res, ContractError::InvalidCID);
+    }
+    for good in [VALID_CIDV0, VALID_CIDV1_RAW, VALID_CIDV1_DAG_PB] {
+        let cid = String::from_str(&t.env, good);
+        t.client().update_portfolio(&user, &cid);
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+}
+
+#[test]
+fn test_metadata_uri_format_rules() {
+    let t = TestEnv::new();
+    let with = |suffix: &str| std::string::String::from("ipfs://") + suffix;
+    let bad = [
+        with("tmpl"),
+        with("bafy_not_a_cid"),
+        with(&(std::string::String::from(VALID_CIDV1_RAW) + "/has space.json")),
+        with(&(std::string::String::from(VALID_CIDV1_RAW) + "?q=1")),
+        with(""),
+        std::string::String::from("ipfs:/") + VALID_CIDV1_RAW,
+    ];
+    for (i, uri) in bad.iter().enumerate() {
+        let res = t.client().try_register_template(
+            &t.admin,
+            &(i as u32 + 1),
+            &String::from_str(&t.env, uri),
+        );
+        expect_contract_error(res, ContractError::InvalidMetadataURI);
+    }
+    let good = [
+        with(VALID_CIDV1_RAW),
+        with(VALID_CIDV0),
+        with(&(std::string::String::from(VALID_CIDV1_DAG_PB) + "/templates/1.json")),
+    ];
+    for (i, uri) in good.iter().enumerate() {
+        t.client()
+            .register_template(&t.admin, &(i as u32 + 100), &String::from_str(&t.env, uri));
+    }
 }
