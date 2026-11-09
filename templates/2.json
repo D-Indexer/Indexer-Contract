@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "template_id": 2,
+  "name": "Designer",
+  "description": "Visual-first gallery layout for UI/UX and creative work.",
+  "target_industry": "UI/UX & Creative",
+  "fields": [
+    "bio",
+    "portfolio_images",
+    "case_studies",
+    "tools",
+    "contact"
+  ]
+}
