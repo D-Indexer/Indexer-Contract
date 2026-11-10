@@ -34,6 +34,8 @@ pub fn mint_portfolio(
         minted_at: env.ledger().timestamp(),
     };
     storage::save_portfolio(env, &nft);
+    // Keep the user's template selection consistent with the minted portfolio.
+    storage::set_user_template(env, owner, template_id);
     events::portfolio_minted(env, owner, template_id, ipfs_cid);
     Ok(())
 }

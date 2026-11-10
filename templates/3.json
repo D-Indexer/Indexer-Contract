@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "template_id": 3,
+  "name": "Operations",
+  "description": "Structured résumé layout for operations and management roles.",
+  "target_industry": "Operations & Management",
+  "fields": [
+    "bio",
+    "experience",
+    "certifications",
+    "skills",
+    "references"
+  ]
+}

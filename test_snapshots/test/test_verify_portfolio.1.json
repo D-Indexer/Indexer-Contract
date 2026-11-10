@@ -41,7 +41,7 @@
                   "u32": 1
                 },
                 {
-                  "string": "ipfs://tmpl"
+                  "string": "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety"
                 }
               ]
             }
@@ -88,7 +88,7 @@
                   "u32": 1
                 },
                 {
-                  "string": "bafybeig_verify"
+                  "string": "bafkreifbfxj2p7jsaosff2zu3enjxyqfnhk6gn5dhbbuobuisxah6pqmli"
                 }
               ]
             }
@@ -134,7 +134,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -161,7 +161,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -188,7 +188,7 @@
                       "symbol": "ipfs_cid"
                     },
                     "val": {
-                      "string": "bafybeig_verify"
+                      "string": "bafkreifbfxj2p7jsaosff2zu3enjxyqfnhk6gn5dhbbuobuisxah6pqmli"
                     }
                   },
                   {
@@ -221,7 +221,114 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 2073600
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Template"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "creator"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "metadata_uri"
+                    },
+                    "val": {
+                      "string": "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "template_id"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 2073600
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TemplateList"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "vec": [
+                  {
+                    "u32": 1
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 2073600
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "UserTemplate"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 1
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -265,62 +372,6 @@
                       "val": {
                         "bool": true
                       }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Template"
-                          },
-                          {
-                            "u32": 1
-                          }
-                        ]
-                      },
-                      "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "symbol": "creator"
-                            },
-                            "val": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "metadata_uri"
-                            },
-                            "val": {
-                              "string": "ipfs://tmpl"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "template_id"
-                            },
-                            "val": {
-                              "u32": 1
-                            }
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TemplateList"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "vec": [
-                          {
-                            "u32": 1
-                          }
-                        ]
-                      }
                     }
                   ]
                 }
@@ -329,7 +380,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -423,7 +474,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 2073600
       }
     ]
   },

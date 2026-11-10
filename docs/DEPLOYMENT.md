@@ -1,34 +1,44 @@
-# Deployment Guide
+# Deployment
 
 ## Prerequisites
 
-- Rust stable + `wasm32v1-none` target
-- [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)
-- A funded Stellar keypair for deployment
+- Rust 1.99.1 with the `wasm32v1-none` target. Both are installed automatically from
+  `rust-toolchain.toml`.
+- [Stellar CLI](https://github.com/stellar/stellar-cli/releases) 28.1.0
+- `jq`, `python3`, `make`
 
-Validate local contract readiness before deploying:
+## Testnet
 
 ```bash
-make check
+./scripts/deploy.sh testnet
 ```
 
-## Steps
+The script:
 
-Use [Release Checklist](RELEASE_CHECKLIST.md) for the full pre-deploy handoff.
+1. Creates the `folder-deployer` identity if it is missing and funds it via Friendbot. Override
+   with `STELLAR_IDENTITY`, and set `ADMIN_IDENTITY` for a different admin.
+2. Builds the optimized wasm (`make build-optimized`) and checks the template CIDs against
+   `templates/manifest.json`.
+3. Uploads the wasm and fails if the on-chain hash differs from the local sha256.
+4. Deploys and calls `initialize`, then fails unless `get_admins()` returns exactly the admin.
+5. Registers every template in `templates/manifest.json` and checks `list_templates()`.
+6. Writes `deployments/testnet.json` with the network, RPC URL, contract ID, wasm hash, admin,
+   date, source commit, toolchain, tx hashes and templates.
 
-1. Copy `.env.example` to `.env` and fill in `DEPLOYER_SECRET` and `ADMIN_ADDRESS`.
-2. Run `./scripts/deploy.sh testnet` (or `mainnet`).
-3. Save the printed `CONTRACT_ID` — set it in `Indexer-Frontend` and `Indexer-Backend` env files.
+Any failure stops the script with a non-zero exit code and the failing command.
 
-`STELLAR_RPC_URL` is optional for the deploy script. When present, the script passes it to Stellar CLI as `--rpc-url`; otherwise the CLI uses its configured network defaults.
+Then run the end-to-end check:
 
-## Manual Steps
+```bash
+./scripts/smoke-testnet.sh
+```
 
-See the Quick Start section in [README.md](../README.md).
+## Mainnet
 
-## Upgrading the Contract
+`./scripts/deploy.sh mainnet` uses the same flow without Friendbot, so the identity must already
+exist and be funded. Complete [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) first.
 
-Soroban contracts are immutable once deployed. To upgrade:
-1. Deploy a new contract instance.
-2. Update `CONTRACT_ID` in all three repos.
-3. Migrate any off-chain DB records in `Indexer-Backend` to point to the new contract.
+## Upgrades
+
+There is no in-place upgrade. Deploy a new contract, then update `CONTRACT_ID` in
+`Indexer-Frontend` and `Indexer-Backend` and re-index from the new contract.

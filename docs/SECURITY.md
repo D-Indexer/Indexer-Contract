@@ -2,29 +2,38 @@
 
 ## Authorization
 
-- `initialize` requires the initial admin address to authorize.
-- Admin mutations and template registration require an authorized admin.
-- Folder, template-selection, mint, and update writes require owner authorization.
-- Public reads do not require authorization.
+| Function | Signer |
+|---|---|
+| `initialize` | `admin` (the first admin) |
+| `add_admin`, `remove_admin`, `register_template` | `admin` argument, which must be in the admin list |
+| `claim_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
+| All `get_*`, `list_templates`, `verify_portfolio` | none |
+
+Tests assert the exact signer for every write and check that writes fail when nobody has signed
+(`test_each_write_requires_the_right_signer`, `test_writes_fail_without_signature`).
 
 ## State invariants
 
-- A contract can be initialized only once.
-- At least one admin must remain.
-- One address can claim at most one Folder name.
-- One Folder name can be claimed by at most one address.
-- A portfolio can be minted at most once per owner.
-- A template ID can be registered at most once.
-- Template IDs must be non-zero.
-- User template selection requires a claimed Folder.
+- The contract can be initialized only once, and at least one admin must always remain.
+- The admin list holds at most 10 entries; the template registry holds at most 256.
+- One address holds at most one Folder name, and each name belongs to at most one address.
+  Names are permanent: there is no release or transfer.
+- An address mints at most one portfolio. A portfolio always shows the owner's currently selected
+  template.
+- Template IDs are non-zero and registered once.
 
-## Input handling
+## Known risks
 
-User-provided strings are bounded and format-checked before storage. See `docs/VALIDATION.md`.
+- **Initialization front-running.** `initialize` is a separate transaction from deploy.
+  `scripts/deploy.sh` checks `get_admins() == [admin]` afterwards and fails loudly if not; in that
+  case, discard the contract. A constructor-based fix is tracked in [#138](https://github.com/D-Indexer/Indexer-Contract/issues/138).
+- **Single-signature admins.** Any one admin can add or remove other admins. Use multisig accounts
+  as admins until two-step admin addition ([#140](https://github.com/D-Indexer/Indexer-Contract/issues/140)) or a threshold is implemented.
+- **No upgrade path.** The contract has no `upgrade` entry point. A new version is a new
+  contract ID.
 
-## Operational controls
+## Operations
 
-- Do not commit deployer secrets or funded key material.
-- Use a dedicated deployment key instead of a personal wallet.
-- After deployment, keep at least two admin addresses where governance requires continuity.
-- Rotate admin access with `add_admin` before `remove_admin` to avoid losing control.
+- Deploy keys are Stellar CLI identities stored in `~/.config/stellar`. Never commit them or
+  pass secret keys on the command line.
+- Add a new admin before removing an old one.

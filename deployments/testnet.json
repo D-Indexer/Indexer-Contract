@@ -1,0 +1,38 @@
+{
+  "network": "testnet",
+  "rpc_url": "https://soroban-testnet.stellar.org",
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "contract_id": "CDDQK74SMH4RB4HYLHM6BYZPTAMDMRISHW5Q274KADVZVFD57K43O6KV",
+  "wasm_hash": "83fa464a26a7827a4b2a2b8d23f5a28d8c62a0536c0f373f42c76631ade2396b",
+  "admin": "GCFADTAQUXYFXUW7G65YXIQTTDORMT72FFTUYFEEUXJZDNAYTD2RXMBZ",
+  "deployer": "GCFADTAQUXYFXUW7G65YXIQTTDORMT72FFTUYFEEUXJZDNAYTD2RXMBZ",
+  "deployed_at": "2026-11-09T22:15:23Z",
+  "source_commit": "20ec84cea662399ee9796c01f6bb7dd43d9415cc",
+  "toolchain": {
+    "stellar_cli": "stellar 28.1.0 (c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd)",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+  },
+  "explorer": "https://stellar.expert/explorer/testnet/contract/CDDQK74SMH4RB4HYLHM6BYZPTAMDMRISHW5Q274KADVZVFD57K43O6KV",
+  "transactions": {
+    "upload_wasm": "4c325df9bba33a9a4328d4b576de4e58e4ccf438e6d7d8e000bfce718cdefe38",
+    "deploy": "9687fe9f0e95c85418c478d60b5139c4bbeadab96ee9cf5ed1f073be0d312e16",
+    "initialize": "473bff8950bbd5701b822891d13fa1df4a42c53783b814b1dac0ecc7f9c50f61"
+  },
+  "templates": [
+    {
+      "template_id": 1,
+      "metadata_uri": "ipfs://bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i",
+      "tx_hash": "21b306ad910f33cf830c91e01811f6b25492c3374ab9ff396b6cdf7e8238d772"
+    },
+    {
+      "template_id": 2,
+      "metadata_uri": "ipfs://bafkreibl5hwjqwglhrzjepbapjzko74h5zaec5mncnw4u4crn3pejeytgi",
+      "tx_hash": "b6e619d1a252fedef9371d725053f7540c840981a576f59b8b88cf4c889f3b3a"
+    },
+    {
+      "template_id": 3,
+      "metadata_uri": "ipfs://bafkreidb373xq4eldginonrutn4hrywugayklcoof2qjxgearzu36b4gg4",
+      "tx_hash": "8b8947da32125b095c9e87dbad96b42a1ca401e88a4c84f43dd4640ea5a83515"
+    }
+  ]
+}

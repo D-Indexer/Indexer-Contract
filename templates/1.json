@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "template_id": 1,
+  "name": "Developer",
+  "description": "Clean single-page layout for software engineers.",
+  "target_industry": "Software Engineering",
+  "fields": [
+    "bio",
+    "github",
+    "skills",
+    "projects",
+    "work_history"
+  ]
+}

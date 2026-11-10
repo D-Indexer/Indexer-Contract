@@ -20,4 +20,6 @@ pub enum ContractError {
     TemplateAlreadyExists = 15,
     FolderAlreadyClaimed = 16,
     InvalidTemplateID = 17,
+    TemplateLimitReached = 18,
+    TooManyAdmins = 19,
 }
