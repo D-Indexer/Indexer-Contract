@@ -1,501 +1,206 @@
 # Indexer-Contract
 
-[![Soroban Contract CI](https://github.com/Haroldwonder/Indexer-Contract/actions/workflows/contract-ci.yml/badge.svg)](https://github.com/Haroldwonder/Indexer-Contract/actions/workflows/contract-ci.yml)
+[![Soroban Contract CI](https://github.com/D-Indexer/Indexer-Contract/actions/workflows/contract-ci.yml/badge.svg)](https://github.com/D-Indexer/Indexer-Contract/actions/workflows/contract-ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Soroban smart contracts (Rust) powering the **Folder** ecosystem. Manages the on-chain template registry, user identity mapping, and portfolio NFT minting on the Stellar network.
+The Soroban smart contract (Rust, `soroban-sdk` 25.3.1) behind **Folder**, a decentralized
+portfolio tool on Stellar. A user claims a unique `name.folder` handle tied to their Stellar
+address, picks one of the admin-registered portfolio templates, and anchors their portfolio on-chain
+as a record that links owner, template and the IPFS CID of the portfolio content. Anyone can look up
+a Folder name or verify that an address holds a portfolio. Every state change emits a typed event
+that the Folder backend indexes. The frontend
+([`Indexer-Frontend`](https://github.com/D-Indexer/Indexer-Frontend)) and backend
+([`Indexer-Backend`](https://github.com/D-Indexer/Indexer-Backend)) live in separate repositories.
 
-## Overview
+## Testnet deployment
 
-Folder is a dynamic on-chain identity platform that lets users create, own, and share verifiable portfolio NFTs on Stellar. Each "Folder" is a Non-Fungible Token whose metadata points to decentralized storage (IPFS), making portfolios portable, tamper-proof, and globally accessible at a fraction of a cent per transaction.
+| | |
+|---|---|
+| Contract ID | [`CDDQK74SMH4RB4HYLHM6BYZPTAMDMRISHW5Q274KADVZVFD57K43O6KV`](https://stellar.expert/explorer/testnet/contract/CDDQK74SMH4RB4HYLHM6BYZPTAMDMRISHW5Q274KADVZVFD57K43O6KV) |
+| Wasm hash | `83fa464a26a7827a4b2a2b8d23f5a28d8c62a0536c0f373f42c76631ade2396b` |
+| Network / RPC | `testnet` / `https://soroban-testnet.stellar.org` |
+| Admin | [`GCFADTAQ…TD2RXMBZ`](https://stellar.expert/explorer/testnet/account/GCFADTAQUXYFXUW7G65YXIQTTDORMT72FFTUYFEEUXJZDNAYTD2RXMBZ) |
+| Templates | `1`, `2`, `3` ([`templates/`](templates/)) |
+| Deployed | 2026-11-09 |
 
-## Organisation
+The full record, including transaction hashes, is in
+[`deployments/testnet.json`](deployments/testnet.json). The wasm hash can be reproduced with
+`make wasm-hash` at the current commit. An end-to-end run against this contract (claim → mint →
+update → verify, with tx links) is in [`docs/testnet-smoke-run.md`](docs/testnet-smoke-run.md).
 
-This contract is one of three repositories in the Folder organisation.
+## Status
 
-| Repo | Purpose | Language |
+| Area | Status | Notes |
 |---|---|---|
-| `Indexer-Contract` | Soroban smart contracts — identity, templates, NFT minting | Rust |
-| `Indexer-Frontend` | User-facing portfolio UI and passkey auth | TypeScript / React |
-| `Indexer-Backend` | Off-chain indexer, API, IPFS pinning, event listener | TypeScript / Node.js |
+| Folder name claim and lookup (both directions) | ✅ | One name per address, one address per name |
+| Template registry (register, get, list) | ✅ | Admin-only, at most 256 templates, metadata must be `ipfs://` |
+| Template selection per user | ✅ | Kept in sync with the minted portfolio |
+| Portfolio mint / update / read | ✅ | One portfolio per address |
+| `verify_portfolio` | 🟡 | Returns whether the address has a portfolio. It does not check the content behind the CID. |
+| Input validation (names, CIDs, URIs, IDs) | ✅ | Checks shape only, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| Admin management | 🟡 | Add/remove with a 10-admin cap and last-admin protection. Any single admin can act alone; no two-step transfer or threshold. |
+| Events for every state change | 🟡 | All writes emit events. There is no schema version field yet. |
+| Storage TTL extension | ✅ | Instance and persistent entries extended to 120 days, see [docs/STORAGE.md](docs/STORAGE.md) |
+| Testnet deployment + smoke test | ✅ | Scripted, recorded, and re-runnable from CI |
+| CI (fmt, clippy, tests, optimized wasm) | ✅ | On every PR; the wasm is uploaded as an artifact |
+| Initialization in the deploy transaction (constructor) | ⬜ | `initialize` is a separate call; the deploy script verifies the admin afterwards |
+| Template versioning / deprecation | ⬜ | Registered templates can't be changed or retired |
+| Folder name release or transfer | ⬜ | Names are permanent |
+| Portfolio transfer | ⬜ | Portfolios are bound to the minting address; this is not a transferable token standard |
+| Contract upgrade entry point | ⬜ | A new version means a new contract ID |
+| Fuzz / property tests | ⬜ | Validation is covered by example-based unit tests only |
+| Mainnet deployment | ⬜ | See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) |
 
-### Repository Integration Map
+## Quick start
 
-The Folder product is split across three repositories that must stay aligned:
+Prerequisites: [rustup](https://rustup.rs) (the toolchain pinned in
+[`rust-toolchain.toml`](rust-toolchain.toml), Rust 1.99.1 with `wasm32v1-none`, installs on first
+use), [Stellar CLI](https://github.com/stellar/stellar-cli/releases) 28.1.0, `jq`, `python3`.
 
-| Repository | Responsibility | Primary consumers |
-|---|---|---|
-| `Indexer-Contract` | Soroban smart contract for Folder identity, template registry, portfolio NFT state, events, and admin controls. | Frontend, backend indexer, deployment automation |
-| `Indexer-Frontend` | User interface for claiming Folder names, selecting templates, authenticating users, and minting/updating portfolios. | End users, wallet/passkey flows |
-| `Indexer-Backend` | Off-chain indexer/API layer for Soroban events, IPFS pinning, cached portfolio/template data, and frontend API responses. | Frontend, ops, analytics |
+```bash
+# Build
+make build-optimized      # stellar contract build --optimize -> target/stellar/indexer_contract.wasm
+make wasm-hash            # sha256 = the on-chain wasm hash
 
-Cross-repo contract points:
+# Test
+make test                 # cargo test (61 unit tests, Soroban testutils)
+make check                # fmt-check, cargo check, clippy -D warnings, tests, wasm build, script syntax
 
-- Contract function names and argument order must match frontend contract clients.
-- Contract events must match backend event indexer subscriptions.
-- Contract error codes must match frontend/backend user-facing error handling.
-- Validation limits should be mirrored client-side before submitting transactions.
-- `CONTRACT_ID`, Stellar network, and RPC URL must be coordinated across all repos after every deployment.
+# Deploy to testnet (creates and Friendbot-funds the `folder-deployer` identity if needed,
+# initializes, registers templates/manifest.json, writes deployments/testnet.json)
+./scripts/deploy.sh testnet
 
-When changing this contract:
-
-1. Update `Indexer-Frontend` contract call wrappers and validation.
-2. Update `Indexer-Backend` event parsing, API schemas, and validation.
-3. Update deployment environment values after redeploy.
-4. Update this repository's README, events, errors, and validation docs.
-
-## Domain Vocabulary
-
-These terms are consistent across all three repos.
-
-| Term | Definition |
-|---|---|
-| **Folder** | A user's on-chain portfolio identity — one per Stellar address |
-| **Folder Name** | A unique human-readable handle (e.g. `alice.folder`) claimed on-chain |
-| **Template** | A numbered layout (1–N) stored in the contract; maps to a visual design in the frontend |
-| **Portfolio NFT** | The on-chain record linking an owner, template, and IPFS CID |
-| **IPFS CID** | Content Identifier — the hash of portfolio data stored on IPFS, anchored on-chain |
-| **Admin** | A Stellar address with elevated contract permissions |
-
-## Features
-
-- **Folder Identity**: One `.folder` name per owner address, with reverse lookup from owner to Folder name
-- **Template Registry**: Admin-managed mapping of non-zero Template IDs to IPFS metadata URIs
-- **Portfolio Records**: One portfolio record per owner, linking owner, selected template, IPFS CID, and mint timestamp
-- **Access Control**: Owner-only writes for user state and admin-only writes for template/admin management
-- **Input Validation**: Folder names, IPFS CIDs, metadata URIs, and template IDs are validated before storage
-- **IPFS Anchoring**: Portfolio/template metadata is stored off-chain; current CID/URI references are anchored on-chain
-- **Typed Event Emission**: Soroban `#[contractevent]` events support off-chain indexing and frontend reactivity
-
-Ecosystem-level features such as passkey onboarding, IPFS pinning, and proof-of-work enrichment are handled by the frontend/backend repos and must integrate with this contract surface.
-
-## Architecture
-
-```mermaid
-graph TB
-    subgraph Users
-        U[User / Portfolio Owner]
-        R[Recruiter / Client]
-        D[Template Designer]
-    end
-
-    subgraph Frontend["Frontend (React)"]
-        UI[Portfolio UI]
-        PK[Passkey / Freighter Auth]
-    end
-
-    subgraph Contract["Smart Contracts (Soroban / Rust)"]
-        REG[template_registry.rs]
-        NFT[nft_mint.rs]
-        ID[identity_map.rs]
-        AUTH[access_control.rs]
-        STOR[storage.rs]
-        EVT[events.rs]
-    end
-
-    subgraph Backend["Backend (Node.js)"]
-        IDX[indexer.ts]
-        API[REST API]
-        IPFS_SVC[IPFS Pinning]
-        DB[(PostgreSQL)]
-    end
-
-    subgraph Stellar["Stellar Network"]
-        LEDGER[Ledger]
-        ASSET[Stellar Asset / NFT]
-    end
-
-    subgraph Decentralized["Decentralized Storage"]
-        IPFS[IPFS / Filecoin]
-    end
-
-    U -->|claim Folder name| PK
-    PK --> UI
-    UI -->|mint / update portfolio| REG
-    UI -->|mint NFT| NFT
-    REG --> STOR
-    NFT --> ASSET
-    NFT -->|store CID| STOR
-    ID --> STOR
-    AUTH --> STOR
-    STOR --> LEDGER
-    LEDGER -->|events| EVT
-    EVT -->|stream| IDX
-    IDX --> DB
-    IDX --> IPFS_SVC
-    UI -->|POST /api/ipfs/pin| API
-    API --> IPFS_SVC
-    IPFS_SVC --> IPFS
-    IPFS -->|CID| NFT
-    R -->|verify portfolio| LEDGER
-    D -->|publish template| REG
+# End-to-end check against deployments/testnet.json
+./scripts/smoke-testnet.sh
 ```
 
-### Core Contract Modules
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers identities, overrides and mainnet.
 
-| File | Responsibility |
-|---|---|
-| `src/lib.rs` | Public contract entry point — all exposed functions |
-| `src/types.rs` | `PortfolioNFT`, `Template`, `DataKey` enum |
-| `src/errors.rs` | `ContractError` enum |
-| `src/storage.rs` | All ledger reads/writes with TTL management |
-| `src/access_control.rs` | `require_admin`, `require_owner`, admin CRUD |
-| `src/identity_map.rs` | Folder name claiming and resolution |
-| `src/template_registry.rs` | Template registration, listing, user assignment |
-| `src/nft_mint.rs` | Portfolio NFT minting, updating, verification |
-| `src/events.rs` | Event emission for all state changes |
-| `src/test.rs` | 43-case test suite |
+Example calls against the testnet contract:
 
-### Storage Model
-
-- **Instance Storage**: initialization flag, admin list, template definitions, and template ID list — shared contract-wide state
-- **Persistent Storage**: user identity mappings, selected templates, and portfolio records — per-user data with ~1 year TTL bump on access
-
-## Contract Functions
-
-### Identity & Onboarding
-
-- `claim_folder(owner, folder_name)` — Claim a unique Folder name (owner auth required; must be done before minting)
-- `get_folder(folder_name)` → `Address` — Resolve a Folder name to its owner
-- `get_identity(owner)` → `String` — Get the Folder name for an address
-
-### Template Registry
-
-- `register_template(admin, template_id, metadata_uri)` — Add a new non-zero template ID (admin only; no duplicate IDs)
-- `get_template(template_id)` → `Template` — Fetch template metadata
-- `list_templates()` → `Vec<u32>` — All available Template IDs
-- `set_user_template(owner, template_id)` — Assign a template to a claimed Folder (owner auth required)
-- `get_user_template(owner)` → `Option<u32>` — Get the template currently assigned to a Folder
-
-### Portfolio NFT
-
-- `mint_portfolio(owner, template_id, ipfs_cid)` — Mint a portfolio NFT (owner must have a Folder name; one mint per address)
-- `update_portfolio(owner, ipfs_cid)` — Update the IPFS CID (owner auth required)
-- `get_portfolio(owner)` → `PortfolioNFT` — Retrieve portfolio details
-- `verify_portfolio(owner)` → `bool` — Public read — `true` when a portfolio exists, `false` otherwise
-
-### Admin
-
-- `initialize(admin)` — One-time contract setup
-- `add_admin(admin, new_admin)` — Grant admin role
-- `remove_admin(admin, target)` — Revoke admin role (cannot remove last admin)
-
-## Frontend Integration
-
-The frontend calls the contract via `@stellar/stellar-sdk` / Soroban RPC. All write functions require the caller to sign with their Stellar keypair or SEP-20 passkey — never handle raw secret keys in the frontend.
-
-### Events the Frontend Listens For
-
-| Symbol | Payload | Action |
-|---|---|---|
-| `folder_cl` | `(owner, folder_name)` | Update claimed-name UI state |
-| `port_mint` | `(owner, template_id, ipfs_cid)` | Show new portfolio card |
-| `port_upd` | `(owner, ipfs_cid)` | Refresh portfolio display |
-| `tmpl_reg` | `(template_id, metadata_uri)` | Add template to picker |
-| `tmpl_set` | `(owner, template_id)` | Highlight active template |
-
-> Event symbols are max 9 characters — Soroban `symbol_short!` limit.
-
-## Backend Integration
-
-The backend indexes contract events via Soroban RPC event streaming (entry point: `src/indexer.ts`).
-
-### Events → Backend Actions
-
-| Symbol | Backend Action |
-|---|---|
-| `folder_cl` | Upsert identity record in DB |
-| `port_mint` | Pin IPFS CID, store NFT record |
-| `port_upd` | Re-pin new CID, update NFT record |
-| `tmpl_reg` | Cache template metadata |
-| `tmpl_set` | Update user-template mapping |
-
-### Backend API Endpoints
-
-```
-GET  /api/folder/:folder_name   → owner address + portfolio
-GET  /api/portfolio/:owner      → full portfolio (contract + IPFS merged)
-GET  /api/templates             → all templates with metadata
-GET  /api/identity/:owner       → folder name for an address
-POST /api/ipfs/pin              → pin portfolio JSON, returns CID
+```bash
+ID=CDDQK74SMH4RB4HYLHM6BYZPTAMDMRISHW5Q274KADVZVFD57K43O6KV
+stellar contract invoke --id $ID --network testnet --source-account me -- \
+  claim_folder --owner me --folder_name alice.folder
+stellar contract invoke --id $ID --network testnet --source-account me -- \
+  mint_portfolio --owner me --template_id 1 \
+  --ipfs_cid bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i
+stellar contract invoke --id $ID --network testnet --source-account me --send=no -- \
+  get_portfolio --owner me
 ```
 
-### IPFS Flow
+## Public functions
 
-```
-1. Frontend  →  POST /api/ipfs/pin  (portfolio JSON)
-2. Backend   →  pins to IPFS, returns CID
-3. Frontend  →  mint_portfolio(owner, template_id, CID)  on contract
-4. Contract  →  emits port_mint event
-5. Backend   →  indexes event, stores CID reference in DB
-```
+"Signer" is the argument that must authorize the call (`require_auth`). Every write except
+`initialize` first fails with `NotInitialized` (2) if the contract hasn't been initialized, and
+extends the instance TTL. Reads have no signer and emit nothing.
 
-> IPFS pinning always happens **before** the contract transaction, not after.
+### Writes
 
-## Shared Data Structures
-
-```ts
-// TypeScript — Frontend & Backend
-interface PortfolioNFT {
-  owner: string;        // Stellar address (G...)
-  template_id: number;
-  ipfs_cid: string;     // e.g. "bafybeig..."
-  minted_at: number;    // Unix timestamp (ledger)
-}
-
-interface Template {
-  template_id: number;
-  metadata_uri: string; // IPFS URI pointing to template JSON
-  creator: string;      // Stellar address
-}
-```
-
-```rust
-// Rust — src/types.rs
-pub struct PortfolioNFT { pub owner, pub template_id, pub ipfs_cid, pub minted_at }
-pub struct Template     { pub template_id, pub metadata_uri, pub creator }
-```
-
-## Security Features
-
-See [Security Notes](docs/SECURITY.md) for authorization and state invariants.
-
-1. **Owner-Only Writes**: User state mutations require the owner's Stellar signature
-2. **Folder-First User Actions**: A Folder name must be claimed before portfolio minting or template selection
-3. **No Double-Mint**: A second `mint_portfolio` call returns `PortfolioAlreadyMinted`; use `update_portfolio`
-4. **Public Verification**: Anyone can read and verify portfolio authenticity without permission
-5. **Auditable CID Updates**: CID changes require owner authorization and emit update events
-6. **Admin Role Guards**: Template registration and admin management are gated behind admin authorization
-7. **Storage Invariants**: Duplicate template IDs, duplicate Folder claims, and template ID `0` are rejected
-8. **TTL Management**: Persistent storage entries are bumped ~1 year on access to prevent expiry
-
-## Why Stellar
-
-| Property | Detail |
-|---|---|
-| Transaction cost | ~$0.00001 — accessible to job seekers in any economy |
-| Finality | ~5 seconds — portfolio updates are live globally almost immediately |
-| Interoperability | Stellar payment history (USDC, fiat anchors) can be surfaced as Proof of Work |
-| Passkeys (SEP-20) | Biometric onboarding — no 24-word seed phrases for non-crypto users |
-
-## Roadmap
-
-| Phase | Status | Goal | Contract scope | Cross-repo dependencies |
+| Function | Arguments | Signer | Event | Errors |
 |---|---|---|---|---|
-| Phase 1 | Implemented in contract | Folder identity | `initialize`, admin controls, one Folder claim per owner, Folder lookup, validation, events | Frontend wallet/passkey UX and backend identity indexing |
-| Phase 2 | Implemented in contract foundation | Template registry | non-zero template IDs, duplicate rejection, template metadata URI anchoring, user template selection for claimed Folders | Frontend template picker and backend template cache |
-| Phase 3 | Implemented in contract foundation | Portfolio records | one mint per owner, owner-only CID updates, template requirement, public verification, TTL bumps, events | Backend IPFS pinning/indexing and frontend portfolio rendering |
-| Phase 4 | Next | Production deployment | verified optimized WASM, deployed `CONTRACT_ID`, network-specific env values | Stellar CLI install, funded deployer, frontend/backend env rollout |
-| Phase 5 | Next | Stronger verification | full CID parsing, optional credential linkage primitives, cross-repo event compatibility tests | Backend credential/indexing services and frontend verification UI |
-| Phase 6 | Future | Marketplace | designer ownership/payment mechanics and template sale flows | Marketplace UI, payment/indexing backend, economic policy |
+| `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
+| `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
+| `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
+| `claim_folder` | `owner: Address, folder_name: String` | `owner` | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3) |
+| `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
+| `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
+| `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
+| `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
 
-## Quick Start
+Notes:
 
-### 1. Build the Contract
+- `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
+- `set_user_template` also updates `template_id` on an existing portfolio.
+- An admin may remove itself as long as another admin remains.
 
-```bash
-cargo build --target wasm32v1-none --release
-stellar contract optimize --wasm target/wasm32v1-none/release/indexer_contract.wasm
-```
+### Reads
 
-Soroban SDK 25 uses `wasm32v1-none` for modern Rust toolchains. The target is declared in `rust-toolchain.toml`.
-
-### 2. Deploy to Testnet
-
-```bash
-stellar contract deploy \
-  --wasm target/wasm32v1-none/release/indexer_contract.optimized.wasm \
-  --source deployer \
-  --network testnet
-```
-
-### 3. Initialize
-
-```bash
-stellar contract invoke \
-  --id <CONTRACT_ID> \
-  --source deployer \
-  --network testnet \
-  -- initialize \
-  --admin <ADMIN_ADDRESS>
-```
-
-### 4. Claim a Folder
-
-```bash
-stellar contract invoke \
-  --id <CONTRACT_ID> \
-  --source <USER_KEYPAIR> \
-  --network testnet \
-  -- claim_folder \
-  --owner <USER_ADDRESS> \
-  --folder_name "jane.folder"
-```
-
-### 5. Mint a Portfolio NFT
-
-```bash
-stellar contract invoke \
-  --id <CONTRACT_ID> \
-  --source <USER_KEYPAIR> \
-  --network testnet \
-  -- mint_portfolio \
-  --owner <USER_ADDRESS> \
-  --template_id 1 \
-  --ipfs_cid "bafybeig..."
-```
-
-## Environment Variables
-
-### This repo (deploy scripts)
-
-```env
-STELLAR_NETWORK=testnet
-STELLAR_RPC_URL=https://soroban-testnet.stellar.org
-DEPLOYER_SECRET=S...
-ADMIN_ADDRESS=G...
-CONTRACT_ID=C...
-```
-
-### Indexer-Backend
-
-```env
-CONTRACT_ID=C...
-STELLAR_RPC_URL=https://soroban-testnet.stellar.org
-STELLAR_NETWORK=testnet
-IPFS_API_URL=https://api.pinata.cloud
-IPFS_API_KEY=...
-DATABASE_URL=postgresql://...
-```
-
-### Indexer-Frontend
-
-```env
-NEXT_PUBLIC_CONTRACT_ID=C...
-NEXT_PUBLIC_STELLAR_NETWORK=testnet
-NEXT_PUBLIC_BACKEND_URL=https://api.folder.xyz
-```
-
-## Testing
-
-```bash
-make check
-cargo test --locked
-```
-
-Use `make check` for the full local gate. Use `cargo test --locked` when you only need the contract test suite.
-
-## Local Quality Gates
-
-Run the same checks locally before opening a PR:
-
-```bash
-make check
-```
-
-This runs formatting, `cargo check`, clippy with warnings denied, the unit test suite, the release WASM build, and shell-script syntax validation.
-
-Tests cover:
-- ✅ Contract initialization and double-init rejection
-- ✅ Folder name claiming and collision prevention
-- ✅ Mint rejected without a claimed Folder name
-- ✅ Template registration, retrieval, duplicate rejection, and non-zero template IDs
-- ✅ Portfolio NFT minting and CID anchoring
-- ✅ Double-mint rejection
-- ✅ Portfolio update authorization
-- ✅ Public verification reads
-- ✅ Admin role management
-- ✅ Unauthorized access rejection
-- ✅ User template assignment, retrieval, Folder-first enforcement, and unknown-template rejection
-- ✅ Folder/CID/metadata validation bounds and format rules
-- ✅ Missing read paths and exact contract errors
-
-## Error Codes
-
-See [Error Reference](docs/ERRORS.md) for compatibility rules when adding or handling errors.
-
-Input validation limits are documented in [Validation Policy](docs/VALIDATION.md).
-
-Deployment handoffs should follow the [Release Checklist](docs/RELEASE_CHECKLIST.md).
-
-| Code | Error | Description | Frontend / Backend Handling |
+| Function | Arguments | Returns | Errors |
 |---|---|---|---|
-| 1 | AlreadyInitialized | Contract already initialized | Ignore on deploy retry |
-| 2 | NotInitialized | Contract not yet initialized | Block all UI until admin calls `initialize` |
-| 3 | FolderNameTaken | Folder name already claimed | Show "name unavailable" in claim form |
-| 4 | FolderNotFound | Folder name does not exist | Show 404 portfolio page |
-| 5 | PortfolioNotFound | No portfolio minted for this address | Show "no portfolio yet" CTA |
-| 6 | TemplateNotFound | Template ID does not exist | Remove stale template from picker |
-| 7 | Unauthorized | Caller is not the owner or admin | Show auth error, prompt re-sign |
-| 8 | InvalidCID | IPFS CID is empty or malformed | Reject upload before submitting tx |
-| 9 | InvalidFolderName | Folder name is empty or invalid | Validate client-side before tx |
-| 10 | AdminAlreadyExists | Admin address already registered | Suppress duplicate admin UI action |
-| 11 | AdminNotFound | Admin address not found | Show "admin not found" in admin panel |
-| 12 | CannotRemoveLastAdmin | Cannot remove the last remaining admin | Disable remove button when only 1 admin |
-| 13 | PortfolioAlreadyMinted | Portfolio already minted | Direct user to `update_portfolio` |
-| 14 | InvalidMetadataURI | Template metadata URI is empty, malformed, or too long | Reject template registration before tx |
-| 15 | TemplateAlreadyExists | Template ID already registered | Ask admin to choose a new template ID |
-| 16 | FolderAlreadyClaimed | Address already owns a Folder name | Show existing Folder and disable new claim |
-| 17 | InvalidTemplateID | Template ID is invalid | Use a positive non-zero template ID |
+| `get_admins` | — | `Vec<Address>` (empty before `initialize`) | — |
+| `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
+| `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
+| `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
+| `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
+| `get_user_template` | `owner: Address` | `Option<u32>` | — |
+| `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
-## Events
+### Error codes
 
-Typed event definitions and indexer-facing schema are documented in [Contract Events](docs/EVENTS.md).
+Codes are stable. New errors are appended and never renumbered.
 
-| Symbol | Emitted When | Payload |
-|---|---|---|
-| `folder_cl` | A user claims a Folder name | `(owner, folder_name)` |
-| `port_mint` | A new portfolio NFT is minted | `(owner, template_id, ipfs_cid)` |
-| `port_upd` | A portfolio's IPFS CID is updated | `(owner, ipfs_cid)` |
-| `tmpl_reg` | A new template is added to the registry | `(template_id, metadata_uri)` |
-| `tmpl_set` | A user selects a template for their Folder | `(owner, template_id)` |
+| Code | Error | Code | Error |
+|---|---|---|---|
+| 1 | `AlreadyInitialized` | 11 | `AdminNotFound` |
+| 2 | `NotInitialized` | 12 | `CannotRemoveLastAdmin` |
+| 3 | `FolderNameTaken` | 13 | `PortfolioAlreadyMinted` |
+| 4 | `FolderNotFound` | 14 | `InvalidMetadataURI` |
+| 5 | `PortfolioNotFound` | 15 | `TemplateAlreadyExists` |
+| 6 | `TemplateNotFound` | 16 | `FolderAlreadyClaimed` |
+| 7 | `Unauthorized` | 17 | `InvalidTemplateID` |
+| 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
+| 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
+| 10 | `AdminAlreadyExists` | | |
 
-## Documentation Index
+## How the backend indexer consumes events
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Development Workflow](docs/DEVELOPMENT.md)
-- [Error Reference](docs/ERRORS.md)
-- [Contract Events](docs/EVENTS.md)
-- [Release Checklist](docs/RELEASE_CHECKLIST.md)
-- [Security Notes](docs/SECURITY.md)
-- [Storage Model](docs/STORAGE.md)
-- [Validation Policy](docs/VALIDATION.md)
+The contract keeps no history or enumerable lists of users. The backend builds its queryable view
+(owners, Folder names, portfolios, templates, admins) from contract events:
 
-## Cross-Repo Change Checklist
+1. **Fetch.** Poll Soroban RPC `getEvents` with a `contractIds` filter set to the contract ID and
+   page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
+   limited window of recent ledgers.
+2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`.
+3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
+   `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
+   fields you don't know about: fields are only ever appended.
+4. **Apply.** Upsert by owner address: `folder_cl` → identity, `port_mint`/`port_upd` → portfolio
+   CID, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
+   cache plus an IPFS fetch of `metadata_uri`. Timestamps and tx hashes come from the `getEvents`
+   envelope (`ledger`, `ledgerClosedAt`, `txHash`).
+5. **Reconcile.** Use the read functions (`get_portfolio`, `get_identity`, `get_template`) to
+   backfill or check individual records.
 
-When a contract function signature changes:
-- [ ] Update `src/lib.rs` in `Indexer-Contract`
-- [ ] Update `src/lib/contract.ts` in `Indexer-Frontend`
-- [ ] Update API handler + indexer in `Indexer-Backend`
-- [ ] Update the function table and data structures in this README
+[docs/EVENTS.md](docs/EVENTS.md) is the contract between this repo and the backend: the field
+order of every event, compatibility rules, recommended handling and real testnet output. Any PR
+that changes `src/events.rs` must update it.
 
-When a new event is added:
-- [ ] Add emission in `src/events.rs`
-- [ ] Add to frontend event listener
-- [ ] Add to backend indexer
-- [ ] Update the events table in this README
+## Repository layout
 
-## Dependencies
+| Path | Contents |
+|---|---|
+| `src/lib.rs` | Public contract interface; delegates to the modules below |
+| `src/identity_map.rs`, `template_registry.rs`, `nft_mint.rs` | Folder names, templates, portfolios |
+| `src/access_control.rs` | Admin and owner auth checks |
+| `src/storage.rs`, `src/constants.rs` | All ledger I/O, TTL policy, limits |
+| `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
+| `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
+| `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `templates/` | Template metadata JSON and its CID manifest |
+| `deployments/` | Deployment records per network |
 
-- `soroban-sdk = "=25.3.1"`
+## Documentation
 
-## License
-
-MIT
+- [docs/EVENTS.md](docs/EVENTS.md): event schema (the backend depends on it)
+- [docs/STORAGE.md](docs/STORAGE.md): storage keys, bounds and TTL policy
+- [docs/VALIDATION.md](docs/VALIDATION.md): input rules with accepted and rejected examples
+- [docs/SECURITY.md](docs/SECURITY.md): auth matrix, invariants, known risks
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): deploying and redeploying
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): pre-release gates
+- [docs/testnet-smoke-run.md](docs/testnet-smoke-run.md): recorded end-to-end testnet run
 
 ## Contributing
 
-Contributions are welcome!
+1. Pick an issue labelled `good first issue`, `medium` or `hard` and comment that you're taking it.
+2. Branch from `main` and run `make check` before you push. CI runs the same gates.
+3. If you change a public function, event or error, update this README and
+   [docs/EVENTS.md](docs/EVENTS.md) in the same PR. Never renumber errors or reorder event fields.
+4. Add a test for every behaviour change. Auth changes should update `test_snapshots/`.
 
-See [Development Workflow](docs/DEVELOPMENT.md) for local tooling and quality gates.
+## License
 
-Quick checklist:
-- All checks pass: `make check`
-- New features include tests
-- Documentation is updated
-- Contract function changes are reflected in all three repos (see checklist above)
-
-## Support
-
-- GitHub Issues: [Create an issue](https://github.com/Haroldwonder/Indexer-Contract/issues)
-- Stellar Discord: https://discord.gg/stellar
+[MIT](LICENSE)
