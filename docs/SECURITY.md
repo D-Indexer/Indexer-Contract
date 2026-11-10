@@ -26,9 +26,9 @@ Tests assert the exact signer for every write and check that writes fail when no
 
 - **Initialization front-running.** `initialize` is a separate transaction from deploy.
   `scripts/deploy.sh` checks `get_admins() == [admin]` afterwards and fails loudly if not; in that
-  case, discard the contract. A constructor-based fix is tracked as an issue.
+  case, discard the contract. A constructor-based fix is tracked in [#138](https://github.com/D-Indexer/Indexer-Contract/issues/138).
 - **Single-signature admins.** Any one admin can add or remove other admins. Use multisig accounts
-  as admins until two-step admin transfer or a threshold is implemented.
+  as admins until two-step admin addition ([#140](https://github.com/D-Indexer/Indexer-Contract/issues/140)) or a threshold is implemented.
 - **No upgrade path.** The contract has no `upgrade` entry point. A new version is a new
   contract ID.
 

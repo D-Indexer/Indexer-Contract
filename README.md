@@ -38,18 +38,18 @@ update → verify, with tx links) is in [`docs/testnet-smoke-run.md`](docs/testn
 | Portfolio mint / update / read | ✅ | One portfolio per address |
 | `verify_portfolio` | 🟡 | Returns whether the address has a portfolio. It does not check the content behind the CID. |
 | Input validation (names, CIDs, URIs, IDs) | ✅ | Checks shape only, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| Admin management | 🟡 | Add/remove with a 10-admin cap and last-admin protection. Any single admin can act alone; no two-step transfer or threshold. |
-| Events for every state change | 🟡 | All writes emit events. There is no schema version field yet. |
+| Admin management | 🟡 | Add/remove with a 10-admin cap and last-admin protection. Any single admin can act alone; no two-step transfer or threshold ([#140](https://github.com/D-Indexer/Indexer-Contract/issues/140)). |
+| Events for every state change | 🟡 | All writes emit events. There is no schema version field yet ([#137](https://github.com/D-Indexer/Indexer-Contract/issues/137)). |
 | Storage TTL extension | ✅ | Instance and persistent entries extended to 120 days, see [docs/STORAGE.md](docs/STORAGE.md) |
 | Testnet deployment + smoke test | ✅ | Scripted, recorded, and re-runnable from CI |
 | CI (fmt, clippy, tests, optimized wasm) | ✅ | On every PR; the wasm is uploaded as an artifact |
-| Initialization in the deploy transaction (constructor) | ⬜ | `initialize` is a separate call; the deploy script verifies the admin afterwards |
-| Template versioning / deprecation | ⬜ | Registered templates can't be changed or retired |
-| Folder name release or transfer | ⬜ | Names are permanent |
-| Portfolio transfer | ⬜ | Portfolios are bound to the minting address; this is not a transferable token standard |
+| Initialization in the deploy transaction (constructor) | ⬜ | `initialize` is a separate call; the deploy script verifies the admin afterwards ([#138](https://github.com/D-Indexer/Indexer-Contract/issues/138)) |
+| Template versioning / deprecation | ⬜ | Registered templates can't be changed or retired ([#139](https://github.com/D-Indexer/Indexer-Contract/issues/139)) |
+| Folder name release or transfer | ⬜ | Names are permanent ([#141](https://github.com/D-Indexer/Indexer-Contract/issues/141)) |
+| Portfolio transfer | ⬜ | Portfolios are bound to the minting address; this is not a transferable token standard ([#141](https://github.com/D-Indexer/Indexer-Contract/issues/141)) |
 | Contract upgrade entry point | ⬜ | A new version means a new contract ID |
-| Fuzz / property tests | ⬜ | Validation is covered by example-based unit tests only |
-| Mainnet deployment | ⬜ | See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) |
+| Fuzz / property tests | ⬜ | Validation is covered by example-based unit tests only ([#136](https://github.com/D-Indexer/Indexer-Contract/issues/136)) |
+| Mainnet deployment | ⬜ | See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) and [#127](https://github.com/D-Indexer/Indexer-Contract/issues/127) |
 
 ## Quick start
 

@@ -8,4 +8,5 @@
 - [ ] `./scripts/smoke-testnet.sh` passes against the new deployment.
 - [ ] Update `CONTRACT_ID` in the `Indexer-Frontend` and `Indexer-Backend` environments.
 - [ ] Mainnet only: the admin is a multisig account, the deploy identity is dedicated, and the
-      mainnet readiness issue is closed.
+      mainnet readiness issue ([#127](https://github.com/D-Indexer/Indexer-Contract/issues/127))
+      is closed.

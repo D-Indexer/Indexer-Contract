@@ -75,7 +75,6 @@ the positional vec described above.
 
 ## Known limitations
 
-These are tracked as GitHub issues:
-
-- Events carry no schema version field.
+- Events carry no schema version field ([#137](https://github.com/D-Indexer/Indexer-Contract/issues/137)).
 - `owner` is in data rather than topics, so RPC topic filters can't select one owner's events.
+  Filter by contract ID and route on `topics[0]` instead.
