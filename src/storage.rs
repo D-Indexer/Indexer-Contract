@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{AdminChange, DataKey, PortfolioNFT, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -40,6 +40,35 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
 
 pub fn is_admin(env: &Env, address: &Address) -> bool {
     get_admins(env).contains(address)
+}
+
+// ── Admin Timelock ────────────────────────────────────────────────────────────
+
+/// Pending admin changes live in instance storage so they are loaded with the
+/// admin list; the queue is bounded by `MAX_PENDING_ADMIN_CHANGES`.
+pub fn get_pending_admin_changes(env: &Env) -> Vec<(u32, AdminChange)> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingAdminChanges)
+        .unwrap_or(Vec::new(env))
+}
+
+pub fn save_pending_admin_changes(env: &Env, pending: &Vec<(u32, AdminChange)>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAdminChanges, pending);
+}
+
+pub fn next_admin_change_id(env: &Env) -> u32 {
+    let id: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::NextAdminChangeId)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextAdminChangeId, &(id + 1));
+    id
 }
 
 // ── Identity Map ──────────────────────────────────────────────────────────────

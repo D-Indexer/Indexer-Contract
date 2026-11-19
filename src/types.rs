@@ -32,4 +32,25 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // admin timelock: pending queue of admin changes
+    PendingAdminChanges,
+    // admin timelock: next op ID to hand out
+    NextAdminChangeId,
+}
+
+/// Kind of change queued through the admin timelock.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminOp {
+    Add,
+    Remove,
+}
+
+/// A queued admin change, executable once `eta_ledger` is reached.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminChange {
+    pub op: AdminOp,
+    pub target: Address,
+    pub eta_ledger: u32,
 }

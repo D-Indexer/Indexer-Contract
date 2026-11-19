@@ -22,4 +22,8 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    AdminChangeNotFound = 20,
+    AdminChangeNotReady = 21,
+    AdminChangeQueueFull = 22,
+    InvalidAdminChangeOp = 23,
 }

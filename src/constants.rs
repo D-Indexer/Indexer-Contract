@@ -38,3 +38,10 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Delay applied to queued admin changes (~24h at ~5 seconds per ledger).
+pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
+
+/// Maximum number of admin changes that may be queued at once. Bounds the
+/// size of the pending queue stored in instance storage.
+pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;

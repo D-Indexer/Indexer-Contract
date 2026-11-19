@@ -17,6 +17,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
+use crate::types::AdminOp;
 use crate::types::PortfolioNFT;
 use crate::types::Template;
 
@@ -56,14 +57,35 @@ impl FolderContract {
         storage::get_admins(&env)
     }
 
-    pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), ContractError> {
+    /// Queues an admin addition; executable after `ADMIN_TIMELOCK_LEDGERS`.
+    pub fn queue_admin_change(
+        env: Env,
+        admin: Address,
+        op: AdminOp,
+        target: Address,
+    ) -> Result<u32, ContractError> {
         require_initialized(&env)?;
-        access_control::add_admin(&env, &admin, &new_admin)
+        access_control::queue_admin_change(&env, &admin, op, &target)
     }
 
-    pub fn remove_admin(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
+    /// Executes a queued admin change once its ETA ledger has passed.
+    pub fn execute_admin_change(
+        env: Env,
+        admin: Address,
+        op_id: u32,
+    ) -> Result<(), ContractError> {
         require_initialized(&env)?;
-        access_control::remove_admin(&env, &admin, &target)
+        access_control::execute_admin_change(&env, &admin, op_id)
+    }
+
+    /// Cancels a queued admin change before it is executed.
+    pub fn cancel_admin_change(
+        env: Env,
+        admin: Address,
+        op_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::cancel_admin_change(&env, &admin, op_id)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
