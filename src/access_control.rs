@@ -107,15 +107,13 @@ pub fn cancel_admin_change(
 }
 
 fn apply_add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), ContractError> {
-    let mut admins = storage::get_admins(env);
-    if admins.contains(new_admin) {
+    if storage::is_admin(env, new_admin) {
         return Err(ContractError::AdminAlreadyExists);
     }
-    if admins.len() >= MAX_ADMINS {
+    if storage::admin_count(env) >= MAX_ADMINS {
         return Err(ContractError::TooManyAdmins);
     }
-    admins.push_back(new_admin.clone());
-    storage::save_admins(env, &admins);
+    storage::add_admin_entry(env, new_admin);
     events::admin_added(env, caller, new_admin);
     Ok(())
 }
@@ -125,24 +123,13 @@ fn apply_remove_admin(
     caller: &Address,
     target: &Address,
 ) -> Result<(), ContractError> {
-    let mut admins = storage::get_admins(env);
-    let mut found_index: Option<u32> = None;
-    for i in 0..admins.len() {
-        if admins.get(i) == Some(target.clone()) {
-            found_index = Some(i);
-            break;
-        }
+    if !storage::is_admin(env, target) {
+        return Err(ContractError::AdminNotFound);
     }
-    match found_index {
-        Some(i) => {
-            if admins.len() == 1 {
-                return Err(ContractError::CannotRemoveLastAdmin);
-            }
-            admins.remove(i);
-            storage::save_admins(env, &admins);
-            events::admin_removed(env, caller, target);
-            Ok(())
-        }
-        None => Err(ContractError::AdminNotFound),
+    if storage::admin_count(env) == 1 {
+        return Err(ContractError::CannotRemoveLastAdmin);
     }
+    storage::remove_admin_entry(env, target);
+    events::admin_removed(env, caller, target);
+    Ok(())
 }
