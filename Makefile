@@ -50,6 +50,8 @@ wasm-hash: build-optimized
 
 script-check:
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck scripts/*.sh; \
+	else echo "shellcheck not installed; skipping (CI installs it)"; fi
 
 snapshot-list:
 	@find test_snapshots -type f | sort

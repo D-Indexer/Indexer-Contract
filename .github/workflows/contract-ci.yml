@@ -43,8 +43,10 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
-      - name: Shell script syntax
-        run: make script-check
+      - name: Shell script syntax and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          make script-check
 
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check

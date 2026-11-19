@@ -179,7 +179,7 @@ that changes `src/events.rs` must update it.
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
 | `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
 | `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
-| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `multisig-admin-demo.sh`, `template_cids.py` |
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
 
@@ -192,6 +192,7 @@ that changes `src/events.rs` must update it.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): deploying and redeploying
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): pre-release gates
 - [docs/testnet-smoke-run.md](docs/testnet-smoke-run.md): recorded end-to-end testnet run
+- [docs/runs/181-multisig-admin.md](docs/runs/181-multisig-admin.md): recorded 2-of-3 multisig admin run
 
 ## Contributing
 
