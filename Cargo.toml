@@ -8,6 +8,9 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
+# The `alloc` feature is required: the contract stores and returns `String`
+# values (folder names, IPFS CIDs, metadata URIs) and `Vec<Address>` admin
+# lists, which need the SDK's alloc-backed types. Removing it does not build.
 soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
 [dev-dependencies]
