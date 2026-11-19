@@ -1077,6 +1077,94 @@ fn test_each_write_requires_the_right_signer() {
     assert_single_auth(&t, &t.admin, "add_admin");
     t.client().remove_admin(&other_admin, &t.admin);
     assert_single_auth(&t, &other_admin, "remove_admin");
+}
+
+// ── Contract-account (smart wallet) owners ──────────────────────────────────
+
+/// Minimal test smart-wallet contract account: authorizes an invocation by
+/// verifying an ed25519 signature over the payload the host passes to
+/// `__check_auth`. Real auth is used (no `mock_all_auths`).
+mod smart_wallet {
+    use soroban_sdk::{
+        auth::{Context, CustomAccountInterface},
+        contract, contracterror, contractimpl,
+        crypto::Hash,
+        BytesN, Env, Vec,
+    };
+
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u32)]
+    pub enum WalletError {
+        NotAuthorized = 1,
+    }
+
+    #[contract]
+    pub struct TestWallet;
+
+    #[contractimpl]
+    impl TestWallet {
+        pub fn __constructor(env: Env, public_key: BytesN<32>) {
+            env.storage().instance().set(&0u32, &public_key);
+        }
+
+        pub fn public_key(env: Env) -> BytesN<32> {
+            env.storage().instance().get(&0u32).unwrap()
+        }
+    }
+
+    #[contractimpl]
+    impl CustomAccountInterface for TestWallet {
+        type Signature = BytesN<64>;
+        type Error = WalletError;
+
+        fn __check_auth(
+            env: Env,
+            signature_payload: Hash<32>,
+            signature: BytesN<64>,
+            _auth_contexts: Vec<Context>,
+        ) -> Result<(), WalletError> {
+            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
+            env.crypto()
+                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
+            Ok(())
+        }
+    }
+}
+
+use smart_wallet::TestWallet;
+
+/// A contract-account owner plus the ed25519 key that controls it.
+struct WalletOwner {
+    address: Address,
+    signer: soroban_sdk::testutils::ed25519::SigningKey,
+}
+
+impl WalletOwner {
+    fn new(env: &Env) -> Self {
+        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
+        let public_key = signer.verifying_key();
+        let address = env.register(TestWallet, (public_key,));
+        WalletOwner { address, signer }
+    }
+
+    /// Authorizes the next invocation as this contract account, signing the
+    /// payload the host derives for it.
+    fn authorize(&self, env: &Env) {
+        let payload = env.auths().last().unwrap().1.signature_payload();
+        let signature = self.signer.sign(&payload);
+        env.set_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &self.address,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &self.address,
+                fn_name: "__check_auth",
+                args: (),
+                sub_invokes: &[],
+            },
+        }]);
+        let _ = signature;
+    }
+}
 
     let uri = String::from_str(
         &t.env,
