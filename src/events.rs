@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
@@ -48,6 +48,20 @@ pub struct AdminAdded {
 pub struct AdminRemoved {
     pub admin: Address,
     pub target: Address,
+}
+
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
 }
 
 pub fn contract_initialized(env: &Env, admin: &Address) {

@@ -35,6 +35,10 @@ pub const MAX_METADATA_URI_LEN: u32 = 256;
 /// persistent template ID list returned by `list_templates`.
 pub const MAX_TEMPLATES: u32 = 256;
 
+/// Contract version reported by `version()`. Bump on every upgrade that
+/// changes behavior or storage layout.
+pub const CONTRACT_VERSION: u32 = 1;
+
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;

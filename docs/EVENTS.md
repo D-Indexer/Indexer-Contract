@@ -29,6 +29,7 @@ Compatibility rules:
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `upgraded` | `ContractUpgraded` | `admin: Address` (caller), `new_wasm_hash: BytesN<32>` | `upgrade` |
 
 ### Changes in `feat/testnet-deploy`
 
