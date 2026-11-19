@@ -6,7 +6,7 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, String,
+    Address, Env, Event as _, IntoVal, String, Val, Vec,
 };
 
 use crate::constants::{
@@ -198,6 +198,221 @@ fn test_get_missing_identity_rejected() {
 
     let res = t.client().try_get_identity(&user);
     expect_contract_error(res, ContractError::FolderNotFound);
+}
+
+// ── Relayed submission (fee source != owner) ─────────────────────────────────
+
+/// Builds the argument vector the contract sees for `claim_folder(owner, name)`.
+fn claim_folder_args(env: &Env, owner: &Address, name: &String) -> Vec<Val> {
+    (owner.clone(), name.clone()).into_val(env)
+}
+
+/// Builds the argument vector the contract sees for `mint_portfolio(owner, id, cid)`.
+fn mint_portfolio_args(env: &Env, owner: &Address, template_id: u32, cid: &String) -> Vec<Val> {
+    (owner.clone(), template_id, cid.clone()).into_val(env)
+}
+
+/// Authorizes `owner` for a single contract invocation, as the owner's wallet would
+/// when signing a SorobanAuthorizationEntry for a relayer to submit.
+///
+/// `live_until_ledger` is the ledger sequence the signature stays valid through;
+/// the test ledger is moved past it to model an expired entry.
+fn authorize_owner(
+    t: &TestEnv,
+    owner: &Address,
+    fn_name: &str,
+    args: Vec<Val>,
+    live_until_ledger: u32,
+) {
+    t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: owner,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &t.contract_id,
+            fn_name,
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: t.env.ledger().timestamp(),
+        protocol_version: t.env.ledger().protocol_version(),
+        sequence_number: t.env.ledger().sequence(),
+        base_reserve: 0,
+        min_temp_entry_ttl: 1,
+        min_persistent_entry_ttl: 1,
+        max_entry_ttl: live_until_ledger,
+    });
+}
+
+#[test]
+fn test_relayed_claim_folder_with_owner_auth_entry() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let relayer = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "relayed.folder");
+
+    // Only the owner signs; the relayer pays the fee and submits.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &name),
+        100,
+    );
+    t.client().claim_folder(&owner, &name);
+
+    assert_eq!(t.client().get_folder(&name), owner);
+    assert_eq!(t.client().get_identity(&owner), name);
+    // The relayer never gains ownership.
+    assert_ne!(t.client().get_folder(&name), relayer);
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_owner_auth_entry() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "relayed-mint.folder");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &cid),
+        100,
+    );
+    t.client().mint_portfolio(&owner, &1u32, &cid);
+
+    let nft = t.client().get_portfolio(&owner);
+    assert_eq!(nft.owner, owner);
+    assert_eq!(nft.template_id, 1u32);
+    assert_eq!(nft.ipfs_cid, cid);
+}
+
+#[test]
+fn test_relayed_claim_folder_with_expired_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "expired.folder");
+
+    // Auth entry signed for a ledger window that has already passed.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &name),
+        10,
+    );
+    t.env.ledger().set_sequence_number(11);
+
+    let res = t.client().try_claim_folder(&owner, &name);
+    assert!(res.is_err(), "expired auth entry must not authorize");
+    assert!(t.client().try_get_folder(&name).is_err());
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_expired_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "expired-mint.folder");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &cid),
+        10,
+    );
+    t.env.ledger().set_sequence_number(11);
+
+    let res = t.client().try_mint_portfolio(&owner, &1u32, &cid);
+    assert!(res.is_err(), "expired auth entry must not authorize");
+    assert!(t.client().try_get_portfolio(&owner).is_err());
+}
+
+#[test]
+fn test_relayed_claim_folder_with_wrong_args_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let signed_name = String::from_str(&t.env, "signed.folder");
+    let submitted_name = String::from_str(&t.env, "swapped.folder");
+
+    // Owner signed for `signed.folder`; the relayer submits a different name.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &signed_name),
+        100,
+    );
+
+    let res = t.client().try_claim_folder(&owner, &submitted_name);
+    assert!(res.is_err(), "auth entry for other args must not authorize");
+    assert!(t.client().try_get_folder(&submitted_name).is_err());
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_wrong_args_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "wrong-args-mint.folder");
+    let signed_cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+    let submitted_cid = String::from_str(
+        &t.env,
+        "bafkreie33ewzcjvpo3gldpvqgevtoy4oaygkqri3cwxqr6o6lsqc4jqvwu",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    // Owner signed for `signed_cid`; the relayer submits a different CID.
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &signed_cid),
+        100,
+    );
+
+    let res = t.client().try_mint_portfolio(&owner, &1u32, &submitted_cid);
+    assert!(res.is_err(), "auth entry for other args must not authorize");
+    assert!(t.client().try_get_portfolio(&owner).is_err());
+}
+
+#[test]
+fn test_relayed_claim_folder_without_owner_auth_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let relayer = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "no-auth.folder");
+
+    // Only the relayer signs; the owner never authorized the invocation.
+    t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &relayer,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &t.contract_id,
+            fn_name: "claim_folder",
+            args: claim_folder_args(&t.env, &owner, &name),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let res = t.client().try_claim_folder(&owner, &name);
+    assert!(res.is_err(), "relayer signature must not stand in for the owner");
+    assert!(t.client().try_get_folder(&name).is_err());
 }
 
 #[test]
