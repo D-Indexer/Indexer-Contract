@@ -15,8 +15,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,13 +25,17 @@ jobs:
   checks:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -49,17 +52,48 @@ jobs:
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
+      - name: TTL monitor unit tests
+        run: python3 -m unittest discover -s scripts/tests
+
+  supply-chain:
+    name: cargo-deny / renovate config / workflow audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
+        with:
+          command: check advisories bans licenses sources
+
+      - name: Validate Renovate config
+        run: npx --yes -p renovate@44.256.1 renovate-config-validator --strict
+
+      - name: Actions pinned by SHA and permissions declared
+        run: ./scripts/check-workflows.sh
+
+      - name: zizmor (fail on high findings)
+        run: pipx run zizmor==1.32.0 --min-severity high .github/workflows
+
   wasm:
     name: optimized wasm build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: checks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
@@ -87,7 +121,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: indexer_contract-wasm
           path: target/stellar/indexer_contract.wasm
@@ -96,10 +130,14 @@ jobs:
   smoke-testnet:
     name: testnet smoke test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: wasm
     if: github.event_name == 'workflow_dispatch' && inputs.run_smoke
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
