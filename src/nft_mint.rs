@@ -3,6 +3,7 @@ use soroban_sdk::{Address, Env, String};
 use crate::access_control::require_owner;
 use crate::errors::ContractError;
 use crate::events;
+use crate::royalties;
 use crate::storage;
 use crate::types::PortfolioNFT;
 use crate::validation;
@@ -26,6 +27,7 @@ pub fn mint_portfolio(
     validation::require_valid_template_id(template_id)?;
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
+    royalties::charge_on_switch(env, owner, template_id)?;
 
     let nft = PortfolioNFT {
         owner: owner.clone(),

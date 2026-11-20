@@ -38,16 +38,22 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy (warnings denied)
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
       - name: Shell script syntax
         run: make script-check
 
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
+
+      - name: Script unit tests
+        run: python3 -m unittest discover -s scripts/tests
+
+      - name: stellar.toml fragment matches deployments
+        run: python3 scripts/stellar_toml.py generate --check
 
   wasm:
     name: optimized wasm build

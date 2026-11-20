@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{DataKey, PortfolioNFT, Template, TemplatePrice};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -190,4 +190,35 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Royalties ─────────────────────────────────────────────────────────────────
+
+pub fn get_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Treasury)
+}
+
+pub fn set_treasury(env: &Env, treasury: &Address) {
+    env.storage().instance().set(&DataKey::Treasury, treasury);
+}
+
+pub fn get_template_price(env: &Env, template_id: u32) -> Option<TemplatePrice> {
+    let key = DataKey::TemplatePrice(template_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_template_price(env: &Env, template_id: u32, price: &TemplatePrice) {
+    let key = DataKey::TemplatePrice(template_id);
+    env.storage().persistent().set(&key, price);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_template_price(env: &Env, template_id: u32) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::TemplatePrice(template_id));
 }

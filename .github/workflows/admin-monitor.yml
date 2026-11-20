@@ -1,0 +1,64 @@
+name: Privileged action monitor
+
+# Polls the deployed contract's events every 15 minutes and alerts on
+# privileged actions (adm_add, adm_rm, tmpl_reg, treas_set, tmpl_price, init,
+# and future upgrade/pause events). See scripts/admin_monitor.py.
+#
+# Cursor storage: the Actions cache. Each run restores the newest
+# `admin-monitor-cursor-*` entry and saves a new one under a unique key.
+#   + no extra branch, gist or token; nothing is committed.
+#   - caches unused for 7 days are evicted, and eviction or a failed restore
+#     looks like a first run. The script then looks back ~1 hour from the
+#     latest ledger, so a long outage can miss events. If a restored cursor
+#     is older than the RPC retention window (~7 days on public RPC), the
+#     script raises a high-priority `cursor_gap` alert for the missed range.
+#   A dedicated state branch survives eviction but needs `contents: write`,
+#   and a gist needs a PAT; neither seemed worth the extra privilege here.
+#
+# Configuration (repository settings):
+#   vars.EXPECTED_ADMINS      comma-separated allowlist (default: deployment admin)
+#   secrets.ALERT_WEBHOOK_URL optional webhook (receives JSON {title, text, alert})
+#   vars.ALERT_GITHUB_ISSUES  set to "false" to stop opening GitHub issues
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: admin-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore event cursor
+        uses: actions/cache/restore@v4
+        with:
+          path: .admin-monitor
+          key: admin-monitor-cursor-${{ github.run_id }}
+          restore-keys: admin-monitor-cursor-
+
+      - name: Check for privileged actions
+        env:
+          EXPECTED_ADMINS: ${{ vars.EXPECTED_ADMINS }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ vars.ALERT_GITHUB_ISSUES != 'false' && secrets.GITHUB_TOKEN || '' }}
+        run: |
+          [ -n "$EXPECTED_ADMINS" ] || unset EXPECTED_ADMINS
+          python3 scripts/admin_monitor.py
+
+      - name: Save event cursor
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: .admin-monitor
+          key: admin-monitor-cursor-${{ github.run_id }}
