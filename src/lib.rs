@@ -160,4 +160,17 @@ impl FolderContract {
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
     }
+
+    /// Reverse-resolves a Folder name to its portfolio NFT.
+    pub fn get_portfolio_by_folder(
+        env: Env,
+        folder_name: String,
+    ) -> Result<PortfolioNFT, ContractError> {
+        nft_mint::get_portfolio_by_folder(&env, &folder_name)
+    }
+
+    /// Returns whether the Folder name resolves to a minted portfolio.
+    pub fn verify_folder(env: Env, folder_name: String) -> Result<bool, ContractError> {
+        nft_mint::verify_folder(&env, &folder_name)
+    }
 }
