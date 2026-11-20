@@ -34,4 +34,30 @@ pub enum DataKey {
     Portfolio(Address),
     // storage: current storage schema version
     StorageVersion,
+    // governance: current guardian address
+    Guardian,
+    // governance: contract paused flag
+    Paused,
+    // governance: queued admin-set change -> ready ledger
+    PendingChange(u32),
+    // governance: monotonically increasing pending change id
+    PendingNonce,
+}
+
+/// Kinds of admin-set changes that must be queued and timelocked.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeKind {
+    AddAdmin = 0,
+    RemoveAdmin = 1,
+    SetGuardian = 2,
+}
+
+/// A queued, timelocked admin-set change.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingChange {
+    pub kind: ChangeKind,
+    pub target: Address,
+    pub ready_at: u32,
 }

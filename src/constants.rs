@@ -38,3 +38,7 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Ledgers an admin-set change stays queued before it can be executed.
+/// Gives the guardian a window to veto it.
+pub const ADMIN_CHANGE_DELAY: u32 = DAY_IN_LEDGERS;

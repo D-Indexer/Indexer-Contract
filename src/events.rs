@@ -79,6 +79,90 @@ pub struct Migrated {
     pub to: u32,
 }
 
+#[contractevent(topics = ["grd_set"], data_format = "vec")]
+pub struct GuardianSet {
+    pub guardian: Address,
+}
+
+#[contractevent(topics = ["grd_cancel"], data_format = "vec")]
+pub struct GuardianCancelled {
+    pub guardian: Address,
+    pub change_id: u32,
+}
+
+#[contractevent(topics = ["grd_pause"], data_format = "vec")]
+pub struct GuardianPaused {
+    pub guardian: Address,
+}
+
+#[contractevent(topics = ["unpaused"], data_format = "vec")]
+pub struct ContractUnpaused {
+    pub admin: Address,
+}
+
+#[contractevent(topics = ["chg_queued"], data_format = "vec")]
+pub struct ChangeQueued {
+    pub change_id: u32,
+    pub kind: u32,
+    pub target: Address,
+    pub ready_at: u32,
+}
+
+#[contractevent(topics = ["chg_exec"], data_format = "vec")]
+pub struct ChangeExecuted {
+    pub change_id: u32,
+    pub kind: u32,
+    pub target: Address,
+}
+
+pub fn guardian_set(env: &Env, guardian: &Address) {
+    GuardianSet {
+        guardian: guardian.clone(),
+    }
+    .publish(env);
+}
+
+pub fn guardian_cancelled(env: &Env, guardian: &Address, change_id: u32) {
+    GuardianCancelled {
+        guardian: guardian.clone(),
+        change_id,
+    }
+    .publish(env);
+}
+
+pub fn guardian_paused(env: &Env, guardian: &Address) {
+    GuardianPaused {
+        guardian: guardian.clone(),
+    }
+    .publish(env);
+}
+
+pub fn contract_unpaused(env: &Env, admin: &Address) {
+    ContractUnpaused {
+        admin: admin.clone(),
+    }
+    .publish(env);
+}
+
+pub fn change_queued(env: &Env, change_id: u32, kind: u32, target: &Address, ready_at: u32) {
+    ChangeQueued {
+        change_id,
+        kind,
+        target: target.clone(),
+        ready_at,
+    }
+    .publish(env);
+}
+
+pub fn change_executed(env: &Env, change_id: u32, kind: u32, target: &Address) {
+    ChangeExecuted {
+        change_id,
+        kind,
+        target: target.clone(),
+    }
+    .publish(env);
+}
+
 pub fn migrated(env: &Env, from: u32, to: u32) {
     Migrated { from, to }.publish(env);
 }

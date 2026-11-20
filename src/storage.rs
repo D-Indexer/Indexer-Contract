@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{DataKey, PendingChange, PortfolioNFT, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -190,6 +190,65 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Governance ────────────────────────────────────────────────────────────────
+
+pub fn get_guardian(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Guardian)
+}
+
+pub fn set_guardian(env: &Env, guardian: &Address) {
+    env.storage().instance().set(&DataKey::Guardian, guardian);
+}
+
+pub fn is_guardian(env: &Env, address: &Address) -> bool {
+    match get_guardian(env) {
+        Some(guardian) => guardian == *address,
+        None => false,
+    }
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
+}
+
+pub fn get_pending_nonce(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingNonce)
+        .unwrap_or(0)
+}
+
+pub fn next_pending_id(env: &Env) -> u32 {
+    let id = get_pending_nonce(env) + 1;
+    env.storage().instance().set(&DataKey::PendingNonce, &id);
+    id
+}
+
+pub fn get_pending_change(env: &Env, change_id: u32) -> Option<PendingChange> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingChange(change_id))
+}
+
+pub fn save_pending_change(env: &Env, change_id: u32, change: &PendingChange) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingChange(change_id), change);
+}
+
+pub fn remove_pending_change(env: &Env, change_id: u32) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingChange(change_id));
 }
 
 // ── Schema Version & Migration ────────────────────────────────────────────────

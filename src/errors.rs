@@ -23,4 +23,8 @@ pub enum ContractError {
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
     StorageVersionUnsupported = 20,
+    ContractPaused = 21,
+    NotGuardian = 22,
+    ChangeNotFound = 23,
+    ChangeNotReady = 24,
 }
