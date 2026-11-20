@@ -32,4 +32,6 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // storage: current storage schema version
+    StorageVersion,
 }

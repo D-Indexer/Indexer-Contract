@@ -191,3 +191,53 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_BUMP_AMOUNT,
     );
 }
+
+// ── Schema Version & Migration ────────────────────────────────────────────────
+
+/// Current storage layout version. Bump this and add a step to
+/// `run_migration_step` whenever the layout changes.
+pub const CURRENT_STORAGE_VERSION: u32 = 1;
+
+/// Reads the stored schema version, defaulting to 1 (the original layout) when
+/// the marker is missing. The marker is written lazily by `migrate`.
+pub fn get_storage_version(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::StorageVersion)
+        .unwrap_or(1)
+}
+
+pub fn set_storage_version(env: &Env, version: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::StorageVersion, &version);
+}
+
+/// Runs the ordered, bounded migration steps from `from` up to
+/// `CURRENT_STORAGE_VERSION`. Each step is idempotent and touches a bounded
+/// amount of state; per-user data is migrated lazily on access instead.
+pub fn run_migration_step(env: &Env, from: u32) -> Result<u32, ContractError> {
+    let mut version = from;
+    while version < CURRENT_STORAGE_VERSION {
+        match version {
+            // Worked example: version 0 -> 1 only writes the version marker.
+            0 => {}
+            _ => return Err(ContractError::StorageVersionUnsupported),
+        }
+        version += 1;
+    }
+    set_storage_version(env, version);
+    Ok(version)
+}
+
+/// Lazily migrates per-user data for `owner` on access. Idempotent: it only
+/// acts while the stored version is behind `CURRENT_STORAGE_VERSION`.
+pub fn migrate_user(env: &Env, owner: &Address) {
+    let version = get_storage_version(env);
+    if version >= CURRENT_STORAGE_VERSION {
+        return;
+    }
+    // Worked example: version 0 -> 1 has no per-user data to rewrite.
+    let _ = owner;
+    set_storage_version(env, CURRENT_STORAGE_VERSION);
+}

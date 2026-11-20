@@ -73,6 +73,16 @@ pub fn admin_removed(env: &Env, admin: &Address, target: &Address) {
     .publish(env);
 }
 
+#[contractevent(topics = ["migrated"], data_format = "vec")]
+pub struct Migrated {
+    pub from: u32,
+    pub to: u32,
+}
+
+pub fn migrated(env: &Env, from: u32, to: u32) {
+    Migrated { from, to }.publish(env);
+}
+
 pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String) {
     FolderClaimed {
         owner: owner.clone(),
