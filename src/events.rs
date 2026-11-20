@@ -32,6 +32,8 @@ pub struct PortfolioMintedByOwner {
 pub struct PortfolioUpdated {
     pub owner: Address,
     pub ipfs_cid: String,
+    /// Appended field: the CID that was replaced by this update.
+    pub previous_cid: String,
 }
 
 /// `port_upd` with `owner` as `topics[1]`, so indexers can filter by owner.
@@ -130,10 +132,11 @@ pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: 
     .publish(env);
 }
 
-pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
+pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String, previous_cid: &String) {
     PortfolioUpdated {
         owner: owner.clone(),
         ipfs_cid: ipfs_cid.clone(),
+        previous_cid: previous_cid.clone(),
     }
     .publish(env);
     PortfolioUpdatedByOwner {

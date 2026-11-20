@@ -49,9 +49,10 @@ pub fn update_portfolio(
 
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     let mut nft = storage::get_portfolio(env, owner)?;
+    let previous_cid = nft.ipfs_cid.clone();
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);
-    events::portfolio_updated(env, owner, ipfs_cid);
+    events::portfolio_updated(env, owner, ipfs_cid, &previous_cid);
     Ok(())
 }
 
