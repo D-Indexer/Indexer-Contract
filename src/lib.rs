@@ -2,6 +2,7 @@
 
 mod access_control;
 mod constants;
+mod economics;
 mod errors;
 mod events;
 mod identity_map;
@@ -18,6 +19,8 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
+use crate::types::ClaimFee;
+use crate::types::PortfolioNFT;
 use crate::types::Template;
 use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
 
@@ -67,73 +70,41 @@ impl FolderContract {
         access_control::remove_admin(&env, &admin, &target)
     }
 
-    // ── Pricing ───────────────────────────────────────────────────────────────
+    // ── Economics ─────────────────────────────────────────────────────────────
 
-    /// Sets the claim fee token, treasury and base fee (labels longer than
-    /// every tier). Without a fee config, claims are free.
+    /// Sets the Folder claim fee. An `amount` of 0 disables the fee.
     pub fn set_claim_fee(
         env: Env,
         admin: Address,
         token: Address,
+        amount: i128,
         treasury: Address,
-        base_fee: i128,
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
-        pricing::set_claim_fee(&env, &admin, &token, &treasury, base_fee)
+        economics::set_claim_fee(&env, &admin, &token, amount, &treasury)
     }
 
-    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
-    pub fn set_price_tiers(
+    /// Returns the current claim fee configuration, if any.
+    pub fn get_claim_fee(env: Env) -> Option<ClaimFee> {
+        storage::get_claim_fee(&env)
+    }
+
+    /// Withdraws `amount` of `token` held by this contract to `to`, capped at
+    /// `MAX_WITHDRAW_PER_CALL` per call.
+    pub fn withdraw(
         env: Env,
         admin: Address,
-        tiers: PriceTiers,
+        token: Address,
+        to: Address,
+        amount: i128,
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
-        pricing::set_price_tiers(&env, &admin, &tiers)
+        economics::withdraw(&env, &admin, &token, &to, amount)
     }
 
-    pub fn get_price_tiers(env: Env) -> PriceTiers {
-        storage::get_price_tiers(&env)
-    }
-
-    /// Fee charged to claim `folder_name` (or to renew it for one period).
-    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
-        pricing::quote_claim(&env, &folder_name)
-    }
-
-    // ── Leases ────────────────────────────────────────────────────────────────
-
-    /// Enables leases of `period_days` with a `grace_days` grace period for
-    /// new claims. `period_days == 0` restores permanent mode (the default).
-    pub fn set_lease_config(
-        env: Env,
-        admin: Address,
-        period_days: u32,
-        grace_days: u32,
-    ) -> Result<(), ContractError> {
-        require_initialized(&env)?;
-        access_control::require_admin(&env, &admin)?;
-        let config = (period_days > 0).then(|| LeaseConfig {
-            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
-            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
-        });
-        storage::set_lease_config(&env, &config);
-        Ok(())
-    }
-
-    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
-        storage::get_lease_config(&env)
-    }
-
-    /// Extends the owner's lease by `periods`; returns the new expiry.
-    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
-        require_initialized(&env)?;
-        identity_map::renew_folder(&env, &owner, periods)
-    }
-
-    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
-    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
-        identity_map::get_folder_expiry(&env, &folder_name)
+    /// Returns this contract's balance of `token`.
+    pub fn treasury_balance(env: Env, token: Address) -> i128 {
+        economics::treasury_balance(&env, &token)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────

@@ -39,7 +39,11 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
 
-/// Maximum number of length-based price tiers.
-pub const MAX_PRICE_TIERS: u32 = 5;
-/// Seconds per day, used to express lease periods in days.
-pub const SECONDS_PER_DAY: u64 = 86_400;
+/// Upper bound for the Folder claim fee, in the fee token's smallest unit
+/// (10_000 XLM for a 7-decimal token).
+pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
+
+/// Maximum amount a single `withdraw` call may move out of the treasury, in
+/// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
+/// withdrawals must be split across calls, each emitting its own event.
+pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;

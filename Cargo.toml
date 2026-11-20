@@ -8,10 +8,10 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
+soroban-sdk = { version = "=29.0.1", features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
 
 [workspace]
 # Spike (#249): the monolith split into three cross-calling contracts.
