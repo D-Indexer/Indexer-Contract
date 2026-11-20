@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,6 +15,15 @@ pub struct Template {
     pub template_id: u32,
     pub metadata_uri: String,
     pub creator: Address,
+}
+
+/// Fee charged on `claim_folder`, paid in a Stellar Asset Contract token.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimFee {
+    pub token: Address,
+    pub amount: i128,
+    pub treasury: Address,
 }
 
 #[contracttype]
@@ -36,25 +45,6 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
-    // admin timelock: pending queue of admin changes
-    PendingAdminChanges,
-    // admin timelock: next op ID to hand out
-    NextAdminChangeId,
-}
-
-/// Kind of change queued through the admin timelock.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AdminOp {
-    Add,
-    Remove,
-}
-
-/// A queued admin change, executable once `eta_ledger` is reached.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AdminChange {
-    pub op: AdminOp,
-    pub target: Address,
-    pub eta_ledger: u32,
+    // economics: Folder claim fee configuration (instance storage)
+    ClaimFee,
 }

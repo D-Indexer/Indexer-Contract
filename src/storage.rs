@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{AdminChange, DataKey, PortfolioNFT, Template};
+use crate::types::{ClaimFee, DataKey, PortfolioNFT, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -214,12 +214,17 @@ pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
 }
 
 pub fn save_template(env: &Env, template: &Template) {
+    save_template_with_list(env, template, get_template_list(env));
+}
+
+/// Saves a template reusing an already-loaded registry list, avoiding a second
+/// read of `TemplateList` in write paths that had to load it for validation.
+pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32>) {
     let id = template.template_id;
     let key = DataKey::Template(id);
     env.storage().persistent().set(&key, template);
     extend_persistent(env, &key);
 
-    let mut list = get_template_list(env);
     if !list.contains(id) {
         list.push_back(id);
         env.storage()
@@ -271,6 +276,22 @@ pub fn portfolio_exists(env: &Env, owner: &Address) -> bool {
         .has(&DataKey::Portfolio(owner.clone()))
 }
 
+/// Single-read variant of `portfolio_exists` + `get_portfolio`: returns the
+/// stored portfolio (if any) and extends its TTL, so write paths do not pay
+/// for a `has` followed by a `get`.
+pub fn load_portfolio(env: &Env, owner: &Address) -> Option<PortfolioNFT> {
+    let key = DataKey::Portfolio(owner.clone());
+    let result: Option<PortfolioNFT> = env.storage().persistent().get(&key);
+    if result.is_some() {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    result
+}
+
 pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, ContractError> {
     let key = DataKey::Portfolio(owner.clone());
     let result: Option<PortfolioNFT> = env.storage().persistent().get(&key);
@@ -295,4 +316,14 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Economics ─────────────────────────────────────────────────────────────────
+
+pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
+    env.storage().instance().get(&DataKey::ClaimFee)
+}
+
+pub fn set_claim_fee(env: &Env, fee: &ClaimFee) {
+    env.storage().instance().set(&DataKey::ClaimFee, fee);
 }

@@ -1,0 +1,55 @@
+name: Ledger TTL monitor
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      threshold_days:
+        description: Extend entries with fewer days remaining than this
+        default: "30"
+      extend_days:
+        description: Days to extend TTLs by
+        default: "90"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  STELLAR_CLI_VERSION: 28.1.0
+
+jobs:
+  ttl:
+    name: report and extend TTLs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
+        run: |
+          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP" stellar
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # TTL extension can be paid by any account, so a fresh Friendbot-funded
+      # testnet identity is used and no secrets are required.
+      - name: Fund fee-payer identity
+        run: stellar keys generate ttl-monitor --network testnet --fund
+
+      - name: Check and extend TTLs
+        env:
+          THRESHOLD_DAYS: ${{ inputs.threshold_days || '30' }}
+          EXTEND_DAYS: ${{ inputs.extend_days || '90' }}
+        run: |
+          python3 scripts/ttl_monitor.py \
+            --deployment deployments/testnet.json \
+            --threshold-days "$THRESHOLD_DAYS" \
+            --extend-days "$EXTEND_DAYS" \
+            --source ttl-monitor

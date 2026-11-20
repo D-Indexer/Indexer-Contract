@@ -39,9 +39,11 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
 
-/// Delay applied to queued admin changes (~24h at ~5 seconds per ledger).
-pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
+/// Upper bound for the Folder claim fee, in the fee token's smallest unit
+/// (10_000 XLM for a 7-decimal token).
+pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
 
-/// Maximum number of admin changes that may be queued at once. Bounds the
-/// size of the pending queue stored in instance storage.
-pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
+/// Maximum amount a single `withdraw` call may move out of the treasury, in
+/// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
+/// withdrawals must be split across calls, each emitting its own event.
+pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
