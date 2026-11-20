@@ -15,24 +15,30 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  # Keep version and sha256 in lockstep (x86_64-unknown-linux-gnu tarball,
+  # 26427814 bytes). Pinned here, never fetched from the release.
   STELLAR_CLI_VERSION: 28.1.0
+  STELLAR_CLI_SHA256: c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462
 
 jobs:
   checks:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -48,27 +54,61 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           make script-check
 
+      - name: errors.json matches src/errors.rs
+        run: |
+          python3 scripts/test_errors_json.py
+          python3 scripts/errors_json.py --check
+
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
+
+      - name: TTL monitor unit tests
+        run: python3 -m unittest discover -s scripts/tests
+
+  supply-chain:
+    name: cargo-deny / renovate config / workflow audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
+        with:
+          command: check advisories bans licenses sources
+
+      - name: Validate Renovate config
+        run: npx --yes -p renovate@44.256.1 renovate-config-validator --strict
+
+      - name: Actions pinned by SHA and permissions declared
+        run: ./scripts/check-workflows.sh
+
+      - name: zizmor (fail on high findings)
+        run: pipx run zizmor==1.32.0 --min-severity high .github/workflows
 
   wasm:
     name: optimized wasm build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: checks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
+          ./scripts/install-stellar-cli.sh "$RUNNER_TEMP"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/stellar" --version
 
       - name: Build optimized wasm
         run: make build-optimized
@@ -89,7 +129,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: indexer_contract-wasm
           path: target/stellar/indexer_contract.wasm
@@ -98,17 +138,19 @@ jobs:
   smoke-testnet:
     name: testnet smoke test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: wasm
     if: github.event_name == 'workflow_dispatch' && inputs.run_smoke
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
+          ./scripts/install-stellar-cli.sh "$RUNNER_TEMP"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/stellar" --version
 
       # Uses a fresh Friendbot-funded identity, so no secrets are required.
       - name: Run smoke test

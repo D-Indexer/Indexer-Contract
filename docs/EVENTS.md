@@ -24,12 +24,22 @@ Compatibility rules:
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
 | `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
-| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
+| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
-| `upgraded` | `ContractUpgraded` | `admin: Address` (caller), `new_wasm_hash: BytesN<32>` | `upgrade` |
+| `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
+| `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+
+### Changes in the economics / soroban-sdk 29 update
+
+- **New:** `fee_set`, `withdraw`.
+- **Appended:** `fee_paid` as the third field of `folder_cl` (0 when no fee is configured).
+  Decoders that read the first two fields keep working.
+- **soroban-sdk 25.3.1 → 29.0.1:** on-chain event XDR encoding is unchanged apart from the
+  appended field above. Test snapshots now record protocol 29 and spell the event type key
+  `type` instead of `type_` (snapshot JSON only). Run `make sdk-compat` for the full report.
 
 ### Changes in `feat/testnet-deploy`
 
@@ -48,7 +58,9 @@ Compatibility rules:
 |---|---|
 | `init` | Seed the admin set with `admin` |
 | `adm_add` / `adm_rm` | Add / remove the admin from the admin set |
-| `folder_cl` | Upsert identity `owner ↔ folder_name` |
+| `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
+| `claim_spon` | Record the sponsor of the claim |
+| `folder_rn` | Update the Folder's lease expiry |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
