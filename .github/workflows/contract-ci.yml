@@ -43,6 +43,9 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
+      - name: Auth snapshots are up to date
+        run: make snapshot-check
+
       - name: Shell script syntax
         run: make script-check
 
