@@ -78,9 +78,27 @@ fn is_valid_cid(bytes: &Bytes) -> bool {
     false
 }
 
+/// Returns true when the label has a hyphen as both its 3rd and 4th bytes,
+/// which covers the IDNA A-label prefix `xn--` and other ambiguous `ab--c`
+/// shapes.
+fn has_ambiguous_hyphen_pair(label: &Bytes) -> bool {
+    label.get(2) == Some(b'-') && label.get(3) == Some(b'-')
+}
+
+/// Returns true when every byte of the label is an ASCII digit.
+fn is_all_numeric(label: &Bytes) -> bool {
+    !label.is_empty() && all_bytes(label, is_digit_byte)
+}
+
+fn is_digit_byte(byte: u8) -> bool {
+    byte.is_ascii_digit()
+}
+
 /// Validates a Folder name: `<label>.folder`, where the label is at least
 /// `MIN_FOLDER_LABEL_LEN` bytes of `[a-z0-9-]` and does not start or end with
-/// a hyphen. The whole name is at most `MAX_FOLDER_NAME_LEN` bytes.
+/// a hyphen. Labels with `--` as the 3rd and 4th bytes (e.g. `xn--`) and
+/// all-numeric labels are rejected. The whole name is at most
+/// `MAX_FOLDER_NAME_LEN` bytes.
 pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractError> {
     let bytes = folder_name.to_bytes();
     let len = bytes.len();
@@ -95,6 +113,8 @@ pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractErr
     if !all_bytes(&label, is_label_byte)
         || label.first() == Some(b'-')
         || label.last() == Some(b'-')
+        || has_ambiguous_hyphen_pair(&label)
+        || is_all_numeric(&label)
     {
         return Err(ContractError::InvalidFolderName);
     }
