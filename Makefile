@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check script-test bindings snapshot-list check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -15,6 +15,8 @@ help:
 	@echo "  build-optimized Build optimized WASM with Stellar CLI -> $(OPTIMIZED_WASM)"
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
 	@echo "  script-check  Validate shell scripts"
+	@echo "  script-test   Run shell script tests (mocked HTTP / CLI)"
+	@echo "  bindings      Generate TypeScript bindings -> bindings/ts"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
@@ -49,7 +51,16 @@ wasm-hash: build-optimized
 	@sha256sum $(OPTIMIZED_WASM) | cut -d' ' -f1
 
 script-check:
-	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
+	@for f in scripts/*.sh scripts/tests/*.sh; do bash -n "$$f" || exit 1; done
+
+script-test:
+	@for f in scripts/tests/*.sh; do bash "$$f" || exit 1; done
+
+bindings:
+	stellar contract bindings typescript --wasm $(OPTIMIZED_WASM) --output-dir bindings/ts --overwrite \
+		--contract-id "$$(jq -r .contract_id deployments/testnet.json)" --network testnet \
+		--rpc-url "$$(jq -r .rpc_url deployments/testnet.json)" \
+		--network-passphrase "$$(jq -r .network_passphrase deployments/testnet.json)"
 
 snapshot-list:
 	@find test_snapshots -type f | sort

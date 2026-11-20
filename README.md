@@ -179,9 +179,39 @@ that changes `src/events.rs` must update it.
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
 | `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
 | `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
-| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py`, `pin-templates.sh`, `testnet-reset-check.sh`; tests in `scripts/tests/` |
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
+
+## TypeScript bindings
+
+CI (`.github/workflows/bindings.yml`) generates bindings with `stellar contract bindings typescript`
+from the optimized wasm on every PR, builds them, smoke-tests them, and uploads the `npm pack`
+tarball as the `indexer-contract-bindings-ts` artifact. Published releases attach the tarball as a
+release asset. The default contract ID and network come from `deployments/testnet.json`.
+
+Consume it from the frontend or backend:
+
+```sh
+npm install https://github.com/D-Indexer/Indexer-Contract/releases/download/<tag>/<tarball>.tgz
+```
+
+```ts
+import { Client, networks } from "indexer-contract"; // package name as generated
+const client = new Client({ ...networks.testnet, rpcUrl: "https://soroban-testnet.stellar.org" });
+```
+
+Locally: `make build-optimized bindings && cd bindings/ts && npm install && npm run build`.
+
+## Automation
+
+| Workflow | Schedule | What it does | Secrets |
+|---|---|---|---|
+| `template-pinning.yml` | weekly | `scripts/pin-templates.sh --verify-only`: fetches each template CID from two gateways and compares sha256; manual runs can pin first | `PIN_TOKEN` (pinning only), optional `PIN_PROVIDER` variable |
+| `testnet-reset.yml` | every 6h | `scripts/testnet-reset-check.sh`; if the contract is gone, redeploys, opens a PR updating `deployments/testnet.json` and an issue | `TESTNET_DEPLOYER_SECRET`, `BOT_TOKEN` |
+| `smoke-scheduled.yml` | daily | Runs `scripts/smoke-testnet.sh`; on failure opens or comments on one `smoke-failure` issue, closes it on the next green run | none |
+
+Script tests (mocked HTTP gateway and mocked `stellar` CLI): `make script-test`.
 
 ## Documentation
 
