@@ -1,8 +1,9 @@
-use soroban_sdk::{Bytes, String};
+use soroban_sdk::{xdr::ToXdr, Bytes, Env, String, Symbol};
 
 use crate::constants::{
     CIDV0_LEN, FOLDER_SUFFIX, MAX_FOLDER_NAME_LEN, MAX_IPFS_CID_LEN, MAX_METADATA_URI_LEN,
-    METADATA_URI_SCHEME, MIN_FOLDER_LABEL_LEN, MIN_IPFS_CID_LEN,
+    MAX_RECORD_KEY_LEN, MAX_RECORD_VALUE_LEN, METADATA_URI_SCHEME, MIN_FOLDER_LABEL_LEN,
+    MIN_IPFS_CID_LEN,
 };
 use crate::errors::ContractError;
 
@@ -139,4 +140,40 @@ pub fn require_valid_template_id(template_id: u32) -> Result<(), ContractError> 
     } else {
         Ok(())
     }
+}
+
+fn is_record_key_byte(byte: u8) -> bool {
+    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+}
+
+/// Validates a record key: `[a-z0-9_]{1,16}`. The documented allowlist keys
+/// (see `docs/STORAGE.md`) all match this pattern.
+pub fn require_valid_record_key(env: &Env, key: &Symbol) -> Result<(), ContractError> {
+    // ScVal XDR of a symbol: 4-byte type tag, 4-byte big-endian length, then the characters.
+    let xdr = key.clone().to_xdr(env);
+    if xdr.len() < 8 {
+        return Err(ContractError::InvalidRecordKey);
+    }
+    let mut len: u32 = 0;
+    for byte in xdr.slice(4..8).iter() {
+        len = (len << 8) | byte as u32;
+    }
+    if len == 0 || len > MAX_RECORD_KEY_LEN || 8 + len > xdr.len() {
+        return Err(ContractError::InvalidRecordKey);
+    }
+    if !all_bytes(&xdr.slice(8..8 + len), is_record_key_byte) {
+        return Err(ContractError::InvalidRecordKey);
+    }
+    Ok(())
+}
+
+/// Validates a record value: 1 to 256 bytes of printable ASCII.
+pub fn require_valid_record_value(value: &String) -> Result<(), ContractError> {
+    let bytes = value.to_bytes();
+    let len = bytes.len();
+    if len == 0 || len > MAX_RECORD_VALUE_LEN || !all_bytes(&bytes, |b| (0x20..=0x7e).contains(&b))
+    {
+        return Err(ContractError::InvalidRecordValue);
+    }
+    Ok(())
 }

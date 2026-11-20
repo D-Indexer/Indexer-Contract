@@ -29,6 +29,10 @@ Compatibility rules:
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `pay_set` | `PaymentAddressSet` | `owner: Address`, `folder_name: String`, `payment: Address` | `set_payment_address` |
+| `pay_clr` | `PaymentAddressCleared` | `owner: Address`, `folder_name: String` | `clear_payment_address` |
+| `rec_set` | `RecordSet` | `owner: Address`, `folder_name: String`, `key: Symbol`, `value: String` | `set_record` |
+| `rec_rm` | `RecordRemoved` | `owner: Address`, `folder_name: String`, `key: Symbol` | `remove_record` |
 
 ### Changes in `feat/testnet-deploy`
 

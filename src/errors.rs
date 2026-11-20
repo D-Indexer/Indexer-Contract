@@ -22,4 +22,8 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    InvalidRecordKey = 20,
+    InvalidRecordValue = 21,
+    RecordLimitReached = 22,
+    RecordNotFound = 23,
 }

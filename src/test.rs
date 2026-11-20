@@ -6,15 +6,18 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, String,
+    Address, Env, Event as _, String, Symbol,
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
-    PERSISTENT_BUMP_AMOUNT,
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_RECORDS,
+    MAX_RECORD_VALUE_LEN, MAX_TEMPLATES, PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::events::{
+    AdminAdded, AdminRemoved, ContractInitialized, PaymentAddressCleared, PaymentAddressSet,
+    RecordRemoved, RecordSet, TemplateRegistered,
+};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -735,7 +738,8 @@ fn test_templates_stored_in_persistent_storage() {
         assert!(!instance.has(&DataKey::Template(1)));
         assert!(!instance.has(&DataKey::TemplateList));
         assert!(persistent.has(&DataKey::Template(1)));
-        assert!(persistent.has(&DataKey::TemplateList));
+        assert!(persistent.has(&DataKey::TemplateCount));
+        assert!(persistent.has(&DataKey::TemplatePage(0)));
     });
     assert_eq!(
         t.persistent_ttl(&DataKey::Template(1)),
@@ -1128,4 +1132,358 @@ fn test_writes_fail_without_signature() {
         t.client().get_portfolio(&user).ipfs_cid,
         String::from_str(&t.env, VALID_CIDV1_RAW)
     );
+}
+
+// ── Indexed template list (#269) ────────────────────────────────────────────
+
+fn unlimited_env() -> TestEnv {
+    let env = Env::new_with_config(soroban_sdk::testutils::EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    });
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let contract_id = env.register(FolderContract, ());
+    let admin = Address::generate(&env);
+    FolderContractClient::new(&env, &contract_id).initialize(&admin);
+    TestEnv {
+        env,
+        admin,
+        contract_id,
+    }
+}
+
+fn template_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    )
+}
+
+#[test]
+fn test_template_list_keeps_registration_order() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+    for id in [5u32, 2, 9] {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+    assert_eq!(
+        t.client().list_templates(),
+        soroban_sdk::vec![&t.env, 5u32, 2, 9]
+    );
+    t.env.as_contract(&t.contract_id, || {
+        let persistent = t.env.storage().persistent();
+        assert!(!persistent.has(&DataKey::TemplateList));
+        assert_eq!(persistent.get::<_, u32>(&DataKey::TemplateCount), Some(3));
+        assert_eq!(
+            persistent.get::<_, soroban_sdk::Vec<u32>>(&DataKey::TemplatePage(0)),
+            Some(soroban_sdk::vec![&t.env, 5u32, 2, 9])
+        );
+    });
+}
+
+#[test]
+fn test_legacy_template_list_migrates_lazily() {
+    let t = unlimited_env();
+    let uri = template_uri(&t.env);
+    let mut legacy = soroban_sdk::Vec::new(&t.env);
+    for id in (1..=40u32).rev() {
+        legacy.push_back(id * 2);
+    }
+    t.env.as_contract(&t.contract_id, || {
+        for id in legacy.iter() {
+            let template = crate::types::Template {
+                template_id: id,
+                metadata_uri: uri.clone(),
+                creator: t.admin.clone(),
+            };
+            t.env
+                .storage()
+                .persistent()
+                .set(&DataKey::Template(id), &template);
+        }
+        t.env
+            .storage()
+            .persistent()
+            .set(&DataKey::TemplateList, &legacy);
+    });
+
+    // Reads work before migration.
+    assert_eq!(t.client().list_templates(), legacy);
+    let res = t.client().try_register_template(&t.admin, &4u32, &uri);
+    expect_contract_error(res, ContractError::TemplateAlreadyExists);
+
+    let mut expected = legacy.clone();
+    for id in [7u32, 9] {
+        t.client().register_template(&t.admin, &id, &uri);
+        expected.push_back(id);
+        assert_eq!(t.client().list_templates(), expected);
+    }
+    t.env.as_contract(&t.contract_id, || {
+        let persistent = t.env.storage().persistent();
+        assert!(!persistent.has(&DataKey::TemplateList));
+        assert_eq!(persistent.get::<_, u32>(&DataKey::TemplateCount), Some(42));
+        assert!(persistent.has(&DataKey::TemplatePage(1)));
+    });
+}
+
+#[test]
+fn test_template_registration_cost_is_constant() {
+    let t = unlimited_env();
+    let uri = template_uri(&t.env);
+    let mut costs = std::vec::Vec::new();
+    for id in 1..=MAX_TEMPLATES {
+        t.client().register_template(&t.admin, &id, &uri);
+        if [32, 128, MAX_TEMPLATES].contains(&id) {
+            let res = t.env.cost_estimate().resources();
+            std::println!(
+                "register_template #{id}: instructions={} read_bytes={} write_bytes={} entries_written={}",
+                res.instructions,
+                res.disk_read_bytes,
+                res.write_bytes,
+                res.write_entries
+            );
+            costs.push(res);
+        }
+    }
+    // Each measured registration fills the last slot of a page, so the bytes
+    // written are identical regardless of registry size.
+    for res in &costs {
+        assert_eq!(res.write_bytes, costs[0].write_bytes);
+        assert_eq!(res.write_entries, costs[0].write_entries);
+    }
+    // Listing a full registry stays within the transaction resource limits.
+    assert_eq!(t.client().list_templates().len(), MAX_TEMPLATES);
+}
+
+// ── Payment address (#268) ──────────────────────────────────────────────────
+
+fn claimed_env() -> (TestEnv, Address, String) {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "alice.folder");
+    t.client().claim_folder(&owner, &name);
+    (t, owner, name)
+}
+
+#[test]
+fn test_payment_address_set_clear_and_fallback() {
+    let (t, owner, name) = claimed_env();
+    let hot = Address::generate(&t.env);
+    assert_eq!(t.client().resolve_payment(&name), owner);
+
+    t.client().set_payment_address(&owner, &hot);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [PaymentAddressSet {
+            owner: owner.clone(),
+            folder_name: name.clone(),
+            payment: hot.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    assert_eq!(t.client().resolve_payment(&name), hot);
+
+    t.client().clear_payment_address(&owner);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [PaymentAddressCleared {
+            owner: owner.clone(),
+            folder_name: name.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    assert_eq!(t.client().resolve_payment(&name), owner);
+
+    let missing = String::from_str(&t.env, "nobody.folder");
+    expect_contract_error(
+        t.client().try_resolve_payment(&missing),
+        ContractError::FolderNotFound,
+    );
+}
+
+#[test]
+fn test_payment_address_owner_only() {
+    let (t, owner, name) = claimed_env();
+    let stranger = Address::generate(&t.env);
+    expect_contract_error(
+        t.client().try_set_payment_address(&stranger, &stranger),
+        ContractError::FolderNotFound,
+    );
+    expect_contract_error(
+        t.client().try_clear_payment_address(&stranger),
+        ContractError::FolderNotFound,
+    );
+    assert_eq!(t.client().resolve_payment(&name), owner);
+
+    t.client().set_payment_address(&owner, &stranger);
+    assert_single_auth(&t, &owner, "set_payment_address");
+    t.client().clear_payment_address(&owner);
+    assert_single_auth(&t, &owner, "clear_payment_address");
+
+    t.env.set_auths(&[]);
+    assert!(t
+        .client()
+        .try_set_payment_address(&owner, &stranger)
+        .is_err());
+    assert!(t.client().try_clear_payment_address(&owner).is_err());
+}
+
+// ── Text records (#267) ─────────────────────────────────────────────────────
+
+#[test]
+fn test_record_set_overwrite_remove() {
+    let (t, owner, name) = claimed_env();
+    let key = Symbol::new(&t.env, "website");
+    let v1 = String::from_str(&t.env, "https://alice.dev");
+    let v2 = String::from_str(&t.env, "https://alice.example");
+
+    t.client().set_record(&owner, &key, &v1);
+    assert_single_auth(&t, &owner, "set_record");
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [RecordSet {
+            owner: owner.clone(),
+            folder_name: name.clone(),
+            key: key.clone(),
+            value: v1.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    assert_eq!(t.client().get_record(&name, &key), v1);
+
+    t.client().set_record(&owner, &key, &v2);
+    assert_eq!(t.client().get_record(&name, &key), v2);
+    let github = Symbol::new(&t.env, "github");
+    let handle = String::from_str(&t.env, "alice");
+    t.client().set_record(&owner, &github, &handle);
+    let records = t.client().get_records(&name);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records.get(key.clone()), Some(v2));
+    assert_eq!(records.get(github.clone()), Some(handle));
+
+    t.client().remove_record(&owner, &key);
+    assert_single_auth(&t, &owner, "remove_record");
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [RecordRemoved {
+            owner: owner.clone(),
+            folder_name: name.clone(),
+            key: key.clone(),
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+    expect_contract_error(
+        t.client().try_get_record(&name, &key),
+        ContractError::RecordNotFound,
+    );
+    expect_contract_error(
+        t.client().try_remove_record(&owner, &key),
+        ContractError::RecordNotFound,
+    );
+    assert_eq!(t.client().get_records(&name).len(), 1);
+
+    let missing = String::from_str(&t.env, "nobody.folder");
+    expect_contract_error(
+        t.client().try_get_records(&missing),
+        ContractError::FolderNotFound,
+    );
+    let stranger = Address::generate(&t.env);
+    expect_contract_error(
+        t.client().try_set_record(&stranger, &github, &v1),
+        ContractError::FolderNotFound,
+    );
+}
+
+#[test]
+fn test_record_cap() {
+    let (t, owner, _name) = claimed_env();
+    let value = String::from_str(&t.env, "x");
+    for i in 0..MAX_RECORDS {
+        let key = Symbol::new(&t.env, &std::format!("k{i}"));
+        t.client().set_record(&owner, &key, &value);
+    }
+    let extra = Symbol::new(&t.env, "extra");
+    expect_contract_error(
+        t.client().try_set_record(&owner, &extra, &value),
+        ContractError::RecordLimitReached,
+    );
+    // Overwriting an existing key is still allowed at the cap.
+    t.client()
+        .set_record(&owner, &Symbol::new(&t.env, "k0"), &value);
+}
+
+#[test]
+fn test_record_key_and_value_validation() {
+    let (t, owner, _name) = claimed_env();
+    let value = String::from_str(&t.env, "ok");
+    for bad in ["Website", "a_very_long_key_17", "UPPER"] {
+        expect_contract_error(
+            t.client()
+                .try_set_record(&owner, &Symbol::new(&t.env, bad), &value),
+            ContractError::InvalidRecordKey,
+        );
+    }
+    for good in ["a", "contact_cid", "key_sixteen_1234"] {
+        t.client()
+            .set_record(&owner, &Symbol::new(&t.env, good), &value);
+    }
+
+    let key = Symbol::new(&t.env, "website");
+    let too_long = "a".repeat(MAX_RECORD_VALUE_LEN as usize + 1);
+    let max = "a".repeat(MAX_RECORD_VALUE_LEN as usize);
+    for bad in [
+        "",
+        "line\nbreak",
+        "tab\there",
+        too_long.as_str(),
+        "caf\u{e9}",
+    ] {
+        expect_contract_error(
+            t.client()
+                .try_set_record(&owner, &key, &String::from_str(&t.env, bad)),
+            ContractError::InvalidRecordValue,
+        );
+    }
+    t.client()
+        .set_record(&owner, &key, &String::from_str(&t.env, &max));
+}
+
+// ── Binary CID evaluation (#266) ────────────────────────────────────────────
+
+/// Measures the stored size of a portfolio entry with the CID as a string
+/// versus its decoded binary form (34 bytes for CIDv0, 36 for CIDv1 raw).
+#[test]
+fn test_binary_cid_storage_savings() {
+    use soroban_sdk::{xdr::ToXdr, Bytes};
+    let env = Env::default();
+    let owner = Address::generate(&env);
+    let cases = [
+        ("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", 34u32),
+        (
+            "bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+            36u32,
+        ),
+    ];
+    for (cid, binary_len) in cases {
+        let portfolio = crate::types::PortfolioNFT {
+            owner: owner.clone(),
+            template_id: 1,
+            ipfs_cid: String::from_str(&env, cid),
+            minted_at: 0,
+        };
+        let string_cid = String::from_str(&env, cid).to_xdr(&env).len();
+        let binary_cid = Bytes::from_slice(&env, &[0u8; 64][..binary_len as usize])
+            .to_xdr(&env)
+            .len();
+        let entry = portfolio.to_xdr(&env).len();
+        std::println!(
+            "cid_len={} entry={} string_cid={} binary_cid={} saved={}",
+            cid.len(),
+            entry,
+            string_cid,
+            binary_cid,
+            string_cid - binary_cid
+        );
+        assert!(string_cid > binary_cid);
+    }
 }

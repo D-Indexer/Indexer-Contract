@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, String};
+use soroban_sdk::{contractevent, Address, Env, String, Symbol};
 
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
@@ -111,6 +111,70 @@ pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     TemplateAssigned {
         owner: owner.clone(),
         template_id,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["pay_set"], data_format = "vec")]
+pub struct PaymentAddressSet {
+    pub owner: Address,
+    pub folder_name: String,
+    pub payment: Address,
+}
+
+#[contractevent(topics = ["pay_clr"], data_format = "vec")]
+pub struct PaymentAddressCleared {
+    pub owner: Address,
+    pub folder_name: String,
+}
+
+#[contractevent(topics = ["rec_set"], data_format = "vec")]
+pub struct RecordSet {
+    pub owner: Address,
+    pub folder_name: String,
+    pub key: Symbol,
+    pub value: String,
+}
+
+#[contractevent(topics = ["rec_rm"], data_format = "vec")]
+pub struct RecordRemoved {
+    pub owner: Address,
+    pub folder_name: String,
+    pub key: Symbol,
+}
+
+pub fn payment_address_set(env: &Env, owner: &Address, folder_name: &String, payment: &Address) {
+    PaymentAddressSet {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+        payment: payment.clone(),
+    }
+    .publish(env);
+}
+
+pub fn payment_address_cleared(env: &Env, owner: &Address, folder_name: &String) {
+    PaymentAddressCleared {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
+pub fn record_set(env: &Env, owner: &Address, folder_name: &String, key: &Symbol, value: &String) {
+    RecordSet {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+        key: key.clone(),
+        value: value.clone(),
+    }
+    .publish(env);
+}
+
+pub fn record_removed(env: &Env, owner: &Address, folder_name: &String, key: &Symbol) {
+    RecordRemoved {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+        key: key.clone(),
     }
     .publish(env);
 }

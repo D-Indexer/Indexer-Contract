@@ -35,6 +35,18 @@ pub const MAX_METADATA_URI_LEN: u32 = 256;
 /// persistent template ID list returned by `list_templates`.
 pub const MAX_TEMPLATES: u32 = 256;
 
+/// Template IDs per `TemplatePage` entry. Registration rewrites at most one
+/// page, and `list_templates` reads at most `MAX_TEMPLATES / TEMPLATE_PAGE_SIZE`
+/// pages, which stays well inside the per-transaction ledger entry limit.
+pub const TEMPLATE_PAGE_SIZE: u32 = 32;
+
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Maximum number of text records per Folder.
+pub const MAX_RECORDS: u32 = 16;
+/// Maximum record key length (`[a-z0-9_]{1,16}`).
+pub const MAX_RECORD_KEY_LEN: u32 = 16;
+/// Maximum record value length, in bytes of printable ASCII.
+pub const MAX_RECORD_VALUE_LEN: u32 = 256;

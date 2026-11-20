@@ -14,7 +14,7 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol, Vec};
 
 use crate::errors::ContractError;
 use crate::types::PortfolioNFT;
@@ -83,6 +83,52 @@ impl FolderContract {
 
     pub fn get_identity(env: Env, owner: Address) -> Result<String, ContractError> {
         identity_map::get_identity(&env, &owner)
+    }
+
+    /// Routes payments for the owner's Folder name to `payment`.
+    pub fn set_payment_address(
+        env: Env,
+        owner: Address,
+        payment: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::set_payment_address(&env, &owner, &payment)
+    }
+
+    pub fn clear_payment_address(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::clear_payment_address(&env, &owner)
+    }
+
+    /// Returns the Folder's payment address, or its owner when none is set.
+    pub fn resolve_payment(env: Env, folder_name: String) -> Result<Address, ContractError> {
+        identity_map::resolve_payment(&env, &folder_name)
+    }
+
+    pub fn set_record(
+        env: Env,
+        owner: Address,
+        key: Symbol,
+        value: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::set_record(&env, &owner, &key, &value)
+    }
+
+    pub fn remove_record(env: Env, owner: Address, key: Symbol) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::remove_record(&env, &owner, &key)
+    }
+
+    pub fn get_record(env: Env, folder_name: String, key: Symbol) -> Result<String, ContractError> {
+        identity_map::get_record(&env, &folder_name, &key)
+    }
+
+    pub fn get_records(
+        env: Env,
+        folder_name: String,
+    ) -> Result<Map<Symbol, String>, ContractError> {
+        identity_map::get_records(&env, &folder_name)
     }
 
     // ── Template Registry ─────────────────────────────────────────────────────
