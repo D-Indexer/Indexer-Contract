@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check preflight-test snapshot-list check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -15,6 +15,7 @@ help:
 	@echo "  build-optimized Build optimized WASM with Stellar CLI -> $(OPTIMIZED_WASM)"
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
 	@echo "  script-check  Validate shell scripts"
+	@echo "  preflight-test Run mainnet preflight check tests (mocked, offline)"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
@@ -51,10 +52,13 @@ wasm-hash: build-optimized
 script-check:
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
 
+preflight-test:
+	./scripts/tests/test-mainnet-preflight.sh
+
 snapshot-list:
 	@find test_snapshots -type f | sort
 
-check: fmt-check cargo-check clippy test build-wasm script-check
+check: fmt-check cargo-check clippy test build-wasm script-check preflight-test
 
 clean:
 	cargo clean

@@ -176,7 +176,7 @@
   ],
   "ledger": {
     "protocol_version": 25,
-    "sequence_number": 0,
+    "sequence_number": 36,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -210,6 +210,33 @@
           "ext": "v0"
         },
         "live_until": 2073600
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "LastUpdate"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  }
+                ]
+              },
+              "durability": "temporary",
+              "val": {
+                "u32": 36
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 48
       },
       {
         "entry": {
@@ -535,7 +562,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312023
       },
       {
         "entry": {
@@ -555,7 +582,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312011
       },
       {
         "entry": {
@@ -595,7 +622,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312035
       },
       {
         "entry": {

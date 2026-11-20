@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # deploy.sh — build, deploy, initialize and seed the Folder contract.
 #
-# Usage: ./scripts/deploy.sh [testnet|mainnet]
+# Usage: ./scripts/deploy.sh [testnet|mainnet|local]
+#
+# `local` targets a stellar/quickstart container (RPC on localhost:8000) and
+# funds identities through its Friendbot.
 #
 # Environment (all optional):
 #   STELLAR_IDENTITY   Stellar CLI identity that pays for and signs the deploy
@@ -24,12 +27,17 @@ case "$NETWORK" in
     DEFAULT_RPC_URL="https://soroban-testnet.stellar.org"
     PASSPHRASE="Test SDF Network ; September 2015"
     ;;
+  local)
+    DEFAULT_RPC_URL="http://localhost:8000/rpc"
+    PASSPHRASE="Standalone Network ; February 2017"
+    FRIENDBOT_URL="${FRIENDBOT_URL:-http://localhost:8000/friendbot}"
+    ;;
   mainnet)
     DEFAULT_RPC_URL="https://mainnet.sorobanrpc.com"
     PASSPHRASE="Public Global Stellar Network ; September 2015"
     ;;
   *)
-    echo "Unsupported network: $NETWORK. Expected 'testnet' or 'mainnet'." >&2
+    echo "Unsupported network: $NETWORK. Expected 'testnet', 'mainnet' or 'local'." >&2
     exit 1
     ;;
 esac
@@ -72,6 +80,12 @@ run_stellar() {
 
 ensure_identity() {
   local name="$1"
+  if [[ "$NETWORK" == "local" ]]; then
+    stellar keys address "$name" >/dev/null 2>&1 || stellar keys generate "$name" >/dev/null
+    echo "==> Funding '$name' via local Friendbot"
+    curl -sSf "$FRIENDBOT_URL?addr=$(stellar keys address "$name")" >/dev/null 2>&1 || true
+    return
+  fi
   if ! stellar keys address "$name" >/dev/null 2>&1; then
     [[ "$NETWORK" == "testnet" ]] || die "identity '$name' not found; create it with 'stellar keys add $name'"
     echo "==> Creating identity '$name' and funding it via Friendbot"
@@ -126,12 +140,30 @@ ADMINS="$(invoke get_admins)"
 TEMPLATES_JSON="[]"
 if [[ -n "$MANIFEST" ]]; then
   echo "==> Registering templates from $MANIFEST"
-  while IFS=$'\t' read -r id uri; do
-    invoke register_template --admin "$ADMIN_ADDRESS" --template_id "$id" --metadata_uri "$uri" >/dev/null
-    echo "    template $id -> $uri (tx $(last_tx))"
-    TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg tx "$(last_tx)" \
-      '. + [{template_id: $id, metadata_uri: $uri, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
-  done < <(jq -r '.[] | [.template_id, .metadata_uri] | @tsv' "$MANIFEST")
+  # One atomic register_templates call per batch of up to MAX_BATCH_REGISTER
+  # (20) items. Falls back to one register_template call per item if the
+  # batch call fails, e.g. against a contract without register_templates.
+  BATCH_SIZE=20
+  COUNT="$(jq length "$MANIFEST")"
+  for ((start = 0; start < COUNT; start += BATCH_SIZE)); do
+    BATCH="$(jq -c --argjson s "$start" --argjson n "$BATCH_SIZE" '.[$s:$s+$n]' "$MANIFEST")"
+    ITEMS="$(jq -c '[.[] | [.template_id, .metadata_uri]]' <<<"$BATCH")"
+    # Subshell: a failed invoke calls die, which must not end the script here.
+    if (invoke register_templates --admin "$ADMIN_ADDRESS" --items "$ITEMS") >/dev/null 2>"$LOG_DIR/batch_err"; then
+      TX="$(last_tx)"
+      echo "    registered $(jq length <<<"$BATCH") templates in one batch (tx $TX)"
+      TEMPLATES_JSON="$(jq -c --arg tx "$TX" --argjson b "$BATCH" \
+        '. + [$b[] | {template_id, metadata_uri, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
+      continue
+    fi
+    echo "    batch registration failed; falling back to single registration" >&2
+    while IFS=$'\t' read -r id uri; do
+      invoke register_template --admin "$ADMIN_ADDRESS" --template_id "$id" --metadata_uri "$uri" >/dev/null
+      echo "    template $id -> $uri (tx $(last_tx))"
+      TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg tx "$(last_tx)" \
+        '. + [{template_id: $id, metadata_uri: $uri, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
+    done < <(jq -r '.[] | [.template_id, .metadata_uri] | @tsv' <<<"$BATCH")
+  done
   ON_CHAIN="$(invoke list_templates)"
   [[ "$(jq -c 'sort' <<<"$ON_CHAIN")" == "$(jq -c '[.[].template_id] | sort' "$MANIFEST")" ]] \
     || die "list_templates returned $ON_CHAIN, expected ids from $MANIFEST"

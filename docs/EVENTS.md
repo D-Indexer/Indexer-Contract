@@ -25,10 +25,11 @@ Compatibility rules:
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
 | `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
-| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
+| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template`, `register_templates` (one per item, in input order) |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `upd_ivl` | `UpdateIntervalSet` | `admin: Address` (caller), `ledgers: u32` | `set_min_update_interval` |
 
 ### Changes in `feat/testnet-deploy`
 

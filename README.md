@@ -104,15 +104,20 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
 | `claim_folder` | `owner: Address, folder_name: String` | `owner` | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
+| `register_templates` | `admin: Address, items: Vec<(u32, String)>` (1–20 items) | `admin` (must be an admin) | one `tmpl_reg` per item, in order | 2, 7, `InvalidBatchSize` (22), 17, 14, 15 (also for in-batch duplicates), 18 |
+| `set_min_update_interval` | `admin: Address, ledgers: u32` (0–17280; 0 disables) | `admin` (must be an admin) | `upd_ivl` | 2, 7, `InvalidUpdateInterval` (21) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
-| `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5), `UpdateTooSoon` (20) |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `register_templates` validates every item before writing any: one invalid item writes nothing.
+- `update_portfolio` is rate-limited per owner to one call every `get_min_update_interval` ledgers
+  (default 12, ~1 minute). Mint isn't rate-limited but starts the interval.
 
 ### Reads
 
@@ -124,6 +129,7 @@ Notes:
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
+| `get_min_update_interval` | — | `u32` ledgers between updates per owner (0 = no limit) | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
@@ -142,7 +148,8 @@ Codes are stable. New errors are appended and never renumbered.
 | 7 | `Unauthorized` | 17 | `InvalidTemplateID` |
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
-| 10 | `AdminAlreadyExists` | | |
+| 10 | `AdminAlreadyExists` | 20 | `UpdateTooSoon` |
+| 21 | `InvalidUpdateInterval` | 22 | `InvalidBatchSize` |
 
 ## How the backend indexer consumes events
 

@@ -22,4 +22,7 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    UpdateTooSoon = 20,
+    InvalidUpdateInterval = 21,
+    InvalidBatchSize = 22,
 }

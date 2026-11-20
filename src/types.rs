@@ -32,4 +32,8 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // rate limit: minimum ledgers between portfolio updates (instance)
+    MinUpdateInterval,
+    // rate limit: owner -> ledger sequence of the last mint/update (temporary)
+    LastUpdate(Address),
 }

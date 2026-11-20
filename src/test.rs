@@ -3,14 +3,15 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{
-        storage::{Instance as _, Persistent as _},
+        storage::{Instance as _, Persistent as _, Temporary as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
     Address, Env, Event as _, String,
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS,
+    MAX_BATCH_REGISTER, MAX_TEMPLATES, MAX_UPDATE_INTERVAL_LEDGERS, MIN_UPDATE_INTERVAL_LEDGERS,
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
@@ -41,6 +42,15 @@ impl TestEnv {
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
     }
+}
+
+/// Moves the ledger past the default portfolio update interval.
+fn skip_update_interval(env: &Env) {
+    advance_ledgers(env, MIN_UPDATE_INTERVAL_LEDGERS);
+}
+
+fn advance_ledgers(env: &Env, ledgers: u32) {
+    env.ledger().with_mut(|li| li.sequence_number += ledgers);
 }
 
 fn uninitialized_env() -> TestEnv {
@@ -359,6 +369,7 @@ fn test_update_portfolio() {
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid1);
+    skip_update_interval(&t.env);
     t.client().update_portfolio(&user, &cid2);
 
     assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid2);
@@ -1012,6 +1023,7 @@ fn test_cid_format_rules() {
     }
     for good in [VALID_CIDV0, VALID_CIDV1_RAW, VALID_CIDV1_DAG_PB] {
         let cid = String::from_str(&t.env, good);
+        skip_update_interval(&t.env);
         t.client().update_portfolio(&user, &cid);
         assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
     }
@@ -1094,6 +1106,7 @@ fn test_each_write_requires_the_right_signer() {
     t.client()
         .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
     assert_single_auth(&t, &user, "mint_portfolio");
+    skip_update_interval(&t.env);
     t.client()
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
     assert_single_auth(&t, &user, "update_portfolio");
@@ -1128,4 +1141,244 @@ fn test_writes_fail_without_signature() {
         t.client().get_portfolio(&user).ipfs_cid,
         String::from_str(&t.env, VALID_CIDV1_RAW)
     );
+}
+
+// ── Portfolio update rate limit ─────────────────────────────────────────────
+
+fn last_update_ttl(t: &TestEnv, user: &Address) -> Option<u32> {
+    t.env.as_contract(&t.contract_id, || {
+        let key = DataKey::LastUpdate(user.clone());
+        if t.env.storage().temporary().has(&key) {
+            Some(t.env.storage().temporary().get_ttl(&key))
+        } else {
+            None
+        }
+    })
+}
+
+#[test]
+fn test_update_rate_limit_boundary_ledgers() {
+    let (t, user) = minted_env();
+    let cid = String::from_str(&t.env, VALID_CIDV0);
+    assert_eq!(
+        t.client().get_min_update_interval(),
+        MIN_UPDATE_INTERVAL_LEDGERS
+    );
+
+    // Mint starts the interval: the last ledger inside it is rejected.
+    advance_ledgers(&t.env, MIN_UPDATE_INTERVAL_LEDGERS - 1);
+    let res = t.client().try_update_portfolio(&user, &cid);
+    expect_contract_error(res, ContractError::UpdateTooSoon);
+
+    // The first ledger after it succeeds and restarts the interval.
+    advance_ledgers(&t.env, 1);
+    t.client().update_portfolio(&user, &cid);
+    let res = t.client().try_update_portfolio(&user, &cid);
+    expect_contract_error(res, ContractError::UpdateTooSoon);
+
+    skip_update_interval(&t.env);
+    t.client().update_portfolio(&user, &cid);
+}
+
+#[test]
+fn test_update_rate_limit_disabled() {
+    let (t, user) = minted_env();
+    t.client().set_min_update_interval(&t.admin, &0u32);
+    let cid = String::from_str(&t.env, VALID_CIDV0);
+    t.client().update_portfolio(&user, &cid);
+    t.client().update_portfolio(&user, &cid);
+}
+
+#[test]
+fn test_update_rate_limit_config_change() {
+    let (t, user) = minted_env();
+    let cid = String::from_str(&t.env, VALID_CIDV0);
+
+    // Only admins can configure it, within bounds.
+    let res = t
+        .client()
+        .try_set_min_update_interval(&Address::generate(&t.env), &5u32);
+    expect_contract_error(res, ContractError::Unauthorized);
+    let res = t
+        .client()
+        .try_set_min_update_interval(&t.admin, &(MAX_UPDATE_INTERVAL_LEDGERS + 1));
+    expect_contract_error(res, ContractError::InvalidUpdateInterval);
+    t.client()
+        .set_min_update_interval(&t.admin, &MAX_UPDATE_INTERVAL_LEDGERS);
+
+    // The new interval applies to the existing mint record.
+    skip_update_interval(&t.env);
+    let res = t.client().try_update_portfolio(&user, &cid);
+    expect_contract_error(res, ContractError::UpdateTooSoon);
+
+    t.client().set_min_update_interval(&t.admin, &3u32);
+    assert_eq!(t.client().get_min_update_interval(), 3);
+    t.client().update_portfolio(&user, &cid);
+}
+
+#[test]
+fn test_update_rate_limit_temporary_entry_expires() {
+    let (t, user) = minted_env();
+    let interval = 100u32;
+    t.client().set_min_update_interval(&t.admin, &interval);
+    advance_ledgers(&t.env, interval);
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
+
+    // The entry's TTL equals the interval, so it costs no long-term rent.
+    assert_eq!(last_update_ttl(&t, &user), Some(interval));
+
+    advance_ledgers(&t.env, interval + 1);
+    assert_eq!(last_update_ttl(&t, &user), None);
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    assert_eq!(last_update_ttl(&t, &user), Some(interval));
+}
+
+// ── Batch template registration ─────────────────────────────────────────────
+
+fn template_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    )
+}
+
+#[test]
+fn test_register_templates_emits_events_in_order() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+    let items = soroban_sdk::vec![
+        &t.env,
+        (5u32, uri.clone()),
+        (2u32, uri.clone()),
+        (9u32, uri.clone())
+    ];
+    t.client().register_templates(&t.admin, &items);
+
+    let expected: std::vec::Vec<_> = [5u32, 2, 9]
+        .iter()
+        .map(|id| {
+            TemplateRegistered {
+                template_id: *id,
+                metadata_uri: uri.clone(),
+                creator: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)
+        })
+        .collect();
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        expected.as_slice()
+    );
+    assert_eq!(
+        t.client().list_templates(),
+        soroban_sdk::vec![&t.env, 5u32, 2, 9]
+    );
+    assert_eq!(t.client().get_template(&9u32).creator, t.admin);
+}
+
+#[test]
+fn test_register_templates_invalid_item_writes_nothing() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+    t.client().register_template(&t.admin, &3u32, &uri);
+    let bad_uri = String::from_str(&t.env, "https://example.com");
+
+    let cases = [
+        (
+            soroban_sdk::vec![&t.env, (1u32, uri.clone()), (2u32, bad_uri)],
+            ContractError::InvalidMetadataURI,
+        ),
+        (
+            soroban_sdk::vec![&t.env, (1u32, uri.clone()), (0u32, uri.clone())],
+            ContractError::InvalidTemplateID,
+        ),
+        (
+            soroban_sdk::vec![&t.env, (1u32, uri.clone()), (3u32, uri.clone())],
+            ContractError::TemplateAlreadyExists,
+        ),
+        (
+            soroban_sdk::vec![
+                &t.env,
+                (1u32, uri.clone()),
+                (2u32, uri.clone()),
+                (1u32, uri.clone())
+            ],
+            ContractError::TemplateAlreadyExists,
+        ),
+    ];
+    for (items, err) in cases {
+        let res = t.client().try_register_templates(&t.admin, &items);
+        expect_contract_error(res, err);
+        assert_eq!(t.client().list_templates(), soroban_sdk::vec![&t.env, 3u32]);
+        expect_contract_error(
+            t.client().try_get_template(&1u32),
+            ContractError::TemplateNotFound,
+        );
+    }
+
+    let res = t.client().try_register_templates(
+        &Address::generate(&t.env),
+        &soroban_sdk::vec![&t.env, (1u32, uri)],
+    );
+    expect_contract_error(res, ContractError::Unauthorized);
+}
+
+#[test]
+fn test_register_templates_batch_size_bounds() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    let empty: soroban_sdk::Vec<(u32, String)> = soroban_sdk::Vec::new(&t.env);
+    let res = t.client().try_register_templates(&t.admin, &empty);
+    expect_contract_error(res, ContractError::InvalidBatchSize);
+
+    let mut items = soroban_sdk::Vec::new(&t.env);
+    for id in 1..=MAX_BATCH_REGISTER + 1 {
+        items.push_back((id, uri.clone()));
+    }
+    let res = t.client().try_register_templates(&t.admin, &items);
+    expect_contract_error(res, ContractError::InvalidBatchSize);
+    assert_eq!(t.client().list_templates().len(), 0);
+
+    items.pop_back();
+    t.client().register_templates(&t.admin, &items);
+    assert_eq!(t.client().list_templates().len(), MAX_BATCH_REGISTER);
+}
+
+#[test]
+fn test_register_templates_respects_template_cap() {
+    let env = Env::new_with_config(soroban_sdk::testutils::EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    });
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let contract_id = env.register(FolderContract, ());
+    let client = FolderContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let uri = template_uri(&env);
+
+    let start = MAX_TEMPLATES - 2;
+    for id in 1..=start {
+        client.register_template(&admin, &id, &uri);
+    }
+    // Three more would exceed the cap: the whole batch is rejected.
+    let over = soroban_sdk::vec![
+        &env,
+        (start + 1, uri.clone()),
+        (start + 2, uri.clone()),
+        (start + 3, uri.clone())
+    ];
+    expect_contract_error(
+        client.try_register_templates(&admin, &over),
+        ContractError::TemplateLimitReached,
+    );
+    assert_eq!(client.list_templates().len(), start);
+
+    // Exactly filling the cap is allowed.
+    let fill = soroban_sdk::vec![&env, (start + 1, uri.clone()), (start + 2, uri)];
+    client.register_templates(&admin, &fill);
+    assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
 }

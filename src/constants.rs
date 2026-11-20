@@ -38,3 +38,14 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Maximum number of templates accepted by one `register_templates` call.
+pub const MAX_BATCH_REGISTER: u32 = 20;
+
+/// Default minimum number of ledgers between two `update_portfolio` calls by
+/// the same owner (~1 minute). Admins can change it with
+/// `set_min_update_interval`; 0 disables the limit.
+pub const MIN_UPDATE_INTERVAL_LEDGERS: u32 = 12;
+/// Upper bound for the configurable update interval (~1 day). Keeps the
+/// temporary `LastUpdate` entry TTL well below the network `max_entry_ttl`.
+pub const MAX_UPDATE_INTERVAL_LEDGERS: u32 = DAY_IN_LEDGERS;
