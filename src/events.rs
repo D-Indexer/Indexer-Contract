@@ -1,5 +1,7 @@
 use soroban_sdk::{contractevent, Address, Env, String};
 
+use crate::types::Config;
+
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
     pub owner: Address,
@@ -48,6 +50,14 @@ pub struct AdminAdded {
 pub struct AdminRemoved {
     pub admin: Address,
     pub target: Address,
+}
+
+#[contractevent(topics = ["cfg_set"], data_format = "vec")]
+pub struct ConfigSet {
+    pub admin: Address,
+    pub max_folder_name_len: u32,
+    pub max_metadata_uri_len: u32,
+    pub max_templates: u32,
 }
 
 pub fn contract_initialized(env: &Env, admin: &Address) {
@@ -111,6 +121,16 @@ pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     TemplateAssigned {
         owner: owner.clone(),
         template_id,
+    }
+    .publish(env);
+}
+
+pub fn config_set(env: &Env, admin: &Address, config: &Config) {
+    ConfigSet {
+        admin: admin.clone(),
+        max_folder_name_len: config.max_folder_name_len,
+        max_metadata_uri_len: config.max_metadata_uri_len,
+        max_templates: config.max_templates,
     }
     .publish(env);
 }

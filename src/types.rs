@@ -52,10 +52,25 @@ pub struct Limits {
     pub instance_lifetime_threshold: u32,
 }
 
+/// Admin-tunable protocol limits. Defaults mirror the constants in
+/// `constants.rs`; see `FolderContract::get_config` / `set_config`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Config {
+    /// Maximum accepted folder name length, suffix included.
+    pub max_folder_name_len: u32,
+    /// Maximum accepted template metadata URI length.
+    pub max_metadata_uri_len: u32,
+    /// Maximum number of registered templates.
+    pub max_templates: u32,
+}
+
 #[contracttype]
 pub enum DataKey {
     AdminList,
     Initialized,
+    // config: admin-tunable protocol limits
+    Config,
     // identity_map: sha256(folder_name) -> owner (current layout)
     FolderOwnerHash(BytesN<32>),
     // identity_map: folder_name -> owner (legacy layout, read-only migration path)

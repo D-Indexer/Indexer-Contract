@@ -25,6 +25,47 @@ pub fn extend_instance(env: &Env) {
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
+use crate::constants::{
+    HARD_MAX_FOLDER_NAME_LEN, HARD_MAX_METADATA_URI_LEN, HARD_MAX_TEMPLATES, MAX_FOLDER_NAME_LEN,
+    MAX_METADATA_URI_LEN, MAX_TEMPLATES,
+};
+use crate::errors::ContractError;
+use crate::types::{Config, DataKey};
+
+/// Returns the active config, falling back to the compile-time defaults when
+/// no config has been stored yet.
+pub fn get_config(env: &Env) -> Config {
+    env.storage()
+        .instance()
+        .get(&DataKey::Config)
+        .unwrap_or_else(default_config)
+}
+
+/// Compile-time defaults for the tunable limits.
+pub fn default_config() -> Config {
+    Config {
+        max_folder_name_len: MAX_FOLDER_NAME_LEN,
+        max_metadata_uri_len: MAX_METADATA_URI_LEN,
+        max_templates: MAX_TEMPLATES,
+    }
+}
+
+/// Validates `config` against the hard ceilings and the current state, then
+/// stores it. Rejects values that would invalidate existing data.
+pub fn set_config(env: &Env, config: &Config) -> Result<(), ContractError> {
+    if config.max_folder_name_len > HARD_MAX_FOLDER_NAME_LEN
+        || config.max_metadata_uri_len > HARD_MAX_METADATA_URI_LEN
+        || config.max_templates > HARD_MAX_TEMPLATES
+    {
+        return Err(ContractError::InvalidConfig);
+    }
+    if config.max_templates < get_template_list(env).len() {
+        return Err(ContractError::InvalidConfig);
+    }
+    env.storage().instance().set(&DataKey::Config, config);
+    Ok(())
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 pub fn get_admins(env: &Env) -> Vec<Address> {
