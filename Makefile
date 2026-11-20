@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test snapshots snapshot-check build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -15,6 +15,8 @@ help:
 	@echo "  build-optimized Build optimized WASM with Stellar CLI -> $(OPTIMIZED_WASM)"
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
 	@echo "  script-check  Validate shell scripts"
+	@echo "  snapshots     Regenerate tracked Soroban auth snapshots"
+	@echo "  snapshot-check Fail if tracked auth snapshots are stale"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
@@ -54,7 +56,21 @@ script-check:
 snapshot-list:
 	@find test_snapshots -type f | sort
 
-check: fmt-check cargo-check clippy test build-wasm script-check
+# Regenerate the tracked auth snapshots from the current test suite.
+snapshots:
+	@rm -rf test_snapshots
+	cargo test --locked
+	@find test_snapshots -type f | sort
+
+# Fail when `cargo test` rewrote any tracked auth snapshot.
+snapshot-check:
+	@git diff --exit-code -- test_snapshots/ || { \
+		echo "Stale auth snapshots (run 'make snapshots' and commit):" >&2; \
+		git diff --name-only -- test_snapshots/ >&2; \
+		exit 1; \
+	}
+
+check: fmt-check cargo-check clippy test snapshot-check build-wasm script-check
 
 clean:
 	cargo clean
