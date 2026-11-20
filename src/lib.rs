@@ -16,7 +16,7 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
 use crate::types::ClaimFee;
@@ -126,6 +126,26 @@ impl FolderContract {
     /// Returns this contract's balance of `token`.
     pub fn treasury_balance(env: Env, token: Address) -> i128 {
         economics::treasury_balance(&env, &token)
+    }
+
+    /// Replaces the contract code with `new_wasm_hash`. Admin only. Storage is
+    /// untouched: instance and persistent entries survive an upgrade.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        events::contract_upgraded(&env, &admin, &new_wasm_hash);
+        Ok(())
+    }
+
+    /// Returns the contract version (`CONTRACT_VERSION`).
+    pub fn version(_env: Env) -> u32 {
+        constants::CONTRACT_VERSION
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────

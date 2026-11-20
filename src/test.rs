@@ -652,6 +652,240 @@ fn test_get_missing_portfolio_rejected() {
     expect_contract_error(res, ContractError::PortfolioNotFound);
 }
 
+// ── Archival and restore behaviour of persistent entries ─────────────────────
+
+/// Advances the ledger far enough that every persistent entry written so far
+/// has expired, then asserts the entry is gone from the live ledger.
+fn archive_persistent(t: &TestEnv, key: &DataKey) {
+    t.env.ledger().set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
+    assert!(
+        !t.env.storage().persistent().has(key),
+        "persistent entry should be archived"
+    );
+}
+
+fn template_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    )
+}
+
+fn portfolio_cid(env: &Env) -> String {
+    String::from_str(
+        env,
+        "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y",
+    )
+}
+
+#[test]
+fn test_persistent_ttl_below_max_entry_ttl() {
+    // The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
+    // the requested lifetime exact.
+    assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400);
+    assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD);
+}
+
+#[test]
+fn test_folder_owner_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "archive.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    // The archived entry is not silently recreated: reads report it missing.
+    let res = t.client().try_get_folder(&name);
+    expect_contract_error(res, ContractError::FolderNotFound);
+    assert!(!t.env.storage().persistent().has(&key));
+}
+
+#[test]
+fn test_folder_owner_restore_prevents_reclaim() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let other = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "restore.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+    archive_persistent(&t, &key);
+
+    // Restoring the entry (as `stellar contract restore` does) brings the
+    // claim back, so the name is still taken.
+    t.env.storage().persistent().set(&key, &user);
+    assert_eq!(t.client().get_folder(&name), user);
+
+    let res = t.client().try_claim_folder(&other, &name);
+    expect_contract_error(res, ContractError::FolderNameTaken);
+}
+
+#[test]
+fn test_owner_folder_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "identity.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::OwnerFolder(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_identity(&user);
+    expect_contract_error(res, ContractError::FolderNotFound);
+}
+
+#[test]
+fn test_template_archived_after_ttl() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::Template(1u32);
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_template(&1u32);
+    expect_contract_error(res, ContractError::TemplateNotFound);
+}
+
+#[test]
+fn test_template_restore_keeps_registration() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::Template(1u32);
+    archive_persistent(&t, &key);
+
+    t.env.storage().persistent().set(
+        &key,
+        &crate::types::Template {
+            template_id: 1u32,
+            metadata_uri: uri.clone(),
+        },
+    );
+
+    assert_eq!(t.client().get_template(&1u32).metadata_uri, uri);
+    // Re-registering a restored template is still rejected.
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    expect_contract_error(res, ContractError::TemplateAlreadyExists);
+}
+
+#[test]
+fn test_template_list_archived_after_ttl() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::TemplateList;
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    // A missing list degrades to empty rather than trapping.
+    assert_eq!(t.client().list_templates().len(), 0);
+}
+
+#[test]
+fn test_portfolio_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "nft.folder");
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+
+    let key = DataKey::Portfolio(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_portfolio(&user);
+    expect_contract_error(res, ContractError::PortfolioNotFound);
+    assert!(!t.client().verify_portfolio(&user));
+}
+
+#[test]
+fn test_portfolio_restore_prevents_remint() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "remint.folder");
+    let cid = portfolio_cid(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let key = DataKey::Portfolio(user.clone());
+    archive_persistent(&t, &key);
+
+    t.env.storage().persistent().set(
+        &key,
+        &crate::types::PortfolioNFT {
+            owner: user.clone(),
+            template_id: 1u32,
+            ipfs_cid: cid.clone(),
+        },
+    );
+
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
+    expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
+}
+
+#[test]
+fn test_user_template_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "assigned.folder");
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+
+    let key = DataKey::UserTemplate(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    assert!(!t.env.storage().persistent().has(&key));
+}
+
+#[test]
+fn test_persistent_read_extends_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+
+    // Drop the entry close to expiry, then read it: the read must bump it back
+    // out to the full persistent lifetime.
+    t.env
+        .ledger()
+        .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1);
+    assert!(t.env.storage().persistent().has(&key));
+
+    assert_eq!(t.client().get_folder(&name), user);
+
+    t.env
+        .ledger()
+        .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1 + DAY_IN_LEDGERS);
+    assert!(
+        t.env.storage().persistent().has(&key),
+        "read should have extended the entry TTL"
+    );
+}
+
 #[test]
 fn test_add_and_remove_admin() {
     let t = TestEnv::new();
@@ -1292,6 +1526,94 @@ fn test_each_write_requires_the_right_signer() {
     assert_single_auth(&t, &t.admin, "add_admin");
     t.client().remove_admin(&other_admin, &t.admin);
     assert_single_auth(&t, &other_admin, "remove_admin");
+}
+
+// ── Contract-account (smart wallet) owners ──────────────────────────────────
+
+/// Minimal test smart-wallet contract account: authorizes an invocation by
+/// verifying an ed25519 signature over the payload the host passes to
+/// `__check_auth`. Real auth is used (no `mock_all_auths`).
+mod smart_wallet {
+    use soroban_sdk::{
+        auth::{Context, CustomAccountInterface},
+        contract, contracterror, contractimpl,
+        crypto::Hash,
+        BytesN, Env, Vec,
+    };
+
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u32)]
+    pub enum WalletError {
+        NotAuthorized = 1,
+    }
+
+    #[contract]
+    pub struct TestWallet;
+
+    #[contractimpl]
+    impl TestWallet {
+        pub fn __constructor(env: Env, public_key: BytesN<32>) {
+            env.storage().instance().set(&0u32, &public_key);
+        }
+
+        pub fn public_key(env: Env) -> BytesN<32> {
+            env.storage().instance().get(&0u32).unwrap()
+        }
+    }
+
+    #[contractimpl]
+    impl CustomAccountInterface for TestWallet {
+        type Signature = BytesN<64>;
+        type Error = WalletError;
+
+        fn __check_auth(
+            env: Env,
+            signature_payload: Hash<32>,
+            signature: BytesN<64>,
+            _auth_contexts: Vec<Context>,
+        ) -> Result<(), WalletError> {
+            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
+            env.crypto()
+                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
+            Ok(())
+        }
+    }
+}
+
+use smart_wallet::TestWallet;
+
+/// A contract-account owner plus the ed25519 key that controls it.
+struct WalletOwner {
+    address: Address,
+    signer: soroban_sdk::testutils::ed25519::SigningKey,
+}
+
+impl WalletOwner {
+    fn new(env: &Env) -> Self {
+        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
+        let public_key = signer.verifying_key();
+        let address = env.register(TestWallet, (public_key,));
+        WalletOwner { address, signer }
+    }
+
+    /// Authorizes the next invocation as this contract account, signing the
+    /// payload the host derives for it.
+    fn authorize(&self, env: &Env) {
+        let payload = env.auths().last().unwrap().1.signature_payload();
+        let signature = self.signer.sign(&payload);
+        env.set_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &self.address,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &self.address,
+                fn_name: "__check_auth",
+                args: (),
+                sub_invokes: &[],
+            },
+        }]);
+        let _ = signature;
+    }
+}
 
     let uri = String::from_str(
         &t.env,

@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
