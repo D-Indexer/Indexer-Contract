@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "examples/folder-pay"]
+resolver = "2"
+
 [package]
 name = "indexer-contract"
 version = "0.1.0"
@@ -12,6 +16,9 @@ soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
 [dev-dependencies]
 soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
+
+[workspace.dependencies]
+soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
 [profile.release]
 opt-level = "z"
