@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/folder-validation", "crates/folder-validation-js"]
+resolver = "2"
+
 [package]
 name = "indexer-contract"
 version = "0.1.0"
@@ -8,6 +12,7 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
+folder-validation = { path = "crates/folder-validation" }
 soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
 [dev-dependencies]
