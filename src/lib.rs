@@ -6,6 +6,7 @@ mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+mod pricing;
 mod storage;
 mod template_registry;
 mod types;
@@ -17,8 +18,8 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::PortfolioNFT;
 use crate::types::Template;
+use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
 
 #[contract]
 pub struct FolderContract;
@@ -66,6 +67,75 @@ impl FolderContract {
         access_control::remove_admin(&env, &admin, &target)
     }
 
+    // ── Pricing ───────────────────────────────────────────────────────────────
+
+    /// Sets the claim fee token, treasury and base fee (labels longer than
+    /// every tier). Without a fee config, claims are free.
+    pub fn set_claim_fee(
+        env: Env,
+        admin: Address,
+        token: Address,
+        treasury: Address,
+        base_fee: i128,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_claim_fee(&env, &admin, &token, &treasury, base_fee)
+    }
+
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to claim `folder_name` (or to renew it for one period).
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
+    // ── Leases ────────────────────────────────────────────────────────────────
+
+    /// Enables leases of `period_days` with a `grace_days` grace period for
+    /// new claims. `period_days == 0` restores permanent mode (the default).
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        period_days: u32,
+        grace_days: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let config = (period_days > 0).then(|| LeaseConfig {
+            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
+            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
+        });
+        storage::set_lease_config(&env, &config);
+        Ok(())
+    }
+
+    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
+        storage::get_lease_config(&env)
+    }
+
+    /// Extends the owner's lease by `periods`; returns the new expiry.
+    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        identity_map::renew_folder(&env, &owner, periods)
+    }
+
+    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
+    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
+        identity_map::get_folder_expiry(&env, &folder_name)
+    }
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     pub fn claim_folder(
@@ -75,6 +145,18 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
+    }
+
+    /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
+    /// Both must authorize.
+    pub fn sponsored_claim(
+        env: Env,
+        sponsor: Address,
+        owner: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {

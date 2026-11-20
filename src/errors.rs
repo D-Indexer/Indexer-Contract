@@ -22,4 +22,9 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    FolderExpired = 20,
+    InvalidPriceTiers = 21,
+    InvalidFee = 22,
+    LeasesDisabled = 23,
+    InvalidRenewal = 24,
 }

@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{DataKey, FeeConfig, LeaseConfig, PortfolioNFT, PriceTiers, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -190,4 +190,68 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Pricing ───────────────────────────────────────────────────────────────────
+
+pub fn get_fee_config(env: &Env) -> Option<FeeConfig> {
+    env.storage().instance().get(&DataKey::FeeConfig)
+}
+
+pub fn set_fee_config(env: &Env, config: &FeeConfig) {
+    env.storage().instance().set(&DataKey::FeeConfig, config);
+}
+
+pub fn get_price_tiers(env: &Env) -> PriceTiers {
+    env.storage()
+        .instance()
+        .get(&DataKey::PriceTiers)
+        .unwrap_or(PriceTiers {
+            by_len: Vec::new(env),
+        })
+}
+
+pub fn set_price_tiers(env: &Env, tiers: &PriceTiers) {
+    env.storage().instance().set(&DataKey::PriceTiers, tiers);
+}
+
+// ── Leases ────────────────────────────────────────────────────────────────────
+
+pub fn get_lease_config(env: &Env) -> Option<LeaseConfig> {
+    env.storage().instance().get(&DataKey::LeaseConfig)
+}
+
+pub fn set_lease_config(env: &Env, config: &Option<LeaseConfig>) {
+    match config {
+        Some(c) => env.storage().instance().set(&DataKey::LeaseConfig, c),
+        None => env.storage().instance().remove(&DataKey::LeaseConfig),
+    }
+}
+
+pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_folder_expiry(env: &Env, folder_name: &String, expiry: u64) {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    env.storage().persistent().set(&key, &expiry);
+    extend_persistent(env, &key);
+}
+
+/// Removes every key of a released Folder: both directions of the identity
+/// mapping (the reverse one only if it still points at this name) and the
+/// expiry entry.
+pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::FolderOwner(folder_name.clone()));
+    persistent.remove(&DataKey::FolderExpiry(folder_name.clone()));
+    let owner_key = DataKey::OwnerFolder(owner.clone());
+    if persistent.get::<_, String>(&owner_key).as_ref() == Some(folder_name) {
+        persistent.remove(&owner_key);
+    }
 }

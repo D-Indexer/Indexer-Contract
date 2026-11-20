@@ -24,7 +24,9 @@ Compatibility rules:
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
 | `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
-| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
+| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder`, `sponsored_claim` |
+| `claim_spon` | `ClaimSponsored` | `sponsor: Address`, `owner: Address`, `folder_name: String` | `sponsored_claim` (after `folder_cl`) |
+| `folder_rn` | `FolderRenewed` | `owner: Address`, `folder_name: String`, `expiry: u64` | `renew_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
@@ -47,7 +49,9 @@ Compatibility rules:
 |---|---|
 | `init` | Seed the admin set with `admin` |
 | `adm_add` / `adm_rm` | Add / remove the admin from the admin set |
-| `folder_cl` | Upsert identity `owner ↔ folder_name` |
+| `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
+| `claim_spon` | Record the sponsor of the claim |
+| `folder_rn` | Update the Folder's lease expiry |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |

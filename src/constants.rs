@@ -38,3 +38,8 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Maximum number of length-based price tiers.
+pub const MAX_PRICE_TIERS: u32 = 5;
+/// Seconds per day, used to express lease periods in days.
+pub const SECONDS_PER_DAY: u64 = 86_400;
