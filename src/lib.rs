@@ -1,8 +1,9 @@
 #![no_std]
 
 mod access_control;
-mod constants;
-mod errors;
+pub mod constants;
+pub mod errors;
+pub mod validation;
 mod events;
 mod identity_map;
 mod nft_mint;

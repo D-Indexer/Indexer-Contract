@@ -5,7 +5,10 @@ edition = "2021"
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[workspace]
+members = ["fuzz"]
 
 [dependencies]
 soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
