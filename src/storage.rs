@@ -27,19 +27,124 @@ pub fn extend_instance(env: &Env) {
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
+/// Returns the admin list. Membership is stored per admin under
+/// `Admin(Address)`; the legacy `AdminList` vector is migrated on first read.
 pub fn get_admins(env: &Env) -> Vec<Address> {
+    migrate_admin_list(env);
+    let count = admin_count(env);
+    let mut admins = Vec::new(env);
+    let mut i = 0u32;
+    while i < count {
+        if let Some(admin) = env.storage().instance().get(&DataKey::Admin(i)) {
+            admins.push_back(admin);
+        }
+        i += 1;
+    }
+    admins
+}
+
+/// Number of admins, migrating the legacy `AdminList` first if needed.
+pub fn admin_count(env: &Env) -> u32 {
+    migrate_admin_list(env);
     env.storage()
         .instance()
-        .get(&DataKey::AdminList)
+        .get(&DataKey::AdminCount)
+        .unwrap_or(0)
+}
+
+/// Constant-time membership check: one instance read, no vector scan.
+pub fn is_admin(env: &Env, address: &Address) -> bool {
+    migrate_admin_list(env);
+    env.storage()
+        .instance()
+        .has(&DataKey::Admin(address.clone()))
+}
+
+/// Adds `address` as an admin. Returns `false` if it already was one.
+pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
+    if is_admin(env, address) {
+        return false;
+    }
+    let count = admin_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::Admin(address.clone()), &());
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCount, &(count + 1));
+    true
+}
+
+/// Removes `address` from the admins. Returns `false` if it was not one.
+pub fn remove_admin_entry(env: &Env, address: &Address) -> bool {
+    if !is_admin(env, address) {
+        return false;
+    }
+    env.storage()
+        .instance()
+        .remove(&DataKey::Admin(address.clone()));
+    let count = admin_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCount, &(count - 1));
+    true
+}
+
+/// Replaces the whole admin set (used by `initialize`).
+pub fn save_admins(env: &Env, admins: &Vec<Address>) {
+    let count = admin_count(env);
+    let mut i = 0u32;
+    while i < count {
+        if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin(i)) {
+            env.storage().instance().remove(&DataKey::Admin(admin));
+        }
+        i += 1;
+    }
+    env.storage().instance().set(&DataKey::AdminCount, &0u32);
+    for admin in admins.iter() {
+        add_admin_entry(env, &admin);
+    }
+}
+
+/// Idempotently converts a legacy `AdminList` vector into per-admin keys.
+/// Does nothing once the legacy entry is gone.
+fn migrate_admin_list(env: &Env) {
+    let legacy: Option<Vec<Address>> = env.storage().instance().get(&DataKey::AdminList);
+    if let Some(admins) = legacy {
+        for admin in admins.iter() {
+            add_admin_entry(env, &admin);
+        }
+        env.storage().instance().remove(&DataKey::AdminList);
+    }
+}
+
+// ── Admin Timelock ────────────────────────────────────────────────────────────
+
+/// Pending admin changes live in instance storage so they are loaded with the
+/// admin list; the queue is bounded by `MAX_PENDING_ADMIN_CHANGES`.
+pub fn get_pending_admin_changes(env: &Env) -> Vec<(u32, AdminChange)> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingAdminChanges)
         .unwrap_or(Vec::new(env))
 }
 
-pub fn save_admins(env: &Env, admins: &Vec<Address>) {
-    env.storage().instance().set(&DataKey::AdminList, admins);
+pub fn save_pending_admin_changes(env: &Env, pending: &Vec<(u32, AdminChange)>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAdminChanges, pending);
 }
 
-pub fn is_admin(env: &Env, address: &Address) -> bool {
-    get_admins(env).contains(address)
+pub fn next_admin_change_id(env: &Env) -> u32 {
+    let id: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::NextAdminChangeId)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextAdminChangeId, &(id + 1));
+    id
 }
 
 // ── Identity Map ──────────────────────────────────────────────────────────────

@@ -68,6 +68,62 @@ pub struct AdminRemoved {
     pub target: Address,
 }
 
+#[contractevent(topics = ["adm_q"], data_format = "vec")]
+pub struct AdminChangeQueued {
+    pub admin: Address,
+    pub op_id: u32,
+    pub target: Address,
+    pub eta_ledger: u32,
+}
+
+#[contractevent(topics = ["adm_ex"], data_format = "vec")]
+pub struct AdminChangeExecuted {
+    pub admin: Address,
+    pub op_id: u32,
+    pub target: Address,
+}
+
+#[contractevent(topics = ["adm_cx"], data_format = "vec")]
+pub struct AdminChangeCancelled {
+    pub admin: Address,
+    pub op_id: u32,
+    pub target: Address,
+}
+
+pub fn admin_change_queued(
+    env: &Env,
+    admin: &Address,
+    op_id: u32,
+    target: &Address,
+    eta_ledger: u32,
+) {
+    AdminChangeQueued {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+        eta_ledger,
+    }
+    .publish(env);
+}
+
+pub fn admin_change_executed(env: &Env, admin: &Address, op_id: u32, target: &Address) {
+    AdminChangeExecuted {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+    }
+    .publish(env);
+}
+
+pub fn admin_change_cancelled(env: &Env, admin: &Address, op_id: u32, target: &Address) {
+    AdminChangeCancelled {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+    }
+    .publish(env);
+}
+
 pub fn contract_initialized(env: &Env, admin: &Address) {
     ContractInitialized {
         admin: admin.clone(),

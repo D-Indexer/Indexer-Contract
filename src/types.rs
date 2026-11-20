@@ -29,6 +29,10 @@ pub struct ClaimFee {
 #[contracttype]
 pub enum DataKey {
     AdminList,
+    // admin membership: per-admin marker, `()` when the address is an admin
+    Admin(Address),
+    // admin membership: number of admins, kept in sync with `Admin(Address)`
+    AdminCount,
     Initialized,
     // identity_map: folder_name -> owner
     FolderOwner(String),
