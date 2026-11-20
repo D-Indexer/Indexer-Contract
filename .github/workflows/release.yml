@@ -1,135 +1,23 @@
-name: Release
+name: Release assets
 
 on:
-  push:
-    tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Tag to release (must match Cargo.toml version)
-        required: true
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  release:
+    types: [published]
 
 permissions:
-  contents: read
-
-env:
-  CARGO_TERM_COLOR: always
-  STELLAR_CLI_VERSION: 28.1.0
-  WASM: target/stellar/indexer_contract.wasm
+  contents: write
 
 jobs:
-  release:
-    name: build / attest / publish
+  errors-json:
+    name: attach errors.json
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the GitHub Release
-      id-token: write # sign the build provenance attestation
-      attestations: write # store the attestation
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve tag and verify it matches Cargo.toml
-        id: version
-        run: |
-          set -euo pipefail
-          TAG="${{ inputs.tag || github.ref_name }}"
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
-            echo "::error::Tag '$TAG' is not a v* semver tag"
-            exit 1
-          fi
-          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
-          if [[ "v$CARGO_VERSION" != "$TAG" ]]; then
-            echo "::error::Cargo.toml version ($CARGO_VERSION) does not match tag ($TAG)"
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Verify errors.json is current
+        run: python3 scripts/errors_json.py --check
 
-      - name: Install pinned Rust toolchain (rust-toolchain.toml)
-        run: rustup toolchain install && rustup show active-toolchain
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
-        run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/stellar" --version
-
-      - name: Build optimized wasm
-        run: make build-optimized
-
-      - name: Generate interface JSON
-        run: stellar contract info interface --wasm "$WASM" --output json-formatted > indexer_contract.interface.json
-
-      - name: Generate SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
-        with:
-          path: .
-          format: cyclonedx-json
-          output-file: indexer_contract.sbom.cdx.json
-          artifact-name: indexer_contract.sbom.cdx.json
-
-      - name: Generate SHA256SUMS
-        run: |
-          sha256sum "$WASM" indexer_contract.interface.json indexer_contract.sbom.cdx.json \
-            > SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            ${{ env.WASM }}
-            indexer_contract.interface.json
-            indexer_contract.sbom.cdx.json
-            SHA256SUMS
-
-      - name: Build changelog section
-        run: |
-          set -euo pipefail
-          PREV="$(git describe --tags --abbrev=0 "${{ steps.version.outputs.tag }}^" 2>/dev/null || true)"
-          {
-            echo "## What's changed"
-            if [[ -n "$PREV" ]]; then
-              echo
-              git log --no-merges --pretty='- %s (%h)' "$PREV..${{ steps.version.outputs.tag }}"
-            else
-              echo
-              echo "Initial release."
-            fi
-            echo
-            echo "## Artifacts"
-            echo
-            echo '```'
-            cat SHA256SUMS
-            echo '```'
-            echo
-            echo "Verify provenance with:"
-            echo
-            echo '```'
-            echo "gh attestation verify indexer_contract.wasm --repo ${{ github.repository }}"
-            echo '```'
-          } > RELEASE_NOTES.md
-          cat RELEASE_NOTES.md
-
-      - name: Publish GitHub Release
+      - name: Upload errors.json
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            "$WASM#indexer_contract.wasm" \
-            "indexer_contract.interface.json#indexer_contract.interface.json" \
-            "indexer_contract.sbom.cdx.json#indexer_contract.sbom.cdx.json" \
-            "SHA256SUMS#SHA256SUMS" \
-            --title "${{ steps.version.outputs.tag }}" \
-            --notes-file RELEASE_NOTES.md \
-            --verify-tag
+        run: gh release upload "${{ github.event.release.tag_name }}" errors.json --clobber

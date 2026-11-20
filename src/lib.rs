@@ -2,10 +2,12 @@
 
 mod access_control;
 mod constants;
+mod economics;
 mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+mod pricing;
 mod storage;
 mod template_registry;
 mod types;
@@ -17,8 +19,10 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
+use crate::types::ClaimFee;
 use crate::types::PortfolioNFT;
 use crate::types::Template;
+use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
 
 #[contract]
 pub struct FolderContract;
@@ -66,6 +70,43 @@ impl FolderContract {
         access_control::remove_admin(&env, &admin, &target)
     }
 
+    // ── Economics ─────────────────────────────────────────────────────────────
+
+    /// Sets the Folder claim fee. An `amount` of 0 disables the fee.
+    pub fn set_claim_fee(
+        env: Env,
+        admin: Address,
+        token: Address,
+        amount: i128,
+        treasury: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        economics::set_claim_fee(&env, &admin, &token, amount, &treasury)
+    }
+
+    /// Returns the current claim fee configuration, if any.
+    pub fn get_claim_fee(env: Env) -> Option<ClaimFee> {
+        storage::get_claim_fee(&env)
+    }
+
+    /// Withdraws `amount` of `token` held by this contract to `to`, capped at
+    /// `MAX_WITHDRAW_PER_CALL` per call.
+    pub fn withdraw(
+        env: Env,
+        admin: Address,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        economics::withdraw(&env, &admin, &token, &to, amount)
+    }
+
+    /// Returns this contract's balance of `token`.
+    pub fn treasury_balance(env: Env, token: Address) -> i128 {
+        economics::treasury_balance(&env, &token)
+    }
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     pub fn claim_folder(
@@ -75,6 +116,18 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
+    }
+
+    /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
+    /// Both must authorize.
+    pub fn sponsored_claim(
+        env: Env,
+        sponsor: Address,
+        owner: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {

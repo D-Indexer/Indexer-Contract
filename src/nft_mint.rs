@@ -3,6 +3,7 @@ use soroban_sdk::{Address, Env, String};
 use crate::access_control::require_owner;
 use crate::errors::ContractError;
 use crate::events;
+use crate::identity_map;
 use crate::storage;
 use crate::types::PortfolioNFT;
 use crate::validation;
@@ -16,7 +17,7 @@ pub fn mint_portfolio(
     require_owner(env, owner)?;
 
     // Must have claimed a Folder name before minting
-    storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    identity_map::get_identity(env, owner)?;
 
     // Prevent double-mint (single read, also refreshes the entry's TTL)
     if storage::load_portfolio(env, owner).is_some() {

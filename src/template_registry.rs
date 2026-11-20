@@ -4,6 +4,7 @@ use crate::access_control::{require_admin, require_owner};
 use crate::constants::MAX_TEMPLATES;
 use crate::errors::ContractError;
 use crate::events;
+use crate::identity_map;
 use crate::storage;
 use crate::types::Template;
 use crate::validation;
@@ -50,7 +51,7 @@ pub fn set_user_template(
     template_id: u32,
 ) -> Result<(), ContractError> {
     require_owner(env, owner)?;
-    storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    identity_map::get_identity(env, owner)?;
     validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
     storage::set_user_template(env, owner, template_id);

@@ -5,7 +5,7 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{ClaimFee, DataKey, PortfolioNFT, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -211,4 +211,14 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Economics ─────────────────────────────────────────────────────────────────
+
+pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
+    env.storage().instance().get(&DataKey::ClaimFee)
+}
+
+pub fn set_claim_fee(env: &Env, fee: &ClaimFee) {
+    env.storage().instance().set(&DataKey::ClaimFee, fee);
 }

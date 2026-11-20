@@ -6,6 +6,9 @@
       provenance attestation (`gh attestation verify indexer_contract.wasm --repo D-Indexer/Indexer-Contract`).
 - [ ] `make wasm-hash` matches the hash in the CI job summary for the same commit.
 - [ ] `python3 scripts/template_cids.py --check` passes, and the template files are pinned on IPFS.
+- [ ] `errors.json` is current (`make errors-json`); the release workflow attaches it.
+- [ ] If `soroban-sdk`, the Stellar CLI or the Rust toolchain changed: run
+      `./scripts/sdk-compat.sh <previous release tag>` and paste the report into the PR.
 - [ ] `docs/EVENTS.md` matches `src/events.rs`, and the backend has been told about any event change.
 - [ ] Deploy to testnet with `./scripts/deploy.sh testnet` and commit `deployments/testnet.json`.
 - [ ] `./scripts/smoke-testnet.sh` passes against the new deployment.
