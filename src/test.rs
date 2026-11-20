@@ -1129,3 +1129,324 @@ fn test_writes_fail_without_signature() {
         String::from_str(&t.env, VALID_CIDV1_RAW)
     );
 }
+
+// ── Economics ───────────────────────────────────────────────────────────────
+
+mod economics {
+    use super::*;
+    use crate::constants::{MAX_CLAIM_FEE, MAX_WITHDRAW_PER_CALL};
+    use crate::events::{FolderClaimed, Withdrawn};
+    use crate::types::ClaimFee;
+    use soroban_sdk::testutils::{AuthorizedInvocation, MockAuth, MockAuthInvoke};
+    use soroban_sdk::{token, IntoVal, Symbol};
+
+    const FEE: i128 = 50_000_000;
+
+    fn sac(t: &TestEnv) -> (Address, token::StellarAssetClient<'_>, token::Client<'_>) {
+        let issuer = Address::generate(&t.env);
+        let id = t.env.register_stellar_asset_contract_v2(issuer).address();
+        (
+            id.clone(),
+            token::StellarAssetClient::new(&t.env, &id),
+            token::Client::new(&t.env, &id),
+        )
+    }
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    #[test]
+    fn funded_claim_pays_fee_and_emits_it() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, tok_client) = sac(&t);
+        let treasury = Address::generate(&t.env);
+        t.client().set_claim_fee(&t.admin, &tok, &FEE, &treasury);
+        assert_eq!(
+            t.client().get_claim_fee(),
+            Some(ClaimFee {
+                token: tok.clone(),
+                amount: FEE,
+                treasury: treasury.clone()
+            })
+        );
+
+        let user = Address::generate(&t.env);
+        admin_tok.mint(&user, &(FEE + 1));
+        t.client().claim_folder(&user, &name(&t, "payer.folder"));
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            std::vec![FolderClaimed {
+                owner: user.clone(),
+                folder_name: name(&t, "payer.folder"),
+                fee_paid: FEE,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(tok_client.balance(&user), 1);
+        assert_eq!(tok_client.balance(&treasury), FEE);
+    }
+
+    #[test]
+    fn claim_auth_tree_includes_token_transfer() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, _) = sac(&t);
+        let treasury = Address::generate(&t.env);
+        t.client().set_claim_fee(&t.admin, &tok, &FEE, &treasury);
+        let user = Address::generate(&t.env);
+        admin_tok.mint(&user, &FEE);
+
+        let folder = name(&t, "authed.folder");
+        t.client().claim_folder(&user, &folder);
+        assert_eq!(
+            t.env.auths(),
+            std::vec![(
+                user.clone(),
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        t.contract_id.clone(),
+                        Symbol::new(&t.env, "claim_folder"),
+                        (user.clone(), folder.clone()).into_val(&t.env),
+                    )),
+                    sub_invocations: std::vec![AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            tok.clone(),
+                            Symbol::new(&t.env, "transfer"),
+                            (user.clone(), treasury.clone(), FEE).into_val(&t.env),
+                        )),
+                        sub_invocations: std::vec![],
+                    }],
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn claim_without_transfer_auth_fails() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, _) = sac(&t);
+        let treasury = Address::generate(&t.env);
+        t.client().set_claim_fee(&t.admin, &tok, &FEE, &treasury);
+        let user = Address::generate(&t.env);
+        admin_tok.mint(&user, &FEE);
+
+        // Authorize only the root call, not the token sub-invocation.
+        let folder = name(&t, "partial.folder");
+        t.env.set_auths(&[]);
+        let res = t
+            .client()
+            .mock_auths(&[MockAuth {
+                address: &user,
+                invoke: &MockAuthInvoke {
+                    contract: &t.contract_id,
+                    fn_name: "claim_folder",
+                    args: (user.clone(), folder.clone()).into_val(&t.env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_claim_folder(&user, &folder);
+        assert!(res.is_err());
+        expect_contract_error(
+            t.client().try_get_folder(&folder),
+            ContractError::FolderNotFound,
+        );
+    }
+
+    #[test]
+    fn insufficient_balance_claim_fails_atomically() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, tok_client) = sac(&t);
+        let treasury = Address::generate(&t.env);
+        t.client().set_claim_fee(&t.admin, &tok, &FEE, &treasury);
+        let user = Address::generate(&t.env);
+        admin_tok.mint(&user, &(FEE - 1));
+
+        let folder = name(&t, "broke.folder");
+        assert!(t.client().try_claim_folder(&user, &folder).is_err());
+        expect_contract_error(
+            t.client().try_get_folder(&folder),
+            ContractError::FolderNotFound,
+        );
+        expect_contract_error(
+            t.client().try_get_identity(&user),
+            ContractError::FolderNotFound,
+        );
+        assert_eq!(tok_client.balance(&user), FEE - 1);
+        assert_eq!(tok_client.balance(&treasury), 0);
+    }
+
+    #[test]
+    fn fee_disabled_and_changed() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, tok_client) = sac(&t);
+        let treasury = Address::generate(&t.env);
+
+        // Disabled: unfunded user claims for free, event reports 0.
+        t.client().set_claim_fee(&t.admin, &tok, &0, &treasury);
+        let free = Address::generate(&t.env);
+        t.client().claim_folder(&free, &name(&t, "free.folder"));
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            std::vec![FolderClaimed {
+                owner: free.clone(),
+                folder_name: name(&t, "free.folder"),
+                fee_paid: 0,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_single_auth(&t, &free, "claim_folder");
+
+        // Changed: the new amount is charged.
+        t.client()
+            .set_claim_fee(&t.admin, &tok, &(FEE * 2), &treasury);
+        let payer = Address::generate(&t.env);
+        admin_tok.mint(&payer, &(FEE * 2));
+        t.client().claim_folder(&payer, &name(&t, "paid.folder"));
+        assert_eq!(tok_client.balance(&treasury), FEE * 2);
+    }
+
+    #[test]
+    fn set_claim_fee_validation_and_auth() {
+        let t = TestEnv::new();
+        let (tok, _, _) = sac(&t);
+        let treasury = Address::generate(&t.env);
+        expect_contract_error(
+            t.client().try_set_claim_fee(&t.admin, &tok, &-1, &treasury),
+            ContractError::InvalidAmount,
+        );
+        expect_contract_error(
+            t.client()
+                .try_set_claim_fee(&t.admin, &tok, &(MAX_CLAIM_FEE + 1), &treasury),
+            ContractError::InvalidAmount,
+        );
+        expect_contract_error(
+            t.client()
+                .try_set_claim_fee(&Address::generate(&t.env), &tok, &FEE, &treasury),
+            ContractError::Unauthorized,
+        );
+        assert_eq!(t.client().get_claim_fee(), None);
+    }
+
+    /// Fee paid into the contract itself, so it can be withdrawn.
+    fn funded_treasury(t: &TestEnv) -> (Address, token::Client<'_>) {
+        let (tok, admin_tok, tok_client) = sac(t);
+        t.client()
+            .set_claim_fee(&t.admin, &tok, &FEE, &t.contract_id);
+        let user = Address::generate(&t.env);
+        admin_tok.mint(&user, &FEE);
+        t.client().claim_folder(&user, &name(t, "fund.folder"));
+        (tok, tok_client)
+    }
+
+    #[test]
+    fn withdraw_happy_path_reconciles_and_emits() {
+        let t = TestEnv::new();
+        let (tok, tok_client) = funded_treasury(&t);
+        assert_eq!(t.client().treasury_balance(&tok), FEE);
+        assert_eq!(
+            t.client().treasury_balance(&tok),
+            tok_client.balance(&t.contract_id)
+        );
+
+        let to = Address::generate(&t.env);
+        t.client().withdraw(&t.admin, &tok, &to, &(FEE - 10));
+        assert_single_auth(&t, &t.admin, "withdraw");
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            std::vec![Withdrawn {
+                admin: t.admin.clone(),
+                token: tok.clone(),
+                to: to.clone(),
+                amount: FEE - 10,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().treasury_balance(&tok), 10);
+        assert_eq!(tok_client.balance(&t.contract_id), 10);
+        assert_eq!(tok_client.balance(&to), FEE - 10);
+    }
+
+    #[test]
+    fn withdraw_rejections() {
+        let t = TestEnv::new();
+        let (tok, _) = funded_treasury(&t);
+        let to = Address::generate(&t.env);
+        expect_contract_error(
+            t.client().try_withdraw(&t.admin, &tok, &to, &(FEE + 1)),
+            ContractError::InsufficientBalance,
+        );
+        expect_contract_error(
+            t.client().try_withdraw(&t.admin, &tok, &to, &-1),
+            ContractError::InvalidAmount,
+        );
+        expect_contract_error(
+            t.client().try_withdraw(&t.admin, &tok, &to, &0),
+            ContractError::InvalidAmount,
+        );
+        expect_contract_error(
+            t.client()
+                .try_withdraw(&Address::generate(&t.env), &tok, &to, &1),
+            ContractError::Unauthorized,
+        );
+        assert_eq!(t.client().treasury_balance(&tok), FEE);
+    }
+
+    #[test]
+    fn withdraw_cap_enforced() {
+        let t = TestEnv::new();
+        let (tok, admin_tok, _) = sac(&t);
+        admin_tok.mint(&t.contract_id, &(MAX_WITHDRAW_PER_CALL + 1));
+        let to = Address::generate(&t.env);
+        expect_contract_error(
+            t.client()
+                .try_withdraw(&t.admin, &tok, &to, &(MAX_WITHDRAW_PER_CALL + 1)),
+            ContractError::InvalidAmount,
+        );
+        t.client()
+            .withdraw(&t.admin, &tok, &to, &MAX_WITHDRAW_PER_CALL);
+        assert_eq!(t.client().treasury_balance(&tok), 1);
+    }
+}
+
+// ── Budgets (used by scripts/sdk-compat.sh) ─────────────────────────────────
+
+/// Prints CPU instructions and memory bytes per entry point. Run with
+/// `cargo test budget_report -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn budget_report() {
+    fn report(t: &TestEnv, entry: &str) {
+        let b = t.env.cost_estimate().budget();
+        std::println!(
+            "BUDGET {entry} cpu={} mem={}",
+            b.cpu_instruction_cost(),
+            b.memory_bytes_cost()
+        );
+    }
+    let t = uninitialized_env();
+    t.client().initialize(&t.admin);
+    report(&t, "initialize");
+    let other = Address::generate(&t.env);
+    t.client().add_admin(&t.admin, &other);
+    report(&t, "add_admin");
+    t.client().remove_admin(&t.admin, &other);
+    report(&t, "remove_admin");
+    let uri = String::from_str(
+        &t.env,
+        &(std::string::String::from("ipfs://") + VALID_CIDV0),
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    report(&t, "register_template");
+    let user = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "budget.folder"));
+    report(&t, "claim_folder");
+    t.client().set_user_template(&user, &1u32);
+    report(&t, "set_user_template");
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0));
+    report(&t, "mint_portfolio");
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    report(&t, "update_portfolio");
+}

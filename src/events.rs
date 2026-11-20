@@ -4,6 +4,24 @@ use soroban_sdk::{contractevent, Address, Env, String};
 pub struct FolderClaimed {
     pub owner: Address,
     pub folder_name: String,
+    /// Appended field: the claim fee paid, 0 when the fee is disabled.
+    pub fee_paid: i128,
+}
+
+#[contractevent(topics = ["fee_set"], data_format = "vec")]
+pub struct ClaimFeeSet {
+    pub admin: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub treasury: Address,
+}
+
+#[contractevent(topics = ["withdraw"], data_format = "vec")]
+pub struct Withdrawn {
+    pub admin: Address,
+    pub token: Address,
+    pub to: Address,
+    pub amount: i128,
 }
 
 #[contractevent(topics = ["port_mint"], data_format = "vec")]
@@ -73,10 +91,31 @@ pub fn admin_removed(env: &Env, admin: &Address, target: &Address) {
     .publish(env);
 }
 
-pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String) {
+pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String, fee_paid: i128) {
     FolderClaimed {
         owner: owner.clone(),
         folder_name: folder_name.clone(),
+        fee_paid,
+    }
+    .publish(env);
+}
+
+pub fn claim_fee_set(env: &Env, admin: &Address, fee: &crate::types::ClaimFee) {
+    ClaimFeeSet {
+        admin: admin.clone(),
+        token: fee.token.clone(),
+        amount: fee.amount,
+        treasury: fee.treasury.clone(),
+    }
+    .publish(env);
+}
+
+pub fn withdrawn(env: &Env, admin: &Address, token: &Address, to: &Address, amount: i128) {
+    Withdrawn {
+        admin: admin.clone(),
+        token: token.clone(),
+        to: to.clone(),
+        amount,
     }
     .publish(env);
 }
