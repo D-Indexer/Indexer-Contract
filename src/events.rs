@@ -6,6 +6,13 @@ pub struct FolderClaimed {
     pub folder_name: String,
 }
 
+/// `folder_cl` with `owner` as `topics[1]`, so indexers can filter by owner.
+#[contractevent(topics = ["folder_cl", "owner"], data_format = "vec")]
+pub struct FolderClaimedByOwner {
+    pub owner: Address,
+    pub folder_name: String,
+}
+
 #[contractevent(topics = ["port_mint"], data_format = "vec")]
 pub struct PortfolioMinted {
     pub owner: Address,
@@ -13,8 +20,23 @@ pub struct PortfolioMinted {
     pub ipfs_cid: String,
 }
 
+/// `port_mint` with `owner` as `topics[1]`, so indexers can filter by owner.
+#[contractevent(topics = ["port_mint", "owner"], data_format = "vec")]
+pub struct PortfolioMintedByOwner {
+    pub owner: Address,
+    pub template_id: u32,
+    pub ipfs_cid: String,
+}
+
 #[contractevent(topics = ["port_upd"], data_format = "vec")]
 pub struct PortfolioUpdated {
+    pub owner: Address,
+    pub ipfs_cid: String,
+}
+
+/// `port_upd` with `owner` as `topics[1]`, so indexers can filter by owner.
+#[contractevent(topics = ["port_upd", "owner"], data_format = "vec")]
+pub struct PortfolioUpdatedByOwner {
     pub owner: Address,
     pub ipfs_cid: String,
 }
@@ -29,6 +51,13 @@ pub struct TemplateRegistered {
 
 #[contractevent(topics = ["tmpl_set"], data_format = "vec")]
 pub struct TemplateAssigned {
+    pub owner: Address,
+    pub template_id: u32,
+}
+
+/// `tmpl_set` with `owner` as `topics[1]`, so indexers can filter by owner.
+#[contractevent(topics = ["tmpl_set", "owner"], data_format = "vec")]
+pub struct TemplateAssignedByOwner {
     pub owner: Address,
     pub template_id: u32,
 }
@@ -79,6 +108,11 @@ pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String) {
         folder_name: folder_name.clone(),
     }
     .publish(env);
+    FolderClaimedByOwner {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
 }
 
 pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: &String) {
@@ -88,10 +122,21 @@ pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: 
         ipfs_cid: ipfs_cid.clone(),
     }
     .publish(env);
+    PortfolioMintedByOwner {
+        owner: owner.clone(),
+        template_id,
+        ipfs_cid: ipfs_cid.clone(),
+    }
+    .publish(env);
 }
 
 pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
     PortfolioUpdated {
+        owner: owner.clone(),
+        ipfs_cid: ipfs_cid.clone(),
+    }
+    .publish(env);
+    PortfolioUpdatedByOwner {
         owner: owner.clone(),
         ipfs_cid: ipfs_cid.clone(),
     }
@@ -109,6 +154,11 @@ pub fn template_registered(env: &Env, template_id: u32, metadata_uri: &String, c
 
 pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     TemplateAssigned {
+        owner: owner.clone(),
+        template_id,
+    }
+    .publish(env);
+    TemplateAssignedByOwner {
         owner: owner.clone(),
         template_id,
     }
