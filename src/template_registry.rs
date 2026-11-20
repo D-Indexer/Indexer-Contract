@@ -20,7 +20,7 @@ pub fn register_template(
     if storage::get_template(env, template_id).is_some() {
         return Err(ContractError::TemplateAlreadyExists);
     }
-    if storage::get_template_list(env).len() >= MAX_TEMPLATES {
+    if storage::get_template_count(env) >= MAX_TEMPLATES {
         return Err(ContractError::TemplateLimitReached);
     }
 
