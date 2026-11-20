@@ -22,6 +22,12 @@ pub const MIN_FOLDER_LABEL_LEN: u32 = 3;
 pub const MAX_FOLDER_NAME_LEN: u32 = 64;
 /// Exact length of a CIDv0 (`Qm...`, base58btc sha2-256).
 pub const CIDV0_LEN: u32 = 46;
+/// Decoded length of a CIDv0 multihash: 2-byte header + 32-byte digest.
+pub const CIDV0_MULTIHASH_LEN: u32 = 34;
+/// Multihash function code for sha2-256, as used by CIDv0.
+pub const CIDV0_MULTIHASH_CODE: u8 = 0x12;
+/// Multihash digest length for sha2-256, as used by CIDv0.
+pub const CIDV0_DIGEST_LEN: u8 = 0x20;
 /// Minimum accepted IPFS CID length.
 pub const MIN_IPFS_CID_LEN: u32 = 46;
 /// Maximum accepted IPFS CID length.

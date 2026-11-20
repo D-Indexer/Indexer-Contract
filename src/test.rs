@@ -924,6 +924,14 @@ fn test_set_user_template_updates_minted_portfolio() {
 const VALID_CIDV1_RAW: &str = "bafkreicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV1_DAG_PB: &str = "bafybeicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV0: &str = "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce";
+/// Real CIDv0 vectors (sha2-256 multihash, base58btc).
+const VALID_CIDV0_VECTORS: [&str; 5] = [
+    "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH",
+    "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o",
+    "QmZULkCELmmk5XNfCgTnCyFgAVxBRBXyDHGGMVoLFLiXEN",
+];
 
 #[test]
 fn test_folder_label_rules() {
@@ -1014,6 +1022,44 @@ fn test_cid_format_rules() {
         let cid = String::from_str(&t.env, good);
         t.client().update_portfolio(&user, &cid);
         assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+}
+
+#[test]
+fn test_cidv0_multihash_vectors() {
+    let (t, user) = minted_env();
+    for good in VALID_CIDV0_VECTORS {
+        let cid = String::from_str(&t.env, good);
+        t.client().update_portfolio(&user, &cid);
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+    // Corrupted vectors: changed digest byte, wrong multihash prefix, and
+    // characters outside the base58btc alphabet.
+    let mut corrupted: std::vec::Vec<std::string::String> = std::vec::Vec::new();
+    for good in VALID_CIDV0_VECTORS {
+        let mut chars: std::vec::Vec<char> = good.chars().collect();
+        let last = chars.len() - 1;
+        chars[last] = if chars[last] == 'a' { 'b' } else { 'a' };
+        corrupted.push(chars.into_iter().collect());
+    }
+    // Decodes to a multihash whose function code is not sha2-256.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5p",
+    ));
+    // Decodes to a multihash whose digest length byte is not 0x20.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5n",
+    ));
+    // Invalid base58btc characters (`0`, `O`, `I`, `l`).
+    corrupted.push(std::string::String::from("Qm") + &"0".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"O".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"I".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"l".repeat(44));
+    for bad in corrupted {
+        let res = t
+            .client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, &bad));
+        expect_contract_error(res, ContractError::InvalidCID);
     }
 }
 

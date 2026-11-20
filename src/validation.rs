@@ -1,10 +1,11 @@
 use soroban_sdk::{Bytes, String};
 
 use crate::constants::{
-    CIDV0_LEN, CIDV1_ALLOWED_CODECS, CIDV1_ALLOWED_DIGEST_LENS, CIDV1_ALLOWED_MULTIHASH_CODES,
-    CIDV1_MULTIBASE_PREFIX, CIDV1_VERSION, FOLDER_SUFFIX, MAX_CIDV1_LEN, MAX_FOLDER_NAME_LEN,
-    MAX_IPFS_CID_LEN, MAX_METADATA_URI_LEN, METADATA_URI_SCHEME, MIN_CIDV1_LEN,
-    MIN_FOLDER_LABEL_LEN, MIN_IPFS_CID_LEN,
+    CIDV0_DIGEST_LEN, CIDV0_LEN, CIDV0_MULTIHASH_CODE, CIDV0_MULTIHASH_LEN, CIDV1_ALLOWED_CODECS,
+    CIDV1_ALLOWED_DIGEST_LENS, CIDV1_ALLOWED_MULTIHASH_CODES, CIDV1_MULTIBASE_PREFIX,
+    CIDV1_VERSION, FOLDER_SUFFIX, MAX_CIDV1_LEN, MAX_FOLDER_NAME_LEN, MAX_IPFS_CID_LEN,
+    MAX_METADATA_URI_LEN, METADATA_URI_SCHEME, MIN_CIDV1_LEN, MIN_FOLDER_LABEL_LEN,
+    MIN_IPFS_CID_LEN,
 };
 use crate::errors::ContractError;
 
@@ -55,6 +56,83 @@ fn is_label_byte(byte: u8) -> bool {
 /// base58btc alphabet used by CIDv0 (no `0`, `O`, `I`, `l`).
 fn is_base58_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() && !matches!(byte, b'0' | b'O' | b'I' | b'l')
+}
+
+/// Value of a base58btc character, or `None` if it is not in the alphabet.
+fn base58_value(byte: u8) -> Option<u32> {
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut i = 0;
+    while i < ALPHABET.len() {
+        if ALPHABET[i] == byte {
+            return Some(i as u32);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Decodes base58btc into `out`, returning the number of decoded bytes.
+/// Fails on invalid characters, on overflow of `out`, or on non-canonical
+/// leading zero bytes.
+fn base58_decode(bytes: &Bytes, out: &mut [u8]) -> Option<u32> {
+    let mut written: usize = 0;
+    for byte in bytes.iter() {
+        let mut carry = base58_value(byte)?;
+        let mut i = 0;
+        while i < written {
+            carry += (out[i] as u32) * 58;
+            out[i] = (carry & 0xff) as u8;
+            carry >>= 8;
+            i += 1;
+        }
+        while carry > 0 {
+            if written >= out.len() {
+                return None;
+            }
+            out[written] = (carry & 0xff) as u8;
+            written += 1;
+            carry >>= 8;
+        }
+    }
+    // Leading `1`s encode leading zero bytes.
+    let mut zeros: usize = 0;
+    for byte in bytes.iter() {
+        if byte != b'1' {
+            break;
+        }
+        zeros += 1;
+    }
+    if zeros + written > out.len() {
+        return None;
+    }
+    // `out` holds the little-endian magnitude; shift it up by `zeros`.
+    let mut i = written;
+    while i > 0 {
+        i -= 1;
+        out[zeros + i] = out[i];
+    }
+    let mut i = 0;
+    while i < zeros {
+        out[i] = 0;
+        i += 1;
+    }
+    Some((zeros + written) as u32)
+}
+
+/// Decodes a CIDv0 (`Qm...`, base58btc) and checks that the result is a
+/// 34-byte sha2-256 multihash (`0x12 0x20` + 32-byte digest).
+fn is_valid_cidv0(bytes: &Bytes) -> bool {
+    if bytes.len() != CIDV0_LEN || !all_bytes(bytes, is_base58_byte) {
+        return false;
+    }
+    let mut buf = [0u8; CIDV0_MULTIHASH_LEN as usize];
+    let decoded = match base58_decode(bytes, &mut buf) {
+        Some(n) => n,
+        None => return false,
+    };
+    decoded == CIDV0_MULTIHASH_LEN
+        && buf[0] == CIDV0_MULTIHASH_CODE
+        && buf[1] == CIDV0_DIGEST_LEN
 }
 
 /// RFC 4648 lowercase base32 alphabet used by CIDv1 multibase prefix `b`.
@@ -173,12 +251,11 @@ fn is_valid_cidv1(bytes: &Bytes) -> bool {
     digest_len == (decoded - pos) as u64
 }
 
-/// Checks a CIDv0 (`Qm` + base58btc, 46 chars) textually, or decodes and
+/// Decodes and validates a base58btc CIDv0 multihash, or decodes and
 /// structurally validates a base32 CIDv1.
 fn is_valid_cid(bytes: &Bytes) -> bool {
-    let len = bytes.len();
     if starts_with(bytes, b"Qm") {
-        return len == CIDV0_LEN && all_bytes(bytes, is_base58_byte);
+        return is_valid_cidv0(bytes);
     }
     if bytes.get(0) == Some(CIDV1_MULTIBASE_PREFIX) {
         return is_valid_cidv1(bytes);
