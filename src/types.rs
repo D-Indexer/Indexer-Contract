@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,9 +17,22 @@ pub struct Template {
     pub creator: Address,
 }
 
+/// Fee charged on `claim_folder`, paid in a Stellar Asset Contract token.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimFee {
+    pub token: Address,
+    pub amount: i128,
+    pub treasury: Address,
+}
+
 #[contracttype]
 pub enum DataKey {
     AdminList,
+    // admin membership: per-admin marker, `()` when the address is an admin
+    Admin(Address),
+    // admin membership: number of admins, kept in sync with `Admin(Address)`
+    AdminCount,
     Initialized,
     // identity_map: folder_name -> owner
     FolderOwner(String),
@@ -32,32 +45,6 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
-    // storage: current storage schema version
-    StorageVersion,
-    // governance: current guardian address
-    Guardian,
-    // governance: contract paused flag
-    Paused,
-    // governance: queued admin-set change -> ready ledger
-    PendingChange(u32),
-    // governance: monotonically increasing pending change id
-    PendingNonce,
-}
-
-/// Kinds of admin-set changes that must be queued and timelocked.
-#[contracttype]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChangeKind {
-    AddAdmin = 0,
-    RemoveAdmin = 1,
-    SetGuardian = 2,
-}
-
-/// A queued, timelocked admin-set change.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PendingChange {
-    pub kind: ChangeKind,
-    pub target: Address,
-    pub ready_at: u32,
+    // economics: Folder claim fee configuration (instance storage)
+    ClaimFee,
 }

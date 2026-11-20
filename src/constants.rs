@@ -35,10 +35,19 @@ pub const MAX_METADATA_URI_LEN: u32 = 256;
 /// persistent template ID list returned by `list_templates`.
 pub const MAX_TEMPLATES: u32 = 256;
 
+/// Contract version reported by `version()`. Bump on every upgrade that
+/// changes behavior or storage layout.
+pub const CONTRACT_VERSION: u32 = 1;
+
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
 
-/// Ledgers an admin-set change stays queued before it can be executed.
-/// Gives the guardian a window to veto it.
-pub const ADMIN_CHANGE_DELAY: u32 = DAY_IN_LEDGERS;
+/// Upper bound for the Folder claim fee, in the fee token's smallest unit
+/// (10_000 XLM for a 7-decimal token).
+pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
+
+/// Maximum amount a single `withdraw` call may move out of the treasury, in
+/// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
+/// withdrawals must be split across calls, each emitting its own event.
+pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
