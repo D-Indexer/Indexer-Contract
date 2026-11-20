@@ -1,0 +1,19 @@
+name: Kani proofs
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kani:
+    name: cargo kani
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Kani proofs
+        uses: model-checking/kani-github-action@v1

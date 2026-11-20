@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Symbol};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,4 +32,27 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // admin audit log ring buffer: slot -> AdminLogEntry
+    AdminLog(u32),
+    // total number of admin log entries ever written (next seq)
+    AdminLogHead,
+}
+
+/// What an admin action acted on.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminSubject {
+    Address(Address),
+    Template(u32),
+}
+
+/// One entry of the bounded on-chain admin audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminLogEntry {
+    pub seq: u32,
+    pub actor: Address,
+    pub action: Symbol,
+    pub subject: AdminSubject,
+    pub ledger: u32,
 }

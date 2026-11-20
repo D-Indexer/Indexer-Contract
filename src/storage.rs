@@ -1,11 +1,11 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    ADMIN_LOG_SIZE, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, PortfolioNFT, Template};
+use crate::types::{AdminLogEntry, AdminSubject, DataKey, PortfolioNFT, Template};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -40,6 +40,54 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
 
 pub fn is_admin(env: &Env, address: &Address) -> bool {
     get_admins(env).contains(address)
+}
+
+// ── Admin Log ─────────────────────────────────────────────────────────────────
+
+fn admin_log_head(env: &Env) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::AdminLogHead)
+        .unwrap_or(0)
+}
+
+/// Appends an entry to the admin log ring buffer. Writes exactly one slot and
+/// the head counter, so the cost is O(1) regardless of log size.
+pub fn append_admin_log(env: &Env, actor: &Address, action: Symbol, subject: AdminSubject) {
+    let seq = admin_log_head(env);
+    let slot_key = DataKey::AdminLog(seq % ADMIN_LOG_SIZE);
+    let entry = AdminLogEntry {
+        seq,
+        actor: actor.clone(),
+        action,
+        subject,
+        ledger: env.ledger().sequence(),
+    };
+    env.storage().persistent().set(&slot_key, &entry);
+    extend_persistent(env, &slot_key);
+    env.storage()
+        .persistent()
+        .set(&DataKey::AdminLogHead, &(seq + 1));
+    extend_persistent(env, &DataKey::AdminLogHead);
+}
+
+/// Returns retained admin log entries in chronological order. `start` is the
+/// offset from the oldest retained entry; at most `ADMIN_LOG_SIZE` entries are
+/// returned.
+pub fn get_admin_log(env: &Env, start: u32, limit: u32) -> Vec<AdminLogEntry> {
+    let head = admin_log_head(env);
+    let retained = head.min(ADMIN_LOG_SIZE);
+    let oldest = head - retained;
+    let mut out = Vec::new(env);
+    let mut i = start;
+    while i < retained && out.len() < limit.min(ADMIN_LOG_SIZE) {
+        let key = DataKey::AdminLog((oldest + i) % ADMIN_LOG_SIZE);
+        if let Some(entry) = env.storage().persistent().get(&key) {
+            out.push_back(entry);
+        }
+        i += 1;
+    }
+    out
 }
 
 // ── Identity Map ──────────────────────────────────────────────────────────────

@@ -13,6 +13,11 @@
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner |
+| `AdminLog(u32)` | persistent | `AdminLogEntry` | `ADMIN_LOG_SIZE` = 50 slots (ring buffer) |
+| `AdminLogHead` | persistent | `u32` (total entries written) | 1 |
+
+Each admin action writes one `AdminLog` slot (`seq % ADMIN_LOG_SIZE`) and the head counter, so
+logging is O(1) and the oldest entry is overwritten once the log is full.
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now

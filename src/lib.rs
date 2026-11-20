@@ -10,15 +10,16 @@ mod storage;
 mod template_registry;
 mod types;
 mod validation;
+mod validation_core;
 
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::PortfolioNFT;
 use crate::types::Template;
+use crate::types::{AdminLogEntry, AdminSubject, PortfolioNFT};
 
 #[contract]
 pub struct FolderContract;
@@ -47,6 +48,12 @@ impl FolderContract {
         storage::save_admins(&env, &admins);
         storage::set_initialized(&env);
         storage::extend_instance(&env);
+        storage::append_admin_log(
+            &env,
+            &admin,
+            symbol_short!("init"),
+            AdminSubject::Address(admin.clone()),
+        );
         events::contract_initialized(&env, &admin);
         Ok(())
     }
@@ -54,6 +61,12 @@ impl FolderContract {
     /// Returns the current admin list (empty before initialization).
     pub fn get_admins(env: Env) -> Vec<Address> {
         storage::get_admins(&env)
+    }
+
+    /// Returns up to `limit` admin log entries in chronological order, starting
+    /// `start` entries after the oldest retained one.
+    pub fn get_admin_log(env: Env, start: u32, limit: u32) -> Vec<AdminLogEntry> {
+        storage::get_admin_log(&env, start, limit)
     }
 
     pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), ContractError> {

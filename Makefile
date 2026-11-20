@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean dev dev-down dev-verify
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -18,6 +18,9 @@ help:
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
+	@echo "  dev           Start a local network, deploy and seed DEV_USERS (default 25) users"
+	@echo "  dev-verify    Verify the seeded local state through reads"
+	@echo "  dev-down      Stop the local network and remove deployments/local.json"
 
 fmt:
 	cargo fmt
@@ -58,3 +61,12 @@ check: fmt-check cargo-check clippy test build-wasm script-check
 
 clean:
 	cargo clean
+
+dev:
+	./scripts/dev.sh up
+
+dev-verify:
+	./scripts/dev.sh verify
+
+dev-down:
+	./scripts/dev.sh down
