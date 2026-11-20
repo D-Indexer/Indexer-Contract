@@ -158,6 +158,61 @@ pub fn set_user_template(env: &Env, owner: &Address, template_id: u32) {
     );
 }
 
+// ── Public TTL extension ──────────────────────────────────────────────────────
+
+/// Extends the TTL of `key` if it exists. Returns `true` when extended.
+fn extend_if_present(env: &Env, key: &DataKey) -> bool {
+    if env.storage().persistent().has(key) {
+        extend_persistent(env, key);
+        true
+    } else {
+        false
+    }
+}
+
+/// Extends the TTL of every persistent key belonging to `owner`:
+/// `OwnerFolder`, `FolderOwner(name)`, `UserTemplate` and `Portfolio`.
+/// Missing keys are skipped. Returns the number of keys extended.
+pub fn extend_owner_ttl(env: &Env, owner: &Address) -> u32 {
+    let mut count = 0;
+
+    let owner_key = DataKey::OwnerFolder(owner.clone());
+    if let Some(folder_name) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, String>(&owner_key)
+    {
+        if extend_if_present(env, &owner_key) {
+            count += 1;
+        }
+        if extend_if_present(env, &DataKey::FolderOwner(folder_name)) {
+            count += 1;
+        }
+    }
+
+    if extend_if_present(env, &DataKey::UserTemplate(owner.clone())) {
+        count += 1;
+    }
+    if extend_if_present(env, &DataKey::Portfolio(owner.clone())) {
+        count += 1;
+    }
+
+    count
+}
+
+/// Extends the TTL of `Template(template_id)` and `TemplateList` if present.
+/// Missing keys are skipped. Returns the number of keys extended.
+pub fn extend_template_ttl(env: &Env, template_id: u32) -> u32 {
+    let mut count = 0;
+    if extend_if_present(env, &DataKey::Template(template_id)) {
+        count += 1;
+    }
+    if extend_if_present(env, &DataKey::TemplateList) {
+        count += 1;
+    }
+    count
+}
+
 // ── Portfolio NFT ─────────────────────────────────────────────────────────────
 
 pub fn portfolio_exists(env: &Env, owner: &Address) -> bool {

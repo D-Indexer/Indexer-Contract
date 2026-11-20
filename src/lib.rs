@@ -147,4 +147,20 @@ impl FolderContract {
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
     }
+
+    // ── TTL maintenance ───────────────────────────────────────────────────────
+
+    /// Extends the TTL of all persistent keys belonging to `owner`. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_owner_ttl(env: Env, owner: Address) -> u32 {
+        storage::extend_owner_ttl(&env, &owner)
+    }
+
+    /// Extends the TTL of the template entry and the template list. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_template_ttl(env: Env, template_id: u32) -> u32 {
+        storage::extend_template_ttl(&env, template_id)
+    }
 }

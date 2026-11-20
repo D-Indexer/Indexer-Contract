@@ -718,6 +718,95 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
     );
 }
 
+#[test]
+fn test_extend_owner_ttl_extends_all_owner_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-owner.folder");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    );
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+    t.client().set_user_template(&user, &1u32);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let keys = [
+        DataKey::OwnerFolder(user.clone()),
+        DataKey::FolderOwner(name.clone()),
+        DataKey::UserTemplate(user.clone()),
+        DataKey::Portfolio(user.clone()),
+    ];
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    for key in keys.iter() {
+        assert!(t.persistent_ttl(key) < PERSISTENT_BUMP_AMOUNT);
+    }
+
+    let extended = t.client().extend_owner_ttl(&user);
+    assert_eq!(extended, 4);
+    for key in keys.iter() {
+        assert_eq!(t.persistent_ttl(key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    // Data is untouched.
+    assert_eq!(t.client().get_identity(&user), name);
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+}
+
+#[test]
+fn test_extend_owner_ttl_skips_missing_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    assert_eq!(t.client().extend_owner_ttl(&user), 0);
+
+    let name = String::from_str(&t.env, "ttl-partial.folder");
+    t.client().claim_folder(&user, &name);
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert_eq!(t.client().extend_owner_ttl(&user), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::OwnerFolder(user.clone())),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+}
+
+#[test]
+fn test_extend_template_ttl_extends_template_keys() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert!(t.persistent_ttl(&DataKey::Template(1)) < PERSISTENT_BUMP_AMOUNT);
+
+    assert_eq!(t.client().extend_template_ttl(&1u32), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::Template(1)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::TemplateList),
+        PERSISTENT_BUMP_AMOUNT
+    );
+
+    // Missing template is skipped without an error.
+    assert_eq!(t.client().extend_template_ttl(&404u32), 1);
+}
+
 // ── Template storage ────────────────────────────────────────────────────────
 
 #[test]
