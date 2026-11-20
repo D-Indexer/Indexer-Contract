@@ -14,7 +14,11 @@ use crate::constants::{
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::events::{
+    AdminAdded, AdminRemoved, ContractInitialized, FolderClaimed, FolderClaimedByOwner,
+    PortfolioMinted, PortfolioMintedByOwner, PortfolioUpdated, PortfolioUpdatedByOwner,
+    TemplateAssigned, TemplateAssignedByOwner, TemplateRegistered,
+};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 

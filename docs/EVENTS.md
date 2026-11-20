@@ -23,12 +23,12 @@ Compatibility rules:
 |---|---|---|---|
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
-| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
+| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin`, `resign_admin` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
-| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `previous_cid: String` | `update_portfolio` |
 
 ### Changes in `feat/testnet-deploy`
 
@@ -47,15 +47,40 @@ Compatibility rules:
 |---|---|
 | `init` | Seed the admin set with `admin` |
 | `adm_add` / `adm_rm` | Add / remove the admin from the admin set |
+
+`resign_admin` emits `adm_rm` with `admin == target == resigning admin`, so indexers need no
+special case: the same handler that removes `target` from the admin set applies. A resignation
+that would leave fewer than `MIN_ADMINS_AFTER_RESIGN` admins fails with `AdminQuorumTooLow` (20)
+and emits nothing.
 | `folder_cl` | Upsert identity `owner ↔ folder_name` |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
-| `port_upd` | Update the portfolio's `ipfs_cid` |
+| `port_upd` | Update the portfolio's `ipfs_cid`; use `previous_cid` to detect gaps (see below) |
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also
 stored on-chain and returned by `get_portfolio`.
+
+## Gap detection for `port_upd`
+
+`port_upd` now carries `previous_cid` as its last data field: the CID that was stored on-chain
+immediately before this update. Positional decoders that read only `owner` and `ipfs_cid` keep
+working; the new field is appended, never inserted.
+
+Use it to detect missed events:
+
+- Keep the last CID you indexed per owner (from `port_mint.ipfs_cid` or the previous
+  `port_upd.ipfs_cid`).
+- On each `port_upd`, compare the stored CID with `previous_cid`:
+  - **equal** → the chain is contiguous; apply `ipfs_cid` and store it.
+  - **different** → at least one `port_upd` was missed (or the record is stale). Do not trust the
+    incremental state: re-read the portfolio with `get_portfolio(owner)` and re-sync, then log the
+    gap for the owner.
+- `previous_cid` is the CID before the write, so a self-update (same CID) yields
+  `previous_cid == ipfs_cid`; treat that as a no-op, not a gap.
+- Events are ordered per ledger; if several `port_upd` events for one owner land in the same
+  ledger, apply them in event order and check each `previous_cid` against the running value.
 
 ## Example (testnet)
 
