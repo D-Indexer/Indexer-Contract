@@ -33,6 +33,12 @@ pub struct TemplateAssigned {
     pub template_id: u32,
 }
 
+#[contractevent(topics = ["upd_ivl"], data_format = "vec")]
+pub struct UpdateIntervalSet {
+    pub admin: Address,
+    pub ledgers: u32,
+}
+
 #[contractevent(topics = ["init"], data_format = "vec")]
 pub struct ContractInitialized {
     pub admin: Address,
@@ -111,6 +117,14 @@ pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     TemplateAssigned {
         owner: owner.clone(),
         template_id,
+    }
+    .publish(env);
+}
+
+pub fn update_interval_set(env: &Env, admin: &Address, ledgers: u32) {
+    UpdateIntervalSet {
+        admin: admin.clone(),
+        ledgers,
     }
     .publish(env);
 }

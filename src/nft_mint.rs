@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, String};
 
-use crate::access_control::require_owner;
+use crate::access_control::{require_admin, require_owner};
+use crate::constants::MAX_UPDATE_INTERVAL_LEDGERS;
 use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
@@ -36,6 +37,8 @@ pub fn mint_portfolio(
     storage::save_portfolio(env, &nft);
     // Keep the user's template selection consistent with the minted portfolio.
     storage::set_user_template(env, owner, template_id);
+    // Mint isn't rate-limited, but it starts the owner's update interval.
+    storage::set_last_update(env, owner, storage::get_min_update_interval(env));
     events::portfolio_minted(env, owner, template_id, ipfs_cid);
     Ok(())
 }
@@ -49,8 +52,17 @@ pub fn update_portfolio(
 
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     let mut nft = storage::get_portfolio(env, owner)?;
+    let interval = storage::get_min_update_interval(env);
+    if interval > 0 {
+        if let Some(last) = storage::get_last_update(env, owner) {
+            if env.ledger().sequence() < last.saturating_add(interval) {
+                return Err(ContractError::UpdateTooSoon);
+            }
+        }
+    }
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);
+    storage::set_last_update(env, owner, interval);
     events::portfolio_updated(env, owner, ipfs_cid);
     Ok(())
 }
@@ -65,4 +77,18 @@ pub fn verify_portfolio(env: &Env, owner: &Address) -> Result<bool, ContractErro
         Err(ContractError::PortfolioNotFound) => Ok(false),
         Err(err) => Err(err),
     }
+}
+
+pub fn set_min_update_interval(
+    env: &Env,
+    admin: &Address,
+    ledgers: u32,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    if ledgers > MAX_UPDATE_INTERVAL_LEDGERS {
+        return Err(ContractError::InvalidUpdateInterval);
+    }
+    storage::set_min_update_interval(env, ledgers);
+    events::update_interval_set(env, admin, ledgers);
+    Ok(())
 }

@@ -2,3 +2,4 @@
 .env
 *.wasm
 !*.optimized.wasm
+deployments/local.json

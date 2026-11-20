@@ -1,8 +1,8 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
-    PERSISTENT_LIFETIME_THRESHOLD,
+    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MIN_UPDATE_INTERVAL_LEDGERS,
+    PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
 use crate::types::{DataKey, PortfolioNFT, Template};
@@ -190,4 +190,41 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+// ── Update rate limit ─────────────────────────────────────────────────────────
+
+pub fn get_min_update_interval(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinUpdateInterval)
+        .unwrap_or(MIN_UPDATE_INTERVAL_LEDGERS)
+}
+
+pub fn set_min_update_interval(env: &Env, ledgers: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MinUpdateInterval, &ledgers);
+}
+
+/// Ledger sequence of the owner's last mint/update, if the temporary entry is
+/// still live. The entry expires once the interval has passed, so it costs no
+/// long-term rent.
+pub fn get_last_update(env: &Env, owner: &Address) -> Option<u32> {
+    env.storage()
+        .temporary()
+        .get(&DataKey::LastUpdate(owner.clone()))
+}
+
+pub fn set_last_update(env: &Env, owner: &Address, interval: u32) {
+    if interval == 0 {
+        return;
+    }
+    let key = DataKey::LastUpdate(owner.clone());
+    env.storage()
+        .temporary()
+        .set(&key, &env.ledger().sequence());
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, interval, interval);
 }
