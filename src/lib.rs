@@ -7,6 +7,7 @@ mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+mod pricing;
 mod storage;
 mod template_registry;
 mod types;
@@ -21,6 +22,7 @@ use crate::errors::ContractError;
 use crate::types::ClaimFee;
 use crate::types::PortfolioNFT;
 use crate::types::Template;
+use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
 
 #[contract]
 pub struct FolderContract;
@@ -114,6 +116,18 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
+    }
+
+    /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
+    /// Both must authorize.
+    pub fn sponsored_claim(
+        env: Env,
+        sponsor: Address,
+        owner: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {

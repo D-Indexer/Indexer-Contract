@@ -153,3 +153,37 @@ pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     }
     .publish(env);
 }
+
+/// Emitted by `sponsored_claim` in addition to the unchanged `folder_cl`
+/// event, so existing `folder_cl` consumers keep decoding the same payload.
+#[contractevent(topics = ["claim_spon"], data_format = "vec")]
+pub struct ClaimSponsored {
+    pub sponsor: Address,
+    pub owner: Address,
+    pub folder_name: String,
+}
+
+#[contractevent(topics = ["folder_rn"], data_format = "vec")]
+pub struct FolderRenewed {
+    pub owner: Address,
+    pub folder_name: String,
+    pub expiry: u64,
+}
+
+pub fn claim_sponsored(env: &Env, sponsor: &Address, owner: &Address, folder_name: &String) {
+    ClaimSponsored {
+        sponsor: sponsor.clone(),
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
+pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: u64) {
+    FolderRenewed {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+        expiry,
+    }
+    .publish(env);
+}
