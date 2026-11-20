@@ -19,6 +19,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 use crate::errors::ContractError;
 use crate::types::PortfolioNFT;
 use crate::types::Template;
+use crate::types::Limits;
 
 #[contract]
 pub struct FolderContract;
@@ -146,6 +147,29 @@ impl FolderContract {
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    /// Returns the client-facing validation rules and limits. Pure read: no
+    /// state is written and no TTL is extended.
+    pub fn get_limits(env: Env) -> Limits {
+        Limits {
+            min_folder_label_len: constants::MIN_FOLDER_LABEL_LEN,
+            max_folder_name_len: constants::MAX_FOLDER_NAME_LEN,
+            folder_suffix: String::from_bytes(&env, constants::FOLDER_SUFFIX),
+            min_ipfs_cid_len: constants::MIN_IPFS_CID_LEN,
+            max_ipfs_cid_len: constants::MAX_IPFS_CID_LEN,
+            metadata_uri_scheme: String::from_bytes(&env, constants::METADATA_URI_SCHEME),
+            max_metadata_uri_len: constants::MAX_METADATA_URI_LEN,
+            max_templates: constants::MAX_TEMPLATES,
+            max_admins: constants::MAX_ADMINS,
+            day_in_ledgers: constants::DAY_IN_LEDGERS,
+            persistent_bump_amount: constants::PERSISTENT_BUMP_AMOUNT,
+            persistent_lifetime_threshold: constants::PERSISTENT_LIFETIME_THRESHOLD,
+            instance_bump_amount: constants::INSTANCE_BUMP_AMOUNT,
+            instance_lifetime_threshold: constants::INSTANCE_LIFETIME_THRESHOLD,
+        }
     }
 
     // ── TTL maintenance ───────────────────────────────────────────────────────

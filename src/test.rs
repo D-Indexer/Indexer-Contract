@@ -12,8 +12,7 @@ use soroban_sdk::{
 use crate::constants::{
     DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
     PERSISTENT_BUMP_AMOUNT,
-};
-use crate::errors::ContractError;
+};use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
 use crate::storage;
 use crate::types::DataKey;
