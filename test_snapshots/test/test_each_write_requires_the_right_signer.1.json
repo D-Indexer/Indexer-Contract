@@ -452,6 +452,30 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "EventDigest"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bytes": "15897d348db213d48d87d1a76b25a5d357c9354e1dd519f1185fa35b22d8fd87"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "EventSeq"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "8"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Initialized"
                           }
                         ]
@@ -665,6 +689,12 @@
                 },
                 {
                   "string": "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce"
+                },
+                {
+                  "u32": 0
+                },
+                {
+                  "u64": "8"
                 }
               ]
             }

@@ -14,7 +14,7 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
 use crate::types::PortfolioNFT;
@@ -64,6 +64,16 @@ impl FolderContract {
     pub fn remove_admin(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::remove_admin(&env, &admin, &target)
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    /// Returns the last event sequence number and the rolling event digest.
+    pub fn get_event_cursor(env: Env) -> (u64, BytesN<32>) {
+        (
+            storage::get_event_seq(&env),
+            storage::get_event_digest(&env),
+        )
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -119,6 +129,57 @@ impl FolderContract {
         storage::get_user_template(&env, &owner)
     }
 
+    /// Sets the content schemas a template supports (1 to 8 non-zero values).
+    pub fn set_template_schemas(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        schemas: Vec<u32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::set_template_schemas(&env, &admin, template_id, &schemas)
+    }
+
+    /// Returns the content schemas a template supports (`[1]` by default).
+    pub fn get_template_schemas(env: Env, template_id: u32) -> Vec<u32> {
+        storage::get_template_schemas(&env, template_id)
+    }
+
+    pub fn set_template_gated(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        gated: bool,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::set_template_gated(&env, &admin, template_id, gated)
+    }
+
+    pub fn allow_template_owner(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::set_template_allowed(&env, &admin, template_id, &owner, true)
+    }
+
+    /// Removing an owner doesn't affect a selection or portfolio they already have.
+    pub fn revoke_template_owner(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::set_template_allowed(&env, &admin, template_id, &owner, false)
+    }
+
+    pub fn can_use_template(env: Env, template_id: u32, owner: Address) -> bool {
+        template_registry::can_use_template(&env, template_id, &owner)
+    }
+
     // ── Portfolio NFT ─────────────────────────────────────────────────────────
 
     pub fn mint_portfolio(
@@ -146,5 +207,64 @@ impl FolderContract {
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
+    }
+
+    pub fn mint_portfolio_v2(
+        env: Env,
+        owner: Address,
+        template_id: u32,
+        ipfs_cid: String,
+        content_schema: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::mint_portfolio_v2(&env, &owner, template_id, &ipfs_cid, content_schema)
+    }
+
+    pub fn update_portfolio_v2(
+        env: Env,
+        owner: Address,
+        ipfs_cid: String,
+        content_schema: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::update_portfolio_v2(&env, &owner, &ipfs_cid, content_schema)
+    }
+
+    /// Returns the content schema of the owner's slot-0 portfolio (1 by default).
+    pub fn get_portfolio_schema(env: Env, owner: Address) -> u32 {
+        storage::get_portfolio_schema(&env, &owner)
+    }
+
+    pub fn mint_portfolio_slot(
+        env: Env,
+        owner: Address,
+        slot: u32,
+        template_id: u32,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::mint_portfolio_slot(&env, &owner, slot, template_id, &ipfs_cid)
+    }
+
+    pub fn update_portfolio_slot(
+        env: Env,
+        owner: Address,
+        slot: u32,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::update_portfolio_slot(&env, &owner, slot, &ipfs_cid)
+    }
+
+    pub fn get_portfolio_slot(
+        env: Env,
+        owner: Address,
+        slot: u32,
+    ) -> Result<PortfolioNFT, ContractError> {
+        nft_mint::get_portfolio_slot(&env, &owner, slot)
+    }
+
+    pub fn list_portfolio_slots(env: Env, owner: Address) -> Vec<u32> {
+        nft_mint::list_portfolio_slots(&env, &owner)
     }
 }

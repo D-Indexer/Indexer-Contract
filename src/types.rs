@@ -32,4 +32,20 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // events: last emitted event sequence number (instance)
+    EventSeq,
+    // events: rolling sha256 digest over all emitted events (instance)
+    EventDigest,
+    // portfolio content schema for the slot-0 portfolio: owner -> u32
+    PortfolioSchema(Address),
+    // content schemas a template supports: template_id -> Vec<u32>
+    TemplateSchemas(u32),
+    // extra portfolio slots: (owner, slot) -> PortfolioNFT (slot 0 is `Portfolio`)
+    PortfolioSlot(Address, u32),
+    // minted non-zero slots of an owner: owner -> Vec<u32>
+    PortfolioSlots(Address),
+    // gated template flag: template_id -> bool
+    TemplateGated(u32),
+    // gated template allowlist entry: (template_id, owner) -> ()
+    TemplateAllow(u32, Address),
 }
