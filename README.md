@@ -104,15 +104,23 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
 | `claim_folder` | `owner: Address, folder_name: String` | `owner` | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
-| `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
-| `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
+| `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6), `TreasuryNotSet` (22) |
+| `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6, 22 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `set_treasury` | `admin: Address, treasury: Address` | `admin` (must be an admin) | `treas_set` | 2, 7 |
+| `set_template_price` | `admin: Address, template_id: u32, price: TemplatePrice` | `admin` (must be an admin) | `tmpl_price` | 2, 7, 17, 6, `InvalidRoyaltyShare` (20), `InvalidPrice` (21) |
+| `remove_template_price` | `admin: Address, template_id: u32` | `admin` (must be an admin) | `tmpl_price` | 2, 7, 17 |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- Paid templates: `TemplatePrice { token, amount, designer, designer_bps }`. When an owner
+  switches *to* a paid template (`set_user_template` or `mint_portfolio`), they pay `amount` of the
+  SAC `token`: `amount * designer_bps / 10_000` (rounded down) to `designer`, the remainder to the
+  treasury. Re-selecting the current template and CID updates are free. The token transfers are
+  part of the owner's auth tree.
 
 ### Reads
 
@@ -126,6 +134,8 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+| `get_treasury` | — | `Option<Address>` | — |
+| `get_template_price` | `template_id: u32` | `Option<TemplatePrice>` (`None` = free) | — |
 
 ### Error codes
 
@@ -142,7 +152,8 @@ Codes are stable. New errors are appended and never renumbered.
 | 7 | `Unauthorized` | 17 | `InvalidTemplateID` |
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
-| 10 | `AdminAlreadyExists` | | |
+| 10 | `AdminAlreadyExists` | 20 | `InvalidRoyaltyShare` |
+| 21 | `InvalidPrice` | 22 | `TreasuryNotSet` |
 
 ## How the backend indexer consumes events
 
@@ -153,7 +164,7 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `treas_set`, `tmpl_price`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
@@ -174,12 +185,15 @@ that changes `src/events.rs` must update it.
 |---|---|
 | `src/lib.rs` | Public contract interface; delegates to the modules below |
 | `src/identity_map.rs`, `template_registry.rs`, `nft_mint.rs` | Folder names, templates, portfolios |
+| `src/royalties.rs` | Paid templates: price config and designer/treasury split |
 | `src/access_control.rs` | Admin and owner auth checks |
 | `src/storage.rs`, `src/constants.rs` | All ledger I/O, TTL policy, limits |
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
 | `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
 | `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
-| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py`, `stellar_toml.py` (SEP-1 fragment + verify), `admin_monitor.py` (privileged-action alerts); tests in `scripts/tests/` |
+| `tools/ledger-keys/` | CLI printing `LedgerKey` XDR for direct `getLedgerEntries` reads |
+| `stellar.toml.fragment`, `stellar-toml.config.json` | Generated stellar.toml section and its config (home domain) |
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
 

@@ -2,3 +2,6 @@
 .env
 *.wasm
 !*.optimized.wasm
+__pycache__/
+/tools/ledger-keys/test_snapshots
+.admin-monitor/

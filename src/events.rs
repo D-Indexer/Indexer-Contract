@@ -1,5 +1,7 @@
 use soroban_sdk::{contractevent, Address, Env, String};
 
+use crate::types::TemplatePrice;
+
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
     pub owner: Address,
@@ -48,6 +50,42 @@ pub struct AdminAdded {
 pub struct AdminRemoved {
     pub admin: Address,
     pub target: Address,
+}
+
+#[contractevent(topics = ["treas_set"], data_format = "vec")]
+pub struct TreasurySet {
+    pub admin: Address,
+    pub treasury: Address,
+}
+
+#[contractevent(topics = ["tmpl_price"], data_format = "vec")]
+pub struct TemplatePriceSet {
+    pub admin: Address,
+    pub template_id: u32,
+    /// `None` when the template is made free again.
+    pub price: Option<TemplatePrice>,
+}
+
+pub fn treasury_set(env: &Env, admin: &Address, treasury: &Address) {
+    TreasurySet {
+        admin: admin.clone(),
+        treasury: treasury.clone(),
+    }
+    .publish(env);
+}
+
+pub fn template_price_set(
+    env: &Env,
+    admin: &Address,
+    template_id: u32,
+    price: Option<TemplatePrice>,
+) {
+    TemplatePriceSet {
+        admin: admin.clone(),
+        template_id,
+        price,
+    }
+    .publish(env);
 }
 
 pub fn contract_initialized(env: &Env, admin: &Address) {

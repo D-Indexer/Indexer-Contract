@@ -29,6 +29,8 @@ Compatibility rules:
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `treas_set` | `TreasurySet` | `admin: Address` (caller), `treasury: Address` | `set_treasury` |
+| `tmpl_price` | `TemplatePriceSet` | `admin: Address` (caller), `template_id: u32`, `price: Option<TemplatePrice>` (`None` = made free) | `set_template_price`, `remove_template_price` |
 
 ### Changes in `feat/testnet-deploy`
 

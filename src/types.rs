@@ -17,6 +17,18 @@ pub struct Template {
     pub creator: Address,
 }
 
+/// Optional price charged when an owner switches to a template. Paid in a
+/// Stellar Asset Contract token and split between the template's designer
+/// (`designer_bps` basis points) and the treasury (the remainder).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplatePrice {
+    pub token: Address,
+    pub amount: i128,
+    pub designer: Address,
+    pub designer_bps: u32,
+}
+
 #[contracttype]
 pub enum DataKey {
     AdminList,
@@ -32,4 +44,8 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // royalties: treasury receiving the non-designer share (instance)
+    Treasury,
+    // royalties: template_id -> TemplatePrice
+    TemplatePrice(u32),
 }

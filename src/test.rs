@@ -6,7 +6,7 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, String,
+    Address, Env, Event as _, IntoVal, String,
 };
 
 use crate::constants::{
@@ -15,7 +15,8 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
-use crate::types::DataKey;
+use crate::royalties::split;
+use crate::types::{DataKey, TemplatePrice};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -1127,5 +1128,245 @@ fn test_writes_fail_without_signature() {
     assert_eq!(
         t.client().get_portfolio(&user).ipfs_cid,
         String::from_str(&t.env, VALID_CIDV1_RAW)
+    );
+}
+
+// ── Template royalties ──────────────────────────────────────────────────────
+
+struct PaidEnv {
+    t: TestEnv,
+    token: Address,
+    designer: Address,
+    treasury: Address,
+    user: Address,
+}
+
+impl PaidEnv {
+    /// Templates 1 (free) and 2 (paid per `amount`/`bps`); `user` has a Folder
+    /// and `balance` tokens.
+    fn new(amount: i128, bps: u32, balance: i128) -> Self {
+        let t = TestEnv::new();
+        let uri = String::from_str(
+            &t.env,
+            &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
+        );
+        t.client().register_template(&t.admin, &1u32, &uri);
+        t.client().register_template(&t.admin, &2u32, &uri);
+        let token = t
+            .env
+            .register_stellar_asset_contract_v2(Address::generate(&t.env))
+            .address();
+        let designer = Address::generate(&t.env);
+        let treasury = Address::generate(&t.env);
+        t.client().set_treasury(&t.admin, &treasury);
+        t.client().set_template_price(
+            &t.admin,
+            &2u32,
+            &TemplatePrice {
+                token: token.clone(),
+                amount,
+                designer: designer.clone(),
+                designer_bps: bps,
+            },
+        );
+        let user = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, "payer.folder"));
+        if balance > 0 {
+            soroban_sdk::token::StellarAssetClient::new(&t.env, &token).mint(&user, &balance);
+        }
+        PaidEnv {
+            t,
+            token,
+            designer,
+            treasury,
+            user,
+        }
+    }
+
+    fn balance(&self, who: &Address) -> i128 {
+        soroban_sdk::token::TokenClient::new(&self.t.env, &self.token).balance(who)
+    }
+}
+
+#[test]
+fn test_royalty_split_arithmetic() {
+    assert_eq!(split(1, 0), Some((0, 1)));
+    assert_eq!(split(1, 1), Some((0, 1)));
+    assert_eq!(split(1, 10_000), Some((1, 0)));
+    assert_eq!(split(3, 0), Some((0, 3)));
+    assert_eq!(split(3, 1), Some((0, 3)));
+    assert_eq!(split(3, 5_000), Some((1, 2)));
+    assert_eq!(split(3, 10_000), Some((3, 0)));
+    assert_eq!(split(10_000, 1), Some((1, 9_999)));
+    assert_eq!(split(1, 10_001), None);
+    assert_eq!(split(i128::MAX, 2), None);
+}
+
+#[test]
+fn test_paid_template_balances_match_split() {
+    for (amount, bps, designer, treasury) in [
+        (1i128, 0u32, 0i128, 1i128),
+        (1, 1, 0, 1),
+        (1, 10_000, 1, 0),
+        (3, 0, 0, 3),
+        (3, 1, 0, 3),
+        (3, 10_000, 3, 0),
+        (3, 5_000, 1, 2),
+    ] {
+        let p = PaidEnv::new(amount, bps, 10);
+        p.t.client().set_user_template(&p.user, &2u32);
+        assert_eq!(p.balance(&p.designer), designer);
+        assert_eq!(p.balance(&p.treasury), treasury);
+        assert_eq!(p.balance(&p.user), 10 - amount);
+    }
+}
+
+#[test]
+fn test_paid_template_charged_on_mint() {
+    let p = PaidEnv::new(3, 5_000, 10);
+    p.t.client()
+        .mint_portfolio(&p.user, &2u32, &String::from_str(&p.t.env, VALID_CIDV0));
+    assert_eq!(p.balance(&p.user), 7);
+    assert_eq!(p.balance(&p.designer), 1);
+    assert_eq!(p.balance(&p.treasury), 2);
+}
+
+#[test]
+fn test_reselection_and_cid_updates_do_not_charge() {
+    let p = PaidEnv::new(3, 5_000, 10);
+    p.t.client().set_user_template(&p.user, &2u32);
+    p.t.client().set_user_template(&p.user, &2u32);
+    p.t.client()
+        .mint_portfolio(&p.user, &2u32, &String::from_str(&p.t.env, VALID_CIDV0));
+    p.t.client()
+        .update_portfolio(&p.user, &String::from_str(&p.t.env, VALID_CIDV1_RAW));
+    assert_eq!(p.balance(&p.user), 7);
+    // Switching away and back charges again.
+    p.t.client().set_user_template(&p.user, &1u32);
+    p.t.client().set_user_template(&p.user, &2u32);
+    assert_eq!(p.balance(&p.user), 4);
+}
+
+#[test]
+fn test_free_template_unchanged() {
+    let p = PaidEnv::new(3, 5_000, 0);
+    p.t.client().set_user_template(&p.user, &1u32);
+    assert_eq!(p.t.client().get_user_template(&p.user), Some(1));
+    assert_eq!(p.t.client().get_template_price(&1u32), None);
+    p.t.client().remove_template_price(&p.t.admin, &2u32);
+    p.t.client().set_user_template(&p.user, &2u32);
+    assert_eq!(p.t.client().get_user_template(&p.user), Some(2));
+}
+
+#[test]
+fn test_insufficient_balance_is_atomic() {
+    let p = PaidEnv::new(3, 5_000, 2);
+    p.t.client().set_user_template(&p.user, &1u32);
+    assert!(p.t.client().try_set_user_template(&p.user, &2u32).is_err());
+    assert_eq!(p.t.client().get_user_template(&p.user), Some(1));
+    assert!(p
+        .t
+        .client()
+        .try_mint_portfolio(&p.user, &2u32, &String::from_str(&p.t.env, VALID_CIDV0))
+        .is_err());
+    assert!(!p.t.client().verify_portfolio(&p.user));
+    assert_eq!(p.balance(&p.user), 2);
+    assert_eq!(p.balance(&p.designer), 0);
+    assert_eq!(p.balance(&p.treasury), 0);
+}
+
+#[test]
+fn test_template_price_validation() {
+    let p = PaidEnv::new(3, 5_000, 0);
+    let mut price = p.t.client().get_template_price(&2u32).unwrap();
+    price.designer_bps = 10_001;
+    expect_contract_error(
+        p.t.client()
+            .try_set_template_price(&p.t.admin, &2u32, &price),
+        ContractError::InvalidRoyaltyShare,
+    );
+    price.designer_bps = 10_000;
+    price.amount = 0;
+    expect_contract_error(
+        p.t.client()
+            .try_set_template_price(&p.t.admin, &2u32, &price),
+        ContractError::InvalidPrice,
+    );
+    price.amount = 1;
+    expect_contract_error(
+        p.t.client()
+            .try_set_template_price(&p.t.admin, &9u32, &price),
+        ContractError::TemplateNotFound,
+    );
+    expect_contract_error(
+        p.t.client().try_set_template_price(&p.user, &2u32, &price),
+        ContractError::Unauthorized,
+    );
+}
+
+#[test]
+fn test_paid_template_requires_treasury() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let token = t
+        .env
+        .register_stellar_asset_contract_v2(Address::generate(&t.env))
+        .address();
+    let price = TemplatePrice {
+        token,
+        amount: 1,
+        designer: Address::generate(&t.env),
+        designer_bps: 0,
+    };
+    t.client().set_template_price(&t.admin, &1u32, &price);
+    let user = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "notreas.folder"));
+    expect_contract_error(
+        t.client().try_set_user_template(&user, &1u32),
+        ContractError::TreasuryNotSet,
+    );
+}
+
+#[test]
+fn test_paid_selection_auth_tree_includes_transfers() {
+    let p = PaidEnv::new(3, 5_000, 10);
+    p.t.client().set_user_template(&p.user, &2u32);
+    let auths = p.t.env.auths();
+    assert_eq!(auths.len(), 1);
+    let (addr, invocation) = &auths[0];
+    assert_eq!(addr, &p.user);
+    match &invocation.function {
+        AuthorizedFunction::Contract((contract, name, _)) => {
+            assert_eq!(contract, &p.t.contract_id);
+            assert_eq!(
+                name,
+                &soroban_sdk::Symbol::new(&p.t.env, "set_user_template")
+            );
+        }
+        _ => panic!("unexpected authorized function"),
+    }
+    let transfers: std::vec::Vec<_> = invocation
+        .sub_invocations
+        .iter()
+        .map(|sub| match &sub.function {
+            AuthorizedFunction::Contract((contract, name, args)) => {
+                assert_eq!(contract, &p.token);
+                assert_eq!(name, &soroban_sdk::Symbol::new(&p.t.env, "transfer"));
+                let to: Address = args.get(1).unwrap().into_val(&p.t.env);
+                let amount: i128 = args.get(2).unwrap().into_val(&p.t.env);
+                (to, amount)
+            }
+            _ => panic!("unexpected sub-invocation"),
+        })
+        .collect();
+    assert_eq!(
+        transfers,
+        std::vec![(p.designer.clone(), 1), (p.treasury.clone(), 2)]
     );
 }

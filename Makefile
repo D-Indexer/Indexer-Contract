@@ -29,10 +29,10 @@ cargo-check:
 	cargo check --locked
 
 clippy:
-	cargo clippy --all-targets --locked -- -D warnings
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 test:
-	cargo test --locked
+	cargo test --workspace --locked
 
 build-wasm:
 	cargo build --target wasm32v1-none --release --locked

@@ -38,3 +38,6 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Basis-point denominator for the designer royalty share (100%).
+pub const MAX_BPS: u32 = 10_000;

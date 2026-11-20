@@ -22,4 +22,7 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    InvalidRoyaltyShare = 20,
+    InvalidPrice = 21,
+    TreasuryNotSet = 22,
 }

@@ -1,0 +1,15 @@
+VERSION = "2.7.0"
+NETWORK_PASSPHRASE = "Public Global Stellar Network ; September 2015"
+
+[[FOLDER_CONTRACTS]]
+network = "mainnet"
+network_passphrase = "Public Global Stellar Network ; September 2015"
+contract_id = "COLDMAINNET"
+wasm_hash = "bb"
+source_commit = "c2"
+source_repository = "https://example.com/repo"
+documentation = "https://example.com/docs"
+
+[[FOLDER_CONTRACTS]]
+network = "futurenet"
+contract_id = "CFUTURE"

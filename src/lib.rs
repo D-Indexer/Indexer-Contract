@@ -6,6 +6,7 @@ mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+mod royalties;
 mod storage;
 mod template_registry;
 mod types;
@@ -14,11 +15,13 @@ mod validation;
 #[cfg(test)]
 mod test;
 
+#[cfg(feature = "lib")]
+pub use crate::types::DataKey;
+
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::PortfolioNFT;
-use crate::types::Template;
+pub use crate::types::{PortfolioNFT, Template, TemplatePrice};
 
 #[contract]
 pub struct FolderContract;
@@ -117,6 +120,44 @@ impl FolderContract {
     /// Returns the template ID currently assigned to the owner's Folder.
     pub fn get_user_template(env: Env, owner: Address) -> Option<u32> {
         storage::get_user_template(&env, &owner)
+    }
+
+    // ── Royalties ─────────────────────────────────────────────────────────────
+
+    /// Sets the treasury that receives the non-designer share of template fees.
+    pub fn set_treasury(env: Env, admin: Address, treasury: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        royalties::set_treasury(&env, &admin, &treasury)
+    }
+
+    pub fn get_treasury(env: Env) -> Option<Address> {
+        storage::get_treasury(&env)
+    }
+
+    /// Makes a template paid. Owners pay `price.amount` when they switch to it
+    /// via `set_user_template` or `mint_portfolio`.
+    pub fn set_template_price(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        price: TemplatePrice,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        royalties::set_template_price(&env, &admin, template_id, &price)
+    }
+
+    /// Makes a template free again.
+    pub fn remove_template_price(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        royalties::remove_template_price(&env, &admin, template_id)
+    }
+
+    pub fn get_template_price(env: Env, template_id: u32) -> Option<TemplatePrice> {
+        storage::get_template_price(&env, template_id)
     }
 
     // ── Portfolio NFT ─────────────────────────────────────────────────────────
