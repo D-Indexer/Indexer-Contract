@@ -19,8 +19,8 @@ pub fn mint_portfolio(
     // Must have claimed a Folder name before minting
     identity_map::get_identity(env, owner)?;
 
-    // Prevent double-mint
-    if storage::portfolio_exists(env, owner) {
+    // Prevent double-mint (single read, also refreshes the entry's TTL)
+    if storage::load_portfolio(env, owner).is_some() {
         return Err(ContractError::PortfolioAlreadyMinted);
     }
 
