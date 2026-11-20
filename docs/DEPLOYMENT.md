@@ -42,3 +42,17 @@ exist and be funded. Complete [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) first
 
 There is no in-place upgrade. Deploy a new contract, then update `CONTRACT_ID` in
 `Indexer-Frontend` and `Indexer-Backend` and re-index from the new contract.
+
+## Reproducible build (Docker)
+
+`make docker-build` builds the optimized wasm inside the pinned `linux/amd64`
+image from the `Dockerfile` (base image by digest, rustup and Stellar CLI
+checksum-verified, non-root user, fixed paths) and prints its sha256. Apple
+Silicon runs the same image under emulation. `.devcontainer/` opens the `dev`
+stage of the same image. CI checks that the Docker and native hashes match.
+
+Expected hash: at `8fc9510` both `make docker-build` and the native
+`make build-optimized` produced
+`b262c3163359fb81adb20f0c6d6623579a5df02ee6221f4bf31d76487fb32055` on
+x86_64 Linux. The current `main` does not compile (see the PR description),
+so its hash will be recorded once that is fixed.
