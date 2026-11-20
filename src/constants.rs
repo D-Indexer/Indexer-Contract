@@ -38,3 +38,7 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Minimum number of admins that must remain after a self-service
+/// resignation (`resign_admin`). Set to 2 for mainnet, 1 for testnet.
+pub const MIN_ADMINS_AFTER_RESIGN: u32 = 2;

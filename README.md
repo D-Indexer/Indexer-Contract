@@ -102,6 +102,7 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
 | `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
+| `resign_admin` | `admin: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `AdminQuorumTooLow` (20) |
 | `claim_folder` | `owner: Address, folder_name: String` | `owner` | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
@@ -113,6 +114,8 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `resign_admin` is self-service: it always removes the caller and refuses to leave fewer than
+  `MIN_ADMINS_AFTER_RESIGN` admins (2 mainnet, 1 testnet), returning `AdminQuorumTooLow` (20).
 
 ### Reads
 

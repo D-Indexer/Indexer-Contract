@@ -66,6 +66,14 @@ impl FolderContract {
         access_control::remove_admin(&env, &admin, &target)
     }
 
+    /// Removes the calling admin from the admin set. Fails with
+    /// `AdminQuorumTooLow` if fewer than `MIN_ADMINS_AFTER_RESIGN` admins
+    /// would remain.
+    pub fn resign_admin(env: Env, admin: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::resign_admin(&env, &admin)
+    }
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     pub fn claim_folder(

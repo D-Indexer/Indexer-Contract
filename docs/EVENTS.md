@@ -23,7 +23,7 @@ Compatibility rules:
 |---|---|---|---|
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
-| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
+| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin`, `resign_admin` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
@@ -47,6 +47,11 @@ Compatibility rules:
 |---|---|
 | `init` | Seed the admin set with `admin` |
 | `adm_add` / `adm_rm` | Add / remove the admin from the admin set |
+
+`resign_admin` emits `adm_rm` with `admin == target == resigning admin`, so indexers need no
+special case: the same handler that removes `target` from the admin set applies. A resignation
+that would leave fewer than `MIN_ADMINS_AFTER_RESIGN` admins fails with `AdminQuorumTooLow` (20)
+and emits nothing.
 | `folder_cl` | Upsert identity `owner ↔ folder_name` |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
