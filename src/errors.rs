@@ -22,4 +22,13 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    // Granular validation codes (append-only; never renumber existing codes).
+    FolderNameTooShort = 20,
+    FolderNameTooLong = 21,
+    FolderNameBadChars = 22,
+    FolderNameBadSuffix = 23,
+    FolderNameBadHyphen = 24,
+    CidTooShort = 25,
+    CidTooLong = 26,
+    CidBadPrefix = 27,
 }

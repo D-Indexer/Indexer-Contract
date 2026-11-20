@@ -145,10 +145,10 @@ fn test_owner_cannot_claim_second_folder() {
 fn test_short_folder_name_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "ab");
+    let name = String::from_str(&t.env, "ab.folder");
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooShort);
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn test_long_folder_name_rejected() {
     );
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooLong);
 }
 
 #[test]

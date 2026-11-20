@@ -65,17 +65,35 @@ fn is_path_byte(byte: u8) -> bool {
 }
 
 /// Checks the textual shape of a CIDv0 (`Qm` + base58btc, 46 chars) or a
-/// base32 CIDv1 (`ba` + lowercase base32).
-fn is_valid_cid(bytes: &Bytes) -> bool {
+/// base32 CIDv1 (`ba` + lowercase base32), returning a granular error code.
+fn check_cid(bytes: &Bytes) -> Result<(), ContractError> {
     let len = bytes.len();
     if starts_with(bytes, b"Qm") {
-        return len == CIDV0_LEN && all_bytes(bytes, is_base58_byte);
+        if len != CIDV0_LEN {
+            return Err(ContractError::CidTooShort);
+        }
+        if !all_bytes(bytes, is_base58_byte) {
+            return Err(ContractError::CidBadPrefix);
+        }
+        return Ok(());
     }
     if starts_with(bytes, b"ba") {
-        return (MIN_IPFS_CID_LEN..=MAX_IPFS_CID_LEN).contains(&len)
-            && all_bytes(bytes, is_base32_lower_byte);
+        if len < MIN_IPFS_CID_LEN {
+            return Err(ContractError::CidTooShort);
+        }
+        if len > MAX_IPFS_CID_LEN {
+            return Err(ContractError::CidTooLong);
+        }
+        if !all_bytes(bytes, is_base32_lower_byte) {
+            return Err(ContractError::CidBadPrefix);
+        }
+        return Ok(());
     }
-    false
+    Err(ContractError::CidBadPrefix)
+}
+
+fn is_valid_cid(bytes: &Bytes) -> bool {
+    check_cid(bytes).is_ok()
 }
 
 /// Validates a Folder name: `<label>.folder`, where the label is at least
@@ -85,29 +103,28 @@ pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractErr
     let bytes = folder_name.to_bytes();
     let len = bytes.len();
     let suffix_len = FOLDER_SUFFIX.len() as u32;
-    if len > MAX_FOLDER_NAME_LEN
-        || len < MIN_FOLDER_LABEL_LEN + suffix_len
-        || !ends_with(&bytes, FOLDER_SUFFIX)
-    {
-        return Err(ContractError::InvalidFolderName);
+    if len > MAX_FOLDER_NAME_LEN {
+        return Err(ContractError::FolderNameTooLong);
+    }
+    if !ends_with(&bytes, FOLDER_SUFFIX) {
+        return Err(ContractError::FolderNameBadSuffix);
+    }
+    if len < MIN_FOLDER_LABEL_LEN + suffix_len {
+        return Err(ContractError::FolderNameTooShort);
     }
     let label = bytes.slice(0..len - suffix_len);
-    if !all_bytes(&label, is_label_byte)
-        || label.first() == Some(b'-')
-        || label.last() == Some(b'-')
-    {
-        return Err(ContractError::InvalidFolderName);
+    if !all_bytes(&label, is_label_byte) {
+        return Err(ContractError::FolderNameBadChars);
+    }
+    if label.first() == Some(b'-') || label.last() == Some(b'-') {
+        return Err(ContractError::FolderNameBadHyphen);
     }
     Ok(())
 }
 
 /// Validates an IPFS CID (CIDv0 or base32 CIDv1) before it is anchored on-chain.
 pub fn require_valid_ipfs_cid(ipfs_cid: &String) -> Result<(), ContractError> {
-    if is_valid_cid(&ipfs_cid.to_bytes()) {
-        Ok(())
-    } else {
-        Err(ContractError::InvalidCID)
-    }
+    check_cid(&ipfs_cid.to_bytes())
 }
 
 /// Validates a template metadata URI: `ipfs://<cid>` optionally followed by
