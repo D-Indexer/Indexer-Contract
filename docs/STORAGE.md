@@ -34,3 +34,30 @@ Constants are in [`src/constants.rs`](../src/constants.rs). One day is about 17,
 - An entry that nobody touches for about 120 days is archived. It can be restored with
   `stellar contract restore`; it is not lost.
 - Read-only calls that are only simulated, never submitted, don't persist extensions.
+
+## Public TTL extension
+
+Two unauthenticated entry points let a backend or cron job keep active records alive without
+touching their data:
+
+| Function | Keys extended | Returns |
+|---|---|---|
+| `extend_owner_ttl(owner)` | `OwnerFolder(owner)`, `FolderOwner(name)`, `UserTemplate(owner)`, `Portfolio(owner)` | number of keys extended |
+| `extend_template_ttl(template_id)` | `Template(template_id)`, `TemplateList` | number of keys extended |
+
+- Neither function requires a signature and neither writes or changes any value.
+- Missing keys are skipped silently, so calling them for an owner or template that does not
+  exist is a no-op that returns `0`.
+- Each key is extended to 120 days, subject to the same threshold as every other read: a key
+  whose remaining TTL is still above 90 days is not re-extended, so repeated calls are cheap.
+
+### Suggested schedule
+
+- Run the job **once a day** for every owner seen in the last 30 days (e.g. owners with recent
+  `claim_folder`, `set_user_template`, `mint_portfolio` or `update_portfolio` activity).
+- Run it **once a week** for every registered template ID (`list_templates`).
+- Because of the 90-day threshold, a daily run only pays rent for entries that actually need it;
+  a monthly run is the minimum that keeps active records from ever reaching the 120-day archive
+  point. Prefer daily so a missed run or two is harmless.
+- Batch calls (a few dozen per transaction) to stay well inside the per-transaction resource
+  limits; the functions are idempotent, so retries are safe.

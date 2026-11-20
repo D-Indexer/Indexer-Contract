@@ -38,3 +38,14 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+// ── Hard ceilings for admin-tunable config ────────────────────────────────────
+// `set_config` rejects any value above these; they are compile-time bounds and
+// can never be raised by an admin.
+
+/// Hard ceiling for the configurable maximum folder name length.
+pub const HARD_MAX_FOLDER_NAME_LEN: u32 = 128;
+/// Hard ceiling for the configurable maximum metadata URI length.
+pub const HARD_MAX_METADATA_URI_LEN: u32 = 512;
+/// Hard ceiling for the configurable maximum number of templates.
+pub const HARD_MAX_TEMPLATES: u32 = 1_024;
