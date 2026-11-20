@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, BytesN, String};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,7 +21,9 @@ pub struct Template {
 pub enum DataKey {
     AdminList,
     Initialized,
-    // identity_map: folder_name -> owner
+    // identity_map: sha256(folder_name) -> owner (current layout)
+    FolderOwnerHash(BytesN<32>),
+    // identity_map: folder_name -> owner (legacy layout, read-only migration path)
     FolderOwner(String),
     // identity_map: owner -> folder_name
     OwnerFolder(Address),

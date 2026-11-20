@@ -15,6 +15,7 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::storage;
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -698,7 +699,7 @@ fn test_persistent_ttl_fits_network_max_entry_ttl() {
     t.client().claim_folder(&user, &name);
 
     // The requested extension is applied exactly, not clamped by the host.
-    let ttl = t.persistent_ttl(&DataKey::FolderOwner(name));
+    let ttl = t.persistent_ttl(&storage::folder_owner_key(&t.env, &name));
     assert_eq!(ttl, PERSISTENT_BUMP_AMOUNT);
 }
 
@@ -713,7 +714,7 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
     t.client().get_folder(&name);
     // Still above the threshold, so no rent is spent re-extending it.
     assert_eq!(
-        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        t.persistent_ttl(&storage::folder_owner_key(&t.env, &name)),
         PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
     );
 }

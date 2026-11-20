@@ -44,8 +44,16 @@ pub fn is_admin(env: &Env, address: &Address) -> bool {
 
 // ── Identity Map ──────────────────────────────────────────────────────────────
 
+/// Hashed key for a Folder name. `sha256` output is a fixed 32 bytes, so the
+/// ledger key is the same size for every name length (3..=64 bytes).
+pub fn folder_owner_key(env: &Env, folder_name: &String) -> DataKey {
+    DataKey::FolderOwnerHash(env.crypto().sha256(folder_name).to_bytes())
+}
+
+/// Reads the owner of a Folder. Falls back to the legacy `FolderOwner(String)`
+/// layout and lazily migrates the entry to the hashed layout on first read.
 pub fn get_folder_owner(env: &Env, folder_name: &String) -> Option<Address> {
-    let key = DataKey::FolderOwner(folder_name.clone());
+    let key = folder_owner_key(env, folder_name);
     let result = env.storage().persistent().get(&key);
     if result.is_some() {
         env.storage().persistent().extend_ttl(
@@ -53,12 +61,25 @@ pub fn get_folder_owner(env: &Env, folder_name: &String) -> Option<Address> {
             PERSISTENT_LIFETIME_THRESHOLD,
             PERSISTENT_BUMP_AMOUNT,
         );
+        return result;
     }
-    result
+
+    let legacy_key = DataKey::FolderOwner(folder_name.clone());
+    let legacy: Option<Address> = env.storage().persistent().get(&legacy_key);
+    if let Some(owner) = legacy {
+        env.storage().persistent().set(&key, &owner);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+        env.storage().persistent().remove(&legacy_key);
+    }
+    legacy
 }
 
 pub fn set_folder_owner(env: &Env, folder_name: &String, owner: &Address) {
-    let folder_key = DataKey::FolderOwner(folder_name.clone());
+    let folder_key = folder_owner_key(env, folder_name);
     let owner_key = DataKey::OwnerFolder(owner.clone());
     env.storage().persistent().set(&folder_key, owner);
     env.storage().persistent().set(&owner_key, folder_name);
