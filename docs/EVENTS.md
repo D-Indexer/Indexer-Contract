@@ -4,6 +4,11 @@ Events are typed Soroban `#[contractevent]` structs in [`src/events.rs`](../src/
 backend indexer (`Indexer-Backend`) depends on this file. Update it in the same PR as any change
 to `src/events.rs`.
 
+The machine-readable schema is [`events.schema.json`](../events.schema.json), generated from
+`src/events.rs` by [`scripts/events_schema.py`](../scripts/events_schema.py). Regenerate it with
+`make events-schema`; `make events-schema-check` (part of `make check` and CI) fails when the
+committed file is stale. Do not edit the schema by hand.
+
 ## Encoding
 
 Every event has:

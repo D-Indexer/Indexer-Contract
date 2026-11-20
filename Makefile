@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check events-schema events-schema-check snapshot-list check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -15,6 +15,8 @@ help:
 	@echo "  build-optimized Build optimized WASM with Stellar CLI -> $(OPTIMIZED_WASM)"
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
 	@echo "  script-check  Validate shell scripts"
+	@echo "  events-schema Regenerate events.schema.json from src/events.rs"
+	@echo "  events-schema-check Fail if events.schema.json is stale"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
@@ -51,10 +53,16 @@ wasm-hash: build-optimized
 script-check:
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
 
+events-schema:
+	python3 scripts/events_schema.py
+
+events-schema-check:
+	python3 scripts/events_schema.py --check
+
 snapshot-list:
 	@find test_snapshots -type f | sort
 
-check: fmt-check cargo-check clippy test build-wasm script-check
+check: fmt-check cargo-check clippy test build-wasm script-check events-schema-check
 
 clean:
 	cargo clean
