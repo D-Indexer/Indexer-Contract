@@ -22,4 +22,8 @@ pub enum ContractError {
     InvalidTemplateID = 17,
     TemplateLimitReached = 18,
     TooManyAdmins = 19,
+    IncompatibleSchema = 20,
+    TemplateNotAllowed = 21,
+    PortfolioLimitReached = 22,
+    InvalidSchemaList = 23,
 }

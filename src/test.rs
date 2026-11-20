@@ -6,7 +6,8 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, String,
+    xdr::{self, WriteXdr as _},
+    Address, Bytes, BytesN, Env, Event as _, String,
 };
 
 use crate::constants::{
@@ -14,7 +15,10 @@ use crate::constants::{
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::events::{
+    AdminAdded, AdminRemoved, ContractInitialized, PortfolioMinted, PortfolioUpdated,
+    TemplateRegistered,
+};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -779,6 +783,7 @@ fn test_initialize_emits_event_and_exposes_admins() {
         t.env.events().all().filter_by_contract(&t.contract_id),
         [ContractInitialized {
             admin: t.admin.clone(),
+            seq: 1,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );
@@ -799,6 +804,7 @@ fn test_admin_changes_emit_events() {
         [AdminAdded {
             admin: t.admin.clone(),
             new_admin: new_admin.clone(),
+            seq: 2,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );
@@ -809,6 +815,7 @@ fn test_admin_changes_emit_events() {
         [AdminRemoved {
             admin: new_admin.clone(),
             target: t.admin.clone(),
+            seq: 3,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );
@@ -862,6 +869,7 @@ fn test_template_registered_event_includes_creator() {
             template_id: 7,
             metadata_uri: uri,
             creator: t.admin.clone(),
+            seq: 2,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );
@@ -1127,5 +1135,463 @@ fn test_writes_fail_without_signature() {
     assert_eq!(
         t.client().get_portfolio(&user).ipfs_cid,
         String::from_str(&t.env, VALID_CIDV1_RAW)
+    );
+}
+
+// ── Event sequence and digest (#250) ────────────────────────────────────────
+
+const URI: &str = "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety";
+const CID_A: &str = "bafkreiaonkhaxbe63gygjrnclypokwjpij7d5ooskdsca2ooiykh2ahi2q";
+const CID_B: &str = "bafkreifwfa7v77kn2om36djjtqiwqykldpady3ytsfbqkqgcrfilhjqtnu";
+
+fn s(t: &TestEnv, v: &str) -> String {
+    String::from_str(&t.env, v)
+}
+
+/// Registers template 1 and claims a Folder for a fresh user.
+fn user_with_folder(t: &TestEnv, label: &str) -> Address {
+    if t.client().try_get_template(&1u32).is_err() {
+        t.client().register_template(&t.admin, &1u32, &s(t, URI));
+    }
+    let user = Address::generate(&t.env);
+    let mut name = std::string::String::from(label);
+    name.push_str(".folder");
+    t.client().claim_folder(&user, &s(t, &name));
+    user
+}
+
+/// Backend-side digest step, recomputed from an emitted event.
+fn fold_event(env: &Env, digest: [u8; 32], ev: &xdr::ContractEvent) -> (u64, [u8; 32]) {
+    let xdr::ContractEventBody::V0(body) = &ev.body;
+    let xdr::ScVal::Vec(Some(items)) = &body.data else {
+        panic!("event data is not a vec");
+    };
+    let xdr::ScVal::U64(seq) = items.last().unwrap() else {
+        panic!("last data field is not the u64 seq");
+    };
+    let topics = xdr::ScVal::Vec(Some(xdr::ScVec(body.topics.clone())));
+    let mut preimage = digest.to_vec();
+    preimage.extend_from_slice(&seq.to_be_bytes());
+    preimage.extend(topics.to_xdr(xdr::Limits::none()).unwrap());
+    preimage.extend(body.data.to_xdr(xdr::Limits::none()).unwrap());
+    let next = env
+        .crypto()
+        .sha256(&Bytes::from_slice(env, &preimage))
+        .to_array();
+    (*seq, next)
+}
+
+fn collect(t: &TestEnv, out: &mut std::vec::Vec<xdr::ContractEvent>) {
+    out.extend(
+        t.env
+            .events()
+            .all()
+            .filter_by_contract(&t.contract_id)
+            .events()
+            .iter()
+            .cloned(),
+    );
+}
+
+#[test]
+fn test_event_cursor_starts_empty() {
+    let t = uninitialized_env();
+    assert_eq!(
+        t.client().get_event_cursor(),
+        (0u64, BytesN::from_array(&t.env, &[0; 32]))
+    );
+}
+
+#[test]
+fn test_event_encoding_vector() {
+    let t = uninitialized_env();
+    t.client().initialize(&t.admin);
+    let events = t.env.events().all().filter_by_contract(&t.contract_id);
+    let xdr::ContractEventBody::V0(body) = &events.events()[0].body;
+
+    // topics = ScVal::Vec([Symbol("init")])
+    let topics = xdr::ScVal::Vec(Some(xdr::ScVec(body.topics.clone())));
+    assert_eq!(
+        topics.to_xdr(xdr::Limits::none()).unwrap(),
+        [
+            0, 0, 0, 16, // SCV_VEC
+            0, 0, 0, 1, // present
+            0, 0, 0, 1, // 1 element
+            0, 0, 0, 15, // SCV_SYMBOL
+            0, 0, 0, 4, b'i', b'n', b'i', b't',
+        ]
+    );
+
+    // digest_1 = sha256(32 zero bytes || seq 1 as u64 BE || topics || data)
+    let mut preimage = std::vec![0u8; 32];
+    preimage.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 1]);
+    preimage.extend(topics.to_xdr(xdr::Limits::none()).unwrap());
+    preimage.extend(body.data.to_xdr(xdr::Limits::none()).unwrap());
+    let expected = t.env.crypto().sha256(&Bytes::from_slice(&t.env, &preimage));
+    assert_eq!(t.client().get_event_cursor(), (1u64, expected.to_bytes()));
+}
+
+#[test]
+fn test_event_digest_recomputes_over_mixed_sequence() {
+    let t = uninitialized_env();
+    let mut events = std::vec::Vec::new();
+    let mut ops = 0;
+
+    t.client().initialize(&t.admin);
+    collect(&t, &mut events);
+    ops += 1;
+    for id in 1..=7u32 {
+        t.client().register_template(&t.admin, &id, &s(&t, URI));
+        collect(&t, &mut events);
+        ops += 1;
+    }
+    let second_admin = Address::generate(&t.env);
+    t.client().add_admin(&t.admin, &second_admin);
+    collect(&t, &mut events);
+    ops += 1;
+    for i in 0..5 {
+        let user = Address::generate(&t.env);
+        let name = std::format!("user{i}.folder");
+        t.client().claim_folder(&user, &s(&t, &name));
+        collect(&t, &mut events);
+        t.client().mint_portfolio(&user, &1u32, &s(&t, CID_A));
+        collect(&t, &mut events);
+        t.client().update_portfolio(&user, &s(&t, CID_B));
+        collect(&t, &mut events);
+        t.client().set_user_template(&user, &2u32);
+        collect(&t, &mut events);
+        ops += 4;
+    }
+    // A failed call emits nothing and must not consume a sequence number.
+    assert!(t
+        .client()
+        .try_register_template(&t.admin, &1u32, &s(&t, URI))
+        .is_err());
+    t.client().remove_admin(&t.admin, &second_admin);
+    collect(&t, &mut events);
+    ops += 1;
+    assert_eq!(ops, 30);
+    assert_eq!(events.len(), 30);
+
+    let mut digest = [0u8; 32];
+    for (i, ev) in events.iter().enumerate() {
+        let (seq, next) = fold_event(&t.env, digest, ev);
+        assert_eq!(seq, i as u64 + 1, "sequence numbers must be gapless");
+        digest = next;
+    }
+    assert_eq!(
+        t.client().get_event_cursor(),
+        (30u64, BytesN::from_array(&t.env, &digest))
+    );
+}
+
+// ── Content schemas (#251) ──────────────────────────────────────────────────
+
+#[test]
+fn test_legacy_entry_points_default_to_schema_1() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "legacy");
+    assert_eq!(
+        t.client().get_template_schemas(&1u32),
+        soroban_sdk::vec![&t.env, 1u32]
+    );
+    t.client().mint_portfolio(&user, &1u32, &s(&t, CID_A));
+    assert_eq!(t.client().get_portfolio_schema(&user), 1);
+
+    let res = t
+        .client()
+        .try_update_portfolio_v2(&user, &s(&t, CID_B), &2u32);
+    expect_contract_error(res, ContractError::IncompatibleSchema);
+    t.client().update_portfolio(&user, &s(&t, CID_B));
+    assert_eq!(t.client().get_portfolio_schema(&user), 1);
+}
+
+#[test]
+fn test_schema_compatibility_matrix() {
+    let t = TestEnv::new();
+    let a = user_with_folder(&t, "alice");
+    let b = user_with_folder(&t, "bobby");
+    t.client().register_template(&t.admin, &2u32, &s(&t, URI));
+    t.client()
+        .set_template_schemas(&t.admin, &2u32, &soroban_sdk::vec![&t.env, 2u32, 3u32]);
+
+    // (template, schema) -> compatible?
+    for (template, schema, ok) in [
+        (1u32, 1u32, true),
+        (1, 2, false),
+        (2, 1, false),
+        (2, 2, true),
+        (2, 3, true),
+    ] {
+        let user = user_with_folder(&t, &std::format!("m{template}x{schema}"));
+        let res = t
+            .client()
+            .try_mint_portfolio_v2(&user, &template, &s(&t, CID_A), &schema);
+        assert_eq!(res.is_ok(), ok, "mint template {template} schema {schema}");
+        if !ok {
+            expect_contract_error(res, ContractError::IncompatibleSchema);
+        }
+    }
+
+    // Legacy mint on a template without schema 1.
+    let res = t.client().try_mint_portfolio(&a, &2u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::IncompatibleSchema);
+
+    t.client().mint_portfolio(&a, &1u32, &s(&t, CID_A));
+    t.client()
+        .mint_portfolio_v2(&b, &2u32, &s(&t, CID_A), &3u32);
+    assert_eq!(t.client().get_portfolio_schema(&b), 3);
+
+    // Update.
+    t.client().update_portfolio_v2(&b, &s(&t, CID_B), &2u32);
+    assert_eq!(t.client().get_portfolio_schema(&b), 2);
+    let res = t.client().try_update_portfolio(&b, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::IncompatibleSchema);
+
+    // Template change.
+    let res = t.client().try_set_user_template(&a, &2u32);
+    expect_contract_error(res, ContractError::IncompatibleSchema);
+    let res = t.client().try_set_user_template(&b, &1u32);
+    expect_contract_error(res, ContractError::IncompatibleSchema);
+    t.client()
+        .set_template_schemas(&t.admin, &1u32, &soroban_sdk::vec![&t.env, 1u32, 2u32]);
+    t.client().set_user_template(&b, &1u32);
+    assert_eq!(t.client().get_portfolio(&b).template_id, 1);
+}
+
+#[test]
+fn test_template_schema_list_rules() {
+    let t = TestEnv::new();
+    user_with_folder(&t, "rules");
+    let mut nine = soroban_sdk::Vec::new(&t.env);
+    for i in 1..=9u32 {
+        nine.push_back(i);
+    }
+    for bad in [
+        soroban_sdk::Vec::new(&t.env),
+        nine,
+        soroban_sdk::vec![&t.env, 0u32],
+    ] {
+        let res = t.client().try_set_template_schemas(&t.admin, &1u32, &bad);
+        expect_contract_error(res, ContractError::InvalidSchemaList);
+    }
+    let res = t.client().try_set_template_schemas(
+        &Address::generate(&t.env),
+        &1u32,
+        &soroban_sdk::vec![&t.env, 1u32],
+    );
+    expect_contract_error(res, ContractError::Unauthorized);
+    let res =
+        t.client()
+            .try_set_template_schemas(&t.admin, &9u32, &soroban_sdk::vec![&t.env, 1u32]);
+    expect_contract_error(res, ContractError::TemplateNotFound);
+}
+
+// ── Portfolio slots (#252) ──────────────────────────────────────────────────
+
+#[test]
+fn test_portfolio_slots_legacy_compatibility() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "slots");
+    assert_eq!(t.client().list_portfolio_slots(&user).len(), 0);
+
+    t.client().mint_portfolio(&user, &1u32, &s(&t, CID_A));
+    assert_eq!(
+        t.client().get_portfolio_slot(&user, &0u32),
+        t.client().get_portfolio(&user)
+    );
+    let res = t
+        .client()
+        .try_mint_portfolio_slot(&user, &0u32, &1u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
+
+    t.client()
+        .update_portfolio_slot(&user, &0u32, &s(&t, CID_B));
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_B));
+
+    // Slot 0 through the slot API is the legacy portfolio.
+    let other = user_with_folder(&t, "other");
+    t.client()
+        .mint_portfolio_slot(&other, &0u32, &1u32, &s(&t, CID_A));
+    assert!(t.client().verify_portfolio(&other));
+}
+
+#[test]
+fn test_multiple_slots_and_cap() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "multi");
+    for slot in [7u32, 1, 2, 3] {
+        t.client()
+            .mint_portfolio_slot(&user, &slot, &1u32, &s(&t, CID_A));
+    }
+    assert!(!t.client().verify_portfolio(&user));
+    let res = t
+        .client()
+        .try_mint_portfolio_slot(&user, &4u32, &1u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::PortfolioLimitReached);
+    let res = t
+        .client()
+        .try_mint_portfolio_slot(&user, &7u32, &1u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
+
+    // Slot 0 is always available on top of the extra slots.
+    t.client().mint_portfolio(&user, &1u32, &s(&t, CID_B));
+    assert_eq!(
+        t.client().list_portfolio_slots(&user),
+        soroban_sdk::vec![&t.env, 0u32, 7, 1, 2, 3]
+    );
+
+    t.client()
+        .update_portfolio_slot(&user, &2u32, &s(&t, CID_B));
+    assert_eq!(
+        t.client().get_portfolio_slot(&user, &2u32).ipfs_cid,
+        s(&t, CID_B)
+    );
+    assert_eq!(
+        t.client().get_portfolio_slot(&user, &1u32).ipfs_cid,
+        s(&t, CID_A)
+    );
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_B));
+
+    let res = t.client().try_get_portfolio_slot(&user, &4u32);
+    expect_contract_error(res, ContractError::PortfolioNotFound);
+    let res = t
+        .client()
+        .try_update_portfolio_slot(&user, &4u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::PortfolioNotFound);
+}
+
+#[test]
+fn test_portfolio_events_carry_slot() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "evslot");
+    let last = |t: &TestEnv| t.env.events().all().filter_by_contract(&t.contract_id);
+
+    let seq = t.client().get_event_cursor().0 + 1;
+    t.client().mint_portfolio(&user, &1u32, &s(&t, CID_A));
+    assert_eq!(
+        last(&t),
+        [PortfolioMinted {
+            owner: user.clone(),
+            template_id: 1,
+            ipfs_cid: s(&t, CID_A),
+            slot: 0,
+            seq,
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+
+    t.client()
+        .mint_portfolio_slot(&user, &3u32, &1u32, &s(&t, CID_A));
+    assert_eq!(
+        last(&t),
+        [PortfolioMinted {
+            owner: user.clone(),
+            template_id: 1,
+            ipfs_cid: s(&t, CID_A),
+            slot: 3,
+            seq: seq + 1,
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+
+    t.client()
+        .update_portfolio_slot(&user, &3u32, &s(&t, CID_B));
+    assert_eq!(
+        last(&t),
+        [PortfolioUpdated {
+            owner: user.clone(),
+            ipfs_cid: s(&t, CID_B),
+            slot: 3,
+            seq: seq + 2,
+        }
+        .to_xdr(&t.env, &t.contract_id)]
+    );
+}
+
+// ── Gated templates (#253) ──────────────────────────────────────────────────
+
+#[test]
+fn test_gated_template_matrix() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "gated");
+    t.client().register_template(&t.admin, &2u32, &s(&t, URI));
+    t.client().set_template_gated(&t.admin, &2u32, &true);
+
+    // Ungated template behaves as today.
+    assert!(t.client().can_use_template(&1u32, &user));
+    t.client().set_user_template(&user, &1u32);
+
+    // Gated, not allowlisted.
+    assert!(!t.client().can_use_template(&2u32, &user));
+    let res = t.client().try_set_user_template(&user, &2u32);
+    expect_contract_error(res, ContractError::TemplateNotAllowed);
+    let res = t.client().try_mint_portfolio(&user, &2u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::TemplateNotAllowed);
+    let res = t
+        .client()
+        .try_mint_portfolio_slot(&user, &1u32, &2u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::TemplateNotAllowed);
+
+    // Gated, allowlisted.
+    t.client().allow_template_owner(&t.admin, &2u32, &user);
+    assert!(t.client().can_use_template(&2u32, &user));
+    t.client().set_user_template(&user, &2u32);
+    t.client().mint_portfolio(&user, &2u32, &s(&t, CID_A));
+
+    // Ungating opens the template to everyone.
+    let stranger = user_with_folder(&t, "stranger");
+    t.client().set_template_gated(&t.admin, &2u32, &false);
+    assert!(t.client().can_use_template(&2u32, &stranger));
+    t.client().mint_portfolio(&stranger, &2u32, &s(&t, CID_A));
+
+    assert!(!t.client().can_use_template(&9u32, &user));
+}
+
+#[test]
+fn test_allowlist_removal_keeps_existing_selection() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "revoked");
+    t.client().register_template(&t.admin, &2u32, &s(&t, URI));
+    t.client().set_template_gated(&t.admin, &2u32, &true);
+    t.client().allow_template_owner(&t.admin, &2u32, &user);
+    t.client().set_user_template(&user, &2u32);
+
+    t.client().revoke_template_owner(&t.admin, &2u32, &user);
+    assert!(!t.client().can_use_template(&2u32, &user));
+    assert_eq!(t.client().get_user_template(&user), Some(2));
+    // Content updates still work; selecting the template again does not.
+    let res = t.client().try_mint_portfolio(&user, &2u32, &s(&t, CID_A));
+    expect_contract_error(res, ContractError::TemplateNotAllowed);
+    t.client().mint_portfolio(&user, &1u32, &s(&t, CID_A));
+    let res = t.client().try_set_user_template(&user, &2u32);
+    expect_contract_error(res, ContractError::TemplateNotAllowed);
+}
+
+#[test]
+fn test_gating_admin_rules() {
+    let t = TestEnv::new();
+    let user = user_with_folder(&t, "rulez");
+    let stranger = Address::generate(&t.env);
+    expect_contract_error(
+        t.client().try_set_template_gated(&stranger, &1u32, &true),
+        ContractError::Unauthorized,
+    );
+    expect_contract_error(
+        t.client().try_allow_template_owner(&stranger, &1u32, &user),
+        ContractError::Unauthorized,
+    );
+    expect_contract_error(
+        t.client()
+            .try_revoke_template_owner(&stranger, &1u32, &user),
+        ContractError::Unauthorized,
+    );
+    expect_contract_error(
+        t.client().try_set_template_gated(&t.admin, &9u32, &true),
+        ContractError::TemplateNotFound,
+    );
+    expect_contract_error(
+        t.client().try_allow_template_owner(&t.admin, &9u32, &user),
+        ContractError::TemplateNotFound,
     );
 }

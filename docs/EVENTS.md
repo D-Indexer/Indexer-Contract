@@ -21,14 +21,48 @@ Compatibility rules:
 
 | Topic | Struct | Data (in order) | Emitted by |
 |---|---|---|---|
-| `init` | `ContractInitialized` | `admin: Address` | `initialize` |
-| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
-| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
-| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
-| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
-| `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
-| `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
-| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `init` | `ContractInitialized` | `admin: Address`, `seq: u64` | `initialize` |
+| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address`, `seq: u64` | `add_admin` |
+| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address`, `seq: u64` | `remove_admin` |
+| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `seq: u64` | `claim_folder` |
+| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address`, `seq: u64` | `register_template` |
+| `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32`, `seq: u64` | `set_user_template` |
+| `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String`, `slot: u32`, `seq: u64` | `mint_portfolio`, `mint_portfolio_v2`, `mint_portfolio_slot` |
+| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `slot: u32`, `seq: u64` | `update_portfolio`, `update_portfolio_v2`, `update_portfolio_slot` |
+
+`slot` is the portfolio slot: `0` for the legacy single portfolio (and the legacy entry points),
+otherwise the slot passed to `mint_portfolio_slot` / `update_portfolio_slot`.
+
+## Sequence and digest
+
+Every event ends with `seq: u64`, a contract-wide counter that starts at `1` and increases by
+exactly one per emitted event. Failed calls roll back and consume no number, so a gap in the
+indexed sequence means a missed event.
+
+The contract also keeps a rolling digest over every event. Starting from 32 zero bytes:
+
+```
+digest_n = sha256(digest_{n-1} || seq_n || topics_xdr || data_xdr)
+```
+
+- `digest_{n-1}`: the previous 32-byte digest (`[0u8; 32]` before the first event).
+- `seq_n`: the event's `seq`, 8 bytes, big-endian `u64`.
+- `topics_xdr`: XDR of the topics as one `ScVal::Vec`, e.g. `[Symbol("init")]` encodes as
+  `00000010 00000001 00000001 0000000f 00000004 696e6974`.
+- `data_xdr`: XDR of the event data `ScVal::Vec` exactly as emitted, `seq` included.
+
+`get_event_cursor() -> (u64, BytesN<32>)` returns the last `seq` and `digest` (`(0, zeros)` before
+any event). An indexer that recomputes the same digest from the events it ingested has processed
+every event up to that `seq`.
+
+Cost: the sha256 over a typical ~260-byte preimage is ~19k CPU instructions in the test host,
+plus two small instance-storage writes, against ~440k for a whole `mint_portfolio` and ~330k for
+`update_portfolio`.
+
+### Changes for issues #250 and #252
+
+- **Appended:** `seq` as the last field of every event; `slot` before `seq` on `port_mint` and
+  `port_upd`.
 
 ### Changes in `feat/testnet-deploy`
 

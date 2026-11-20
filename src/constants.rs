@@ -38,3 +38,12 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Content schema assumed by the legacy portfolio entry points and by
+/// templates that never declared their supported schemas.
+pub const DEFAULT_CONTENT_SCHEMA: u32 = 1;
+/// Maximum number of content schemas a template can declare.
+pub const MAX_TEMPLATE_SCHEMAS: u32 = 8;
+
+/// Maximum number of portfolios per owner, legacy slot 0 included.
+pub const MAX_PORTFOLIOS_PER_OWNER: u32 = 5;
