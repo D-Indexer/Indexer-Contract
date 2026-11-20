@@ -179,7 +179,7 @@ that changes `src/events.rs` must update it.
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
 | `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
 | `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
-| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py`, `events_schema.py` |
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
 
