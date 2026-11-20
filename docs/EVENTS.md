@@ -24,11 +24,22 @@ Compatibility rules:
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
 | `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
-| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
+| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
+| `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+
+### Changes in the economics / soroban-sdk 29 update
+
+- **New:** `fee_set`, `withdraw`.
+- **Appended:** `fee_paid` as the third field of `folder_cl` (0 when no fee is configured).
+  Decoders that read the first two fields keep working.
+- **soroban-sdk 25.3.1 → 29.0.1:** on-chain event XDR encoding is unchanged apart from the
+  appended field above. Test snapshots now record protocol 29 and spell the event type key
+  `type` instead of `type_` (snapshot JSON only). Run `make sdk-compat` for the full report.
 
 ### Changes in `feat/testnet-deploy`
 

@@ -46,6 +46,11 @@ jobs:
       - name: Shell script syntax
         run: make script-check
 
+      - name: errors.json matches src/errors.rs
+        run: |
+          python3 scripts/test_errors_json.py
+          python3 scripts/errors_json.py --check
+
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
