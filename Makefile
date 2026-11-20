@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list mutants check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -16,6 +16,7 @@ help:
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
 	@echo "  script-check  Validate shell scripts"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
+	@echo "  mutants       Run cargo-mutants with mutants.toml"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
 
@@ -53,6 +54,10 @@ script-check:
 
 snapshot-list:
 	@find test_snapshots -type f | sort
+
+mutants:
+	@command -v cargo-mutants >/dev/null || { echo "cargo-mutants not installed (cargo install cargo-mutants)" >&2; exit 1; }
+	cargo mutants --config mutants.toml
 
 check: fmt-check cargo-check clippy test build-wasm script-check
 
