@@ -1129,3 +1129,191 @@ fn test_writes_fail_without_signature() {
         String::from_str(&t.env, VALID_CIDV1_RAW)
     );
 }
+
+// ── Admin audit log ───────────────────────────────────────────────────────────
+
+const TEMPLATE_URI: &str = "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety";
+
+#[test]
+fn test_admin_log_records_each_privileged_path() {
+    use crate::types::AdminSubject;
+    use soroban_sdk::symbol_short;
+
+    let t = TestEnv::new();
+    let other = Address::generate(&t.env);
+    let uri = String::from_str(&t.env, TEMPLATE_URI);
+    t.client().add_admin(&t.admin, &other);
+    t.client().register_template(&other, &7u32, &uri);
+    t.client().remove_admin(&t.admin, &other);
+
+    let log = t.client().get_admin_log(&0, &10);
+    assert_eq!(log.len(), 4);
+    let expected = [
+        (
+            symbol_short!("init"),
+            t.admin.clone(),
+            AdminSubject::Address(t.admin.clone()),
+        ),
+        (
+            symbol_short!("add_admin"),
+            t.admin.clone(),
+            AdminSubject::Address(other.clone()),
+        ),
+        (
+            symbol_short!("reg_tmpl"),
+            other.clone(),
+            AdminSubject::Template(7),
+        ),
+        (
+            symbol_short!("rm_admin"),
+            t.admin.clone(),
+            AdminSubject::Address(other.clone()),
+        ),
+    ];
+    for (i, (action, actor, subject)) in expected.into_iter().enumerate() {
+        let entry = log.get(i as u32).unwrap();
+        assert_eq!(entry.seq, i as u32);
+        assert_eq!(entry.action, action);
+        assert_eq!(entry.actor, actor);
+        assert_eq!(entry.subject, subject);
+        assert_eq!(entry.ledger, t.env.ledger().sequence());
+    }
+
+    // Failed privileged calls are not logged.
+    let res = t.client().try_register_template(&other, &8u32, &uri);
+    expect_contract_error(res, ContractError::Unauthorized);
+    assert_eq!(t.client().get_admin_log(&0, &10).len(), 4);
+}
+
+#[test]
+fn test_admin_log_wraps_and_stays_chronological() {
+    use crate::constants::ADMIN_LOG_SIZE;
+
+    let t = TestEnv::new();
+    t.env.cost_estimate().budget().reset_unlimited();
+    let uri = String::from_str(&t.env, TEMPLATE_URI);
+    // 1 init entry + (ADMIN_LOG_SIZE + 4) template registrations.
+    let total = ADMIN_LOG_SIZE + 5;
+    for id in 1..total {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+
+    let log = t.client().get_admin_log(&0, &u32::MAX);
+    assert_eq!(log.len(), ADMIN_LOG_SIZE);
+    for i in 0..ADMIN_LOG_SIZE {
+        assert_eq!(log.get(i).unwrap().seq, total - ADMIN_LOG_SIZE + i);
+    }
+
+    // Paging returns the same chronological window.
+    let page = t.client().get_admin_log(&(ADMIN_LOG_SIZE - 2), &10);
+    assert_eq!(page.len(), 2);
+    assert_eq!(page.get(1).unwrap().seq, total - 1);
+    assert_eq!(t.client().get_admin_log(&ADMIN_LOG_SIZE, &10).len(), 0);
+
+    // Each write touches only one slot: the ring never holds more entries.
+    let slots = (0..ADMIN_LOG_SIZE + 1)
+        .filter(|s| {
+            t.env.as_contract(&t.contract_id, || {
+                t.env.storage().persistent().has(&DataKey::AdminLog(*s))
+            })
+        })
+        .count();
+    assert_eq!(slots as u32, ADMIN_LOG_SIZE);
+}
+
+// ── Upgrade compatibility ─────────────────────────────────────────────────────
+//
+// Loads the previous release's wasm from `tests/fixtures/wasm/`, populates every
+// `DataKey` through its API, upgrades in place to the HEAD wasm and checks that
+// reads are unchanged and writes still work. See docs/RELEASE_CHECKLIST.md for
+// adding a fixture on each release.
+
+const PREVIOUS_RELEASE_WASM: &[u8] =
+    include_bytes!("../tests/fixtures/wasm/indexer_contract_v0.1.0.wasm");
+
+/// Builds the HEAD wasm once per test run and returns its bytes.
+fn head_wasm() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static WASM: OnceLock<std::vec::Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+        let status = std::process::Command::new(cargo)
+            .args([
+                "build",
+                "--target",
+                "wasm32v1-none",
+                "--release",
+                "--locked",
+            ])
+            .current_dir(manifest_dir)
+            .status()
+            .expect("failed to run cargo build for the HEAD wasm");
+        assert!(status.success(), "building the HEAD wasm failed");
+        let target_dir = std::env::var("CARGO_TARGET_DIR")
+            .unwrap_or_else(|_| std::format!("{manifest_dir}/target"));
+        std::fs::read(std::format!(
+            "{target_dir}/wasm32v1-none/release/indexer_contract.wasm"
+        ))
+        .expect("HEAD wasm not found")
+    })
+}
+
+#[test]
+fn test_upgrade_from_previous_release_preserves_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let id = env.register(PREVIOUS_RELEASE_WASM, ());
+    let client = FolderContractClient::new(&env, &id);
+
+    // Populate every DataKey variant through the previous release's API.
+    let admin = Address::generate(&env); // AdminList, Initialized
+    let admin2 = Address::generate(&env);
+    let user = Address::generate(&env);
+    let folder = String::from_str(&env, "alice.folder"); // FolderOwner, OwnerFolder
+    let uri = String::from_str(&env, TEMPLATE_URI);
+    let cid = String::from_str(&env, VALID_CIDV1_RAW);
+    client.initialize(&admin);
+    client.add_admin(&admin, &admin2);
+    client.register_template(&admin, &1u32, &uri); // Template, TemplateList
+    client.register_template(&admin, &2u32, &uri);
+    client.claim_folder(&user, &folder);
+    client.set_user_template(&user, &2u32); // UserTemplate
+    client.mint_portfolio(&user, &2u32, &cid); // Portfolio
+
+    let admins = client.get_admins();
+    let template = client.get_template(&1u32);
+    let templates = client.list_templates();
+    let portfolio = client.get_portfolio(&user);
+
+    // Upgrade in place to HEAD.
+    let head_hash = env.deployer().upload_contract_wasm(head_wasm());
+    env.as_contract(&id, || {
+        env.deployer().update_current_contract_wasm(head_hash)
+    });
+
+    // Every read returns the same data.
+    assert_eq!(client.get_admins(), admins);
+    assert_eq!(client.get_template(&1u32), template);
+    assert_eq!(client.list_templates(), templates);
+    assert_eq!(client.get_folder(&folder), user);
+    assert_eq!(client.get_identity(&user), folder);
+    assert_eq!(client.get_user_template(&user), Some(2u32));
+    assert_eq!(client.get_portfolio(&user), portfolio);
+    assert!(client.verify_portfolio(&user));
+    expect_contract_error(
+        client.try_initialize(&admin),
+        ContractError::AlreadyInitialized,
+    );
+
+    // Writes still work, including on keys added since the previous release.
+    let user2 = Address::generate(&env);
+    client.claim_folder(&user2, &String::from_str(&env, "bob.folder"));
+    client.register_template(&admin2, &3u32, &uri);
+    client.set_user_template(&user, &3u32);
+    assert_eq!(client.get_portfolio(&user).template_id, 3);
+    client.remove_admin(&admin, &admin2);
+    assert_eq!(client.get_admins().len(), 1);
+    assert_eq!(client.get_admin_log(&0, &10).len(), 2);
+}

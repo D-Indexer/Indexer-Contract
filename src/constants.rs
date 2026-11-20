@@ -38,3 +38,6 @@ pub const MAX_TEMPLATES: u32 = 256;
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.
 pub const MAX_ADMINS: u32 = 10;
+
+/// Number of most recent admin actions kept in the on-chain audit log.
+pub const ADMIN_LOG_SIZE: u32 = 50;

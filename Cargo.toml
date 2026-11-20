@@ -13,6 +13,9 @@ soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 [dev-dependencies]
 soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

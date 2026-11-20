@@ -1,9 +1,10 @@
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{symbol_short, Address, Env};
 
 use crate::constants::MAX_ADMINS;
 use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
+use crate::types::AdminSubject;
 
 pub fn require_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
     caller.require_auth();
@@ -32,6 +33,12 @@ pub fn add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(),
     }
     admins.push_back(new_admin.clone());
     storage::save_admins(env, &admins);
+    storage::append_admin_log(
+        env,
+        caller,
+        symbol_short!("add_admin"),
+        AdminSubject::Address(new_admin.clone()),
+    );
     events::admin_added(env, caller, new_admin);
     Ok(())
 }
@@ -53,6 +60,12 @@ pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(),
             }
             admins.remove(i);
             storage::save_admins(env, &admins);
+            storage::append_admin_log(
+                env,
+                caller,
+                symbol_short!("rm_admin"),
+                AdminSubject::Address(target.clone()),
+            );
             events::admin_removed(env, caller, target);
             Ok(())
         }

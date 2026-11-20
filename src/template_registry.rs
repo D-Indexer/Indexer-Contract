@@ -1,11 +1,11 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{symbol_short, Address, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
 use crate::constants::MAX_TEMPLATES;
 use crate::errors::ContractError;
 use crate::events;
 use crate::storage;
-use crate::types::Template;
+use crate::types::{AdminSubject, Template};
 use crate::validation;
 
 pub fn register_template(
@@ -30,6 +30,12 @@ pub fn register_template(
         creator: admin.clone(),
     };
     storage::save_template(env, &template);
+    storage::append_admin_log(
+        env,
+        admin,
+        symbol_short!("reg_tmpl"),
+        AdminSubject::Template(template_id),
+    );
     events::template_registered(env, template_id, metadata_uri, admin);
     Ok(())
 }

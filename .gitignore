@@ -2,3 +2,5 @@
 .env
 *.wasm
 !*.optimized.wasm
+!tests/fixtures/wasm/*.wasm
+deployments/local.json
