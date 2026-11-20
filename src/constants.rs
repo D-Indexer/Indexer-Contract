@@ -26,6 +26,20 @@ pub const CIDV0_LEN: u32 = 46;
 pub const MIN_IPFS_CID_LEN: u32 = 46;
 /// Maximum accepted IPFS CID length.
 pub const MAX_IPFS_CID_LEN: u32 = 128;
+/// CIDv1 multibase prefix for lowercase base32 (`b`).
+pub const CIDV1_MULTIBASE_PREFIX: u8 = b'b';
+/// CID version accepted for CIDv1 strings.
+pub const CIDV1_VERSION: u64 = 1;
+/// Allowlisted CIDv1 codecs: `raw` (0x55) and `dag-pb` (0x70).
+pub const CIDV1_ALLOWED_CODECS: [u64; 2] = [0x55, 0x70];
+/// Allowlisted multihash functions: `identity` (0x00) and `sha2-256` (0x12).
+pub const CIDV1_ALLOWED_MULTIHASH_CODES: [u64; 2] = [0x00, 0x12];
+/// Allowlisted multihash digest lengths: 32 bytes (sha2-256) and 0 bytes (identity).
+pub const CIDV1_ALLOWED_DIGEST_LENS: [u64; 2] = [32, 0];
+/// Maximum accepted CIDv1 string length, multibase prefix included.
+pub const MAX_CIDV1_LEN: u32 = 128;
+/// Minimum accepted CIDv1 string length, multibase prefix included.
+pub const MIN_CIDV1_LEN: u32 = 46;
 /// Required template metadata URI scheme.
 pub const METADATA_URI_SCHEME: &[u8] = b"ipfs://";
 /// Maximum accepted template metadata URI length.
