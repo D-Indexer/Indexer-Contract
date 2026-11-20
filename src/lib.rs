@@ -14,6 +14,9 @@ mod validation;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod invariants;
+
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 use crate::errors::ContractError;
