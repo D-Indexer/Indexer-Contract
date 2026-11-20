@@ -1,0 +1,71 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  SCOUT_VERSION: 0.3.17
+
+jobs:
+  gitleaks:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks ${{ env.GITLEAKS_VERSION }}
+        run: |
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLo "$RUNNER_TEMP/$f" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$f"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$f" | sha256sum --check
+          tar xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Rule test (fake Stellar seed must be detected)
+        run: |
+          d="$(mktemp -d)"
+          seed="S$(head -c 200 /dev/urandom | base32 | tr -dc 'A-Z2-7' | head -c 55)"
+          echo "SECRET_KEY=$seed" > "$d/leak.env"
+          if gitleaks dir "$d" --config .gitleaks.toml --no-banner --exit-code 1; then
+            echo "::error::stellar-secret-seed rule did not fire"; exit 1
+          fi
+          echo "stellar-secret-seed rule fired as expected"
+
+      - name: Scan full git history
+        run: gitleaks git . --config .gitleaks.toml --no-banner --redact --verbose
+
+  scout:
+    name: Soroban static analysis (Scout)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustup show active-toolchain
+
+      - name: Install cargo-scout-audit ${{ env.SCOUT_VERSION }}
+        run: |
+          cargo install --locked cargo-dylint dylint-link
+          cargo install --locked cargo-scout-audit --version "${SCOUT_VERSION}"
+
+      # Scout exits non-zero on findings; the report is uploaded either way.
+      - name: Run Scout
+        run: cargo scout-audit --output-format md --output-path scout-report.md
+
+      - name: Upload Scout report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scout-report
+          path: scout-report.md
+          if-no-files-found: warn
