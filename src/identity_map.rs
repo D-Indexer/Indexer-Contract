@@ -1,10 +1,12 @@
-use soroban_sdk::{token, Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
-use crate::access_control::require_owner;
+use crate::access_control::{require_admin, require_owner};
+use crate::constants::{MAX_BATCH_READ, RELEASE_COOLDOWN_LEDGERS};
 use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
 use crate::storage;
+use crate::types::FolderMeta;
 use crate::validation;
 
 /// Lease state of a Folder name that has an owner.
@@ -60,6 +62,15 @@ fn claim(
     folder_name: &String,
 ) -> Result<(), ContractError> {
     validation::require_valid_folder_name(folder_name)?;
+    if storage::is_reserved(env, folder_name) {
+        return Err(ContractError::FolderReserved);
+    }
+    if let Some(released_at) = storage::get_released_at(env, folder_name) {
+        if env.ledger().sequence() < released_at.saturating_add(RELEASE_COOLDOWN_LEDGERS) {
+            return Err(ContractError::FolderReleaseCooldown);
+        }
+        storage::remove_released_at(env, folder_name);
+    }
     if let Some(current) = storage::get_owner_folder(env, owner) {
         match lease_state(env, &current) {
             LeaseState::Released => storage::remove_folder(env, &current, owner),
@@ -74,18 +85,92 @@ fn claim(
         }
     }
 
-    let fee_paid = match storage::get_claim_fee(env) {
-        Some(fee) if fee.amount > 0 => {
-            // Covered by the owner's require_auth above. A failed transfer
-            // aborts the whole invocation, so no name mapping is written.
-            token::Client::new(env, &fee.token).transfer(owner, &fee.treasury, &fee.amount);
-            fee.amount
-        }
-        _ => 0,
-    };
-
+    // Charged before any write: a failed transfer aborts the whole invocation.
+    let fee_paid = pricing::quote_claim(env, folder_name)?;
+    pricing::charge(env, payer, fee_paid);
     storage::set_folder_owner(env, folder_name, owner);
+    storage::set_folder_meta(
+        env,
+        folder_name,
+        &FolderMeta {
+            claimed_at: env.ledger().timestamp(),
+            claimed_ledger: env.ledger().sequence(),
+        },
+    );
+    if let Some(lease) = storage::get_lease_config(env) {
+        let expiry = env
+            .ledger()
+            .timestamp()
+            .checked_add(lease.period_secs)
+            .ok_or(ContractError::InvalidRenewal)?;
+        storage::set_folder_expiry(env, folder_name, expiry);
+    }
     events::folder_claimed(env, owner, folder_name, fee_paid);
+    Ok(())
+}
+
+/// Gives up the owner's Folder name. Both directions of the mapping, the
+/// lease expiry and the owner's template selection are deleted, so the
+/// owner can claim a new name right away. The released name can be claimed
+/// again by anyone (the former owner included) once
+/// `RELEASE_COOLDOWN_LEDGERS` have passed.
+///
+/// Fails with `PortfolioExists` while the owner holds a minted portfolio: the
+/// portfolio is tied to the identity and must be burned first.
+pub fn release_folder(env: &Env, owner: &Address) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+    let folder_name = storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    // A lapsed lease is already up for grabs; there is nothing to release.
+    if let LeaseState::Released = lease_state(env, &folder_name) {
+        return Err(ContractError::FolderNotFound);
+    }
+    if storage::load_portfolio(env, owner).is_some() {
+        return Err(ContractError::PortfolioExists);
+    }
+
+    storage::remove_folder_owner(env, &folder_name);
+    storage::remove_owner_folder(env, owner);
+    storage::remove_folder_expiry(env, &folder_name);
+    storage::remove_folder_meta(env, &folder_name);
+    storage::remove_user_template(env, owner);
+    storage::set_released_at(env, &folder_name, env.ledger().sequence());
+    events::folder_released(env, owner, &folder_name);
+    Ok(())
+}
+
+/// Reserves `folder_name` so it cannot be claimed. Admin only. Fails with
+/// `FolderNameTaken` if the name has an owner (active or in its grace
+/// period); a released lease is cleared first. Reserving an already
+/// reserved name is a no-op apart from the event.
+pub fn reserve_folder(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    validation::require_valid_folder_name(folder_name)?;
+    if let Some(previous) = storage::get_folder_owner(env, folder_name) {
+        match lease_state(env, folder_name) {
+            LeaseState::Released => storage::remove_folder(env, folder_name, &previous),
+            _ => return Err(ContractError::FolderNameTaken),
+        }
+    }
+    storage::set_reserved(env, folder_name);
+    events::folder_reserved(env, admin, folder_name);
+    Ok(())
+}
+
+/// Lifts a reservation so the name can be claimed again. Admin only.
+/// Unreserving a name that is not reserved is a no-op apart from the event.
+pub fn unreserve_folder(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    validation::require_valid_folder_name(folder_name)?;
+    storage::remove_reserved(env, folder_name);
+    events::folder_unreserved(env, admin, folder_name);
     Ok(())
 }
 
@@ -128,6 +213,14 @@ pub fn get_folder(env: &Env, folder_name: &String) -> Result<Address, ContractEr
     }
 }
 
+/// Claim metadata of an active name. Names claimed before `FolderMeta`
+/// existed have no entry and fail with `FolderNotFound`, like unclaimed
+/// names; `get_folder` tells the two apart.
+pub fn get_folder_meta(env: &Env, folder_name: &String) -> Result<FolderMeta, ContractError> {
+    get_folder(env, folder_name)?;
+    storage::get_folder_meta(env, folder_name).ok_or(ContractError::FolderNotFound)
+}
+
 pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError> {
     let folder_name = storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
     match lease_state(env, &folder_name) {
@@ -135,6 +228,36 @@ pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError>
         LeaseState::Grace => Err(ContractError::FolderExpired),
         LeaseState::Released => Err(ContractError::FolderNotFound),
     }
+}
+
+/// Batch form of `get_folder`: one entry per input name, in input order.
+/// Any name `get_folder` would reject (unclaimed, malformed, expired)
+/// yields `None` instead of failing the batch.
+pub fn get_folders(env: &Env, names: &Vec<String>) -> Result<Vec<Option<Address>>, ContractError> {
+    if names.len() > MAX_BATCH_READ {
+        return Err(ContractError::BatchTooLarge);
+    }
+    let mut out = Vec::new(env);
+    for name in names.iter() {
+        out.push_back(get_folder(env, &name).ok());
+    }
+    Ok(out)
+}
+
+/// Batch form of `get_identity`: one entry per input owner, in input order.
+/// Any owner `get_identity` would reject yields `None`.
+pub fn get_identities(
+    env: &Env,
+    owners: &Vec<Address>,
+) -> Result<Vec<Option<String>>, ContractError> {
+    if owners.len() > MAX_BATCH_READ {
+        return Err(ContractError::BatchTooLarge);
+    }
+    let mut out = Vec::new(env);
+    for owner in owners.iter() {
+        out.push_back(get_identity(env, &owner).ok());
+    }
+    Ok(out)
 }
 
 pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {

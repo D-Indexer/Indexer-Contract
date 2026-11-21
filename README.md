@@ -102,7 +102,10 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
 | `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
-| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderReserved` (29), `FolderReleaseCooldown` (31), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `release_folder` | `owner: Address` | `owner` | `folder_rel` | 2, `FolderNotFound` (4), `PortfolioExists` (30) |
+| `reserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_rsv` | 2, 7, 9, 3 |
+| `unreserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_unrsv` | 2, 7, 9 |
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
 | `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
@@ -115,6 +118,14 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `reserve_folder` blocks a name (for example `admin.folder` or `stellar.folder`) from being
+  claimed by anyone, admins included, until `unreserve_folder`. Reservations are keyed by the full
+  `<label>.folder` name. Reserving a name that has an owner fails with `FolderNameTaken`; a lapsed
+  lease is cleared first. Both calls are idempotent.
+- `release_folder` deletes the owner's name mapping (both directions), lease expiry, claim
+  metadata and template selection, so the owner can claim a new name right away. The released name can be claimed again
+  by anyone, the former owner included, once `RELEASE_COOLDOWN_LEDGERS` (~7 days) have passed. An
+  owner who holds a minted portfolio can't release; see [docs/SECURITY.md](docs/SECURITY.md).
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -128,6 +139,10 @@ Notes:
 | `get_admins` | — | `Vec<Address>` (empty before `initialize`) | — |
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
+| `get_folders` | `names: Vec<String>` (at most `MAX_BATCH_READ` = 50) | `Vec<Option<Address>>`, same order as `names` | `BatchTooLarge` (32) |
+| `get_identities` | `owners: Vec<Address>` (at most 50) | `Vec<Option<String>>`, same order as `owners` | `BatchTooLarge` (32) |
+| `is_reserved` | `folder_name: String` | `bool`: whether an admin reserved the name | — |
+| `get_folder_meta` | `folder_name: String` | `FolderMeta { claimed_at: u64, claimed_ledger: u32 }` | `FolderNotFound` (4), `FolderExpired` (25) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
@@ -135,6 +150,20 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+
+`get_folders` and `get_identities` resolve a whole page of profiles in one RPC simulation. Each
+element equals the matching `get_folder` / `get_identity` result, with any error (unclaimed,
+malformed, expired) mapped to `None`, so one bad entry doesn't fail the batch. Inputs longer than
+`MAX_BATCH_READ` fail with `BatchTooLarge`. A full 50-item batch costs about 8.0M CPU
+instructions and 2.2 MB of memory (`get_folders`), or 4.4M and 0.9 MB (`get_identities`). A
+test pins the ceilings at 10M CPU and 3 MB.
+
+`get_folder_meta` returns the ledger close time (`claimed_at`, Unix seconds) and ledger sequence
+(`claimed_ledger`) of the current claim. Every claim writes it in the same invocation as
+`FolderOwner`, and release or lease takeover deletes it. Names claimed **before this upgrade**
+have no metadata entry, and `get_folder_meta` returns `FolderNotFound` (4) for them, the same as
+for unclaimed names. Call `get_folder` to tell the two apart: it still resolves pre-upgrade names.
+For those, fall back to the indexer's `folder_cl` record.
 
 ### Error codes
 
@@ -152,7 +181,12 @@ Codes are stable. New errors are appended and never renumbered.
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
 | 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
-| | | 21 | `InsufficientBalance` |
+| 21 | `InsufficientBalance` | 22 | `AdminChangeNotFound` |
+| 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
+| 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
+| 27 | `LeasesDisabled` | 28 | `InvalidRenewal` |
+| 29 | `FolderReserved` | 30 | `PortfolioExists` |
+| 31 | `FolderReleaseCooldown` | 32 | `BatchTooLarge` |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -167,7 +201,8 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`,
+   `name_rsv`, `name_unrsv`, `folder_rel`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
