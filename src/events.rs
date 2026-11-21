@@ -37,6 +37,13 @@ pub struct PortfolioUpdated {
     pub ipfs_cid: String,
 }
 
+#[contractevent(topics = ["port_burn"], data_format = "vec")]
+pub struct PortfolioBurned {
+    pub owner: Address,
+    /// The CID the portfolio pointed at when it was burned.
+    pub last_ipfs_cid: String,
+}
+
 #[contractevent(topics = ["tmpl_reg"], data_format = "vec")]
 pub struct TemplateRegistered {
     pub template_id: u32,
@@ -203,6 +210,14 @@ pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
     PortfolioUpdated {
         owner: owner.clone(),
         ipfs_cid: ipfs_cid.clone(),
+    }
+    .publish(env);
+}
+
+pub fn portfolio_burned(env: &Env, owner: &Address, last_ipfs_cid: &String) {
+    PortfolioBurned {
+        owner: owner.clone(),
+        last_ipfs_cid: last_ipfs_cid.clone(),
     }
     .publish(env);
 }

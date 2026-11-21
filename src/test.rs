@@ -2003,3 +2003,106 @@ fn budget_report() {
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
 }
+
+// ── Portfolio burn ──────────────────────────────────────────────────────────
+
+mod burn {
+    use super::*;
+    use crate::events::PortfolioBurned;
+
+    fn second_template(t: &TestEnv) {
+        let uri = String::from_str(
+            &t.env,
+            &(std::string::String::from("ipfs://") + VALID_CIDV0),
+        );
+        t.client().register_template(&t.admin, &2u32, &uri);
+    }
+
+    #[test]
+    fn burn_then_remint_with_another_template() {
+        let (t, user) = minted_env();
+        second_template(&t);
+        let name = t.client().get_identity(&user);
+
+        t.client().burn_portfolio(&user);
+        assert_single_auth(&t, &user, "burn_portfolio");
+
+        assert!(!t.client().verify_portfolio(&user));
+        expect_contract_error(
+            t.client().try_get_portfolio(&user),
+            ContractError::PortfolioNotFound,
+        );
+        // Owner-scoped state survives the burn.
+        assert_eq!(t.client().get_identity(&user), name);
+        assert_eq!(t.client().get_user_template(&user), Some(1u32));
+
+        let cid = String::from_str(&t.env, VALID_CIDV0);
+        t.client().mint_portfolio(&user, &2u32, &cid);
+        let nft = t.client().get_portfolio(&user);
+        assert_eq!(nft.template_id, 2u32);
+        assert_eq!(nft.ipfs_cid, cid);
+        assert!(t.client().verify_portfolio(&user));
+        assert_eq!(t.client().get_user_template(&user), Some(2u32));
+    }
+
+    #[test]
+    fn burn_without_portfolio_fails() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, "noport.folder"));
+        expect_contract_error(
+            t.client().try_burn_portfolio(&user),
+            ContractError::PortfolioNotFound,
+        );
+    }
+
+    #[test]
+    fn burn_twice_fails() {
+        let (t, user) = minted_env();
+        t.client().burn_portfolio(&user);
+        expect_contract_error(
+            t.client().try_burn_portfolio(&user),
+            ContractError::PortfolioNotFound,
+        );
+    }
+
+    #[test]
+    fn burn_removes_only_portfolio_keys() {
+        let (t, user) = minted_env();
+        let name = t.client().get_identity(&user);
+        assert!(t.has_persistent(&DataKey::Portfolio(user.clone())));
+
+        t.client().burn_portfolio(&user);
+
+        assert!(!t.has_persistent(&DataKey::Portfolio(user.clone())));
+        assert!(t.has_persistent(&DataKey::OwnerFolder(user.clone())));
+        assert!(t.has_persistent(&DataKey::FolderOwner(name)));
+        assert!(t.has_persistent(&DataKey::UserTemplate(user.clone())));
+    }
+
+    #[test]
+    fn burn_emits_owner_and_last_cid() {
+        let (t, user) = minted_env();
+        let cid = String::from_str(&t.env, VALID_CIDV0);
+        t.client().update_portfolio(&user, &cid);
+
+        t.client().burn_portfolio(&user);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [PortfolioBurned {
+                owner: user.clone(),
+                last_ipfs_cid: cid,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn burn_requires_owner_signature() {
+        let (t, user) = minted_env();
+        t.env.set_auths(&[]);
+        assert!(t.client().try_burn_portfolio(&user).is_err());
+        assert!(t.client().verify_portfolio(&user));
+    }
+}

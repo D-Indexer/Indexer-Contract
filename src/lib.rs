@@ -278,6 +278,13 @@ impl FolderContract {
         nft_mint::update_portfolio(&env, &owner, &ipfs_cid)
     }
 
+    /// Deletes the owner's portfolio. Keeps the Folder name and selected
+    /// template; `mint_portfolio` works again afterwards.
+    pub fn burn_portfolio(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::burn_portfolio(&env, &owner)
+    }
+
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
     }

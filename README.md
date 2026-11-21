@@ -109,11 +109,14 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `burn_portfolio` | `owner: Address` | `owner` | `port_burn` | 2, 5 |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
+- `burn_portfolio` deletes the portfolio record (and any portfolio-scoped keys) so the owner can
+  mint again, with any template. The Folder name and selected template are kept.
 - An admin may remove itself as long as another admin remains.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
@@ -170,12 +173,13 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `port_burn`, `fee_set`,
+   `withdraw`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
 4. **Apply.** Upsert by owner address: `folder_cl` → identity, `port_mint`/`port_upd` → portfolio
-   CID, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
+   CID, `port_burn` → delete the portfolio, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
    cache plus an IPFS fetch of `metadata_uri`. Timestamps and tx hashes come from the `getEvents`
    envelope (`ledger`, `ledgerClosedAt`, `txHash`).
 5. **Reconcile.** Use the read functions (`get_portfolio`, `get_identity`, `get_template`) to

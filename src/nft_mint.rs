@@ -56,6 +56,16 @@ pub fn update_portfolio(
     Ok(())
 }
 
+/// Deletes the owner's portfolio so they can mint again. The Folder name and
+/// the selected template (`UserTemplate`) are kept.
+pub fn burn_portfolio(env: &Env, owner: &Address) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+    let nft = storage::get_portfolio(env, owner)?;
+    storage::remove_portfolio(env, owner);
+    events::portfolio_burned(env, owner, &nft.ipfs_cid);
+    Ok(())
+}
+
 pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, ContractError> {
     storage::get_portfolio(env, owner)
 }

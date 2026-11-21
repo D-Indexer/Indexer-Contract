@@ -29,8 +29,14 @@ Compatibility rules:
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `port_burn` | `PortfolioBurned` | `owner: Address`, `last_ipfs_cid: String` | `burn_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+
+### Changes in the portfolio burn update
+
+- **New:** `port_burn`, emitted by `burn_portfolio`. `last_ipfs_cid` is the CID the portfolio
+  pointed at when it was burned, so the indexer can unpin or archive that content.
 
 ### Changes in the economics / soroban-sdk 29 update
 
@@ -65,6 +71,7 @@ Compatibility rules:
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
 | `port_upd` | Update the portfolio's `ipfs_cid` |
+| `port_burn` | Delete (or tombstone) the owner's portfolio record. Keep the owner's identity and selected template: a burn does not touch them. A later `port_mint` for the same owner starts a new portfolio, so don't merge it with the burned one. Optionally unpin `last_ipfs_cid` |
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also

@@ -316,6 +316,14 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
     );
 }
 
+/// Removes every portfolio-scoped key of `owner`. The identity mapping and
+/// `UserTemplate` are owner-scoped and deliberately left in place.
+pub fn remove_portfolio(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Portfolio(owner.clone()));
+}
+
 // ── Economics ─────────────────────────────────────────────────────────────────
 
 pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
