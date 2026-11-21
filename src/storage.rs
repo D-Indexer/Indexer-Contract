@@ -5,7 +5,10 @@ use crate::constants::{
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{ClaimFee, DataKey, PortfolioNFT, Template};
+use crate::types::{
+    AdminChange, ClaimFee, DataKey, FeeConfig, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+    TemplateSubmission,
+};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -35,7 +38,7 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
     let mut admins = Vec::new(env);
     let mut i = 0u32;
     while i < count {
-        if let Some(admin) = env.storage().instance().get(&DataKey::Admin(i)) {
+        if let Some(admin) = env.storage().instance().get(&DataKey::AdminIndex(i)) {
             admins.push_back(admin);
         }
         i += 1;
@@ -71,6 +74,9 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
         .set(&DataKey::Admin(address.clone()), &());
     env.storage()
         .instance()
+        .set(&DataKey::AdminIndex(count), address);
+    env.storage()
+        .instance()
         .set(&DataKey::AdminCount, &(count + 1));
     true
 }
@@ -95,9 +101,10 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
     let count = admin_count(env);
     let mut i = 0u32;
     while i < count {
-        if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin(i)) {
+        if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::AdminIndex(i)) {
             env.storage().instance().remove(&DataKey::Admin(admin));
         }
+        env.storage().instance().remove(&DataKey::AdminIndex(i));
         i += 1;
     }
     env.storage().instance().set(&DataKey::AdminCount, &0u32);
@@ -326,4 +333,175 @@ pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
 
 pub fn set_claim_fee(env: &Env, fee: &ClaimFee) {
     env.storage().instance().set(&DataKey::ClaimFee, fee);
+}
+
+// ── Blocklist ──────────────────────────────────────────────────────────────
+
+pub fn is_blocked(env: &Env, address: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .has(&DataKey::BlockedAddress(address.clone()))
+}
+
+pub fn block_address(env: &Env, address: &Address) {
+    let key = DataKey::BlockedAddress(address.clone());
+    env.storage().persistent().set(&key, &true);
+    extend_persistent(env, &key);
+}
+
+pub fn unblock_address(env: &Env, address: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::BlockedAddress(address.clone()));
+}
+
+// ── Portfolio flags ────────────────────────────────────────────────────────
+
+pub fn get_portfolio_flag(env: &Env, owner: &Address) -> u32 {
+    let key = DataKey::PortfolioFlag(owner.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+pub fn set_portfolio_flag(env: &Env, owner: &Address, flag: u32) {
+    let key = DataKey::PortfolioFlag(owner.clone());
+    if flag == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &flag);
+        extend_persistent(env, &key);
+    }
+}
+
+// ── Template submissions ──────────────────────────────────────────────────
+
+pub fn get_pending_template_submissions(env: &Env) -> Vec<u32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTemplateSubmissions)
+        .unwrap_or(Vec::new(env))
+}
+
+pub fn save_pending_template_submissions(env: &Env, pending: &Vec<u32>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTemplateSubmissions, pending);
+}
+
+pub fn next_template_submission_id(env: &Env) -> u32 {
+    let id: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::NextTemplateSubmissionId)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextTemplateSubmissionId, &(id + 1));
+    id
+}
+
+pub fn get_template_submission(env: &Env, submission_id: u32) -> Option<TemplateSubmission> {
+    let key = DataKey::TemplateSubmission(submission_id);
+    env.storage().persistent().get(&key)
+}
+
+pub fn save_template_submission(
+    env: &Env,
+    submission_id: u32,
+    submission: &TemplateSubmission,
+) {
+    let key = DataKey::TemplateSubmission(submission_id);
+    env.storage().persistent().set(&key, submission);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_template_submission(env: &Env, submission_id: u32) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::TemplateSubmission(submission_id));
+}
+
+pub fn get_template_designer(env: &Env, template_id: u32) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::TemplateDesigner(template_id))
+}
+
+pub fn set_template_designer(env: &Env, template_id: u32, designer: &Address) {
+    let key = DataKey::TemplateDesigner(template_id);
+    env.storage().persistent().set(&key, designer);
+    extend_persistent(env, &key);
+}
+
+// ── Template usage ─────────────────────────────────────────────────────────
+
+pub fn get_template_usage(env: &Env, template_id: u32) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::TemplateUsage(template_id))
+        .unwrap_or(0)
+}
+
+pub fn set_template_usage(env: &Env, template_id: u32, usage: u32) {
+    let key = DataKey::TemplateUsage(template_id);
+    if usage == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &usage);
+        extend_persistent(env, &key);
+    }
+}
+
+// ── Pricing and leases (baseline storage) ──────────────────────────────────
+
+pub fn get_fee_config(env: &Env) -> Option<FeeConfig> {
+    env.storage().instance().get(&DataKey::FeeConfig)
+}
+
+pub fn set_fee_config(env: &Env, config: &FeeConfig) {
+    env.storage().instance().set(&DataKey::FeeConfig, config);
+}
+
+pub fn get_price_tiers(env: &Env) -> PriceTiers {
+    env.storage()
+        .instance()
+        .get(&DataKey::PriceTiers)
+        .unwrap_or(PriceTiers {
+            by_len: Vec::new(env),
+        })
+}
+
+pub fn set_price_tiers(env: &Env, tiers: &PriceTiers) {
+    env.storage().instance().set(&DataKey::PriceTiers, tiers);
+}
+
+pub fn get_lease_config(env: &Env) -> Option<LeaseConfig> {
+    env.storage().instance().get(&DataKey::LeaseConfig)
+}
+
+pub fn set_lease_config(env: &Env, config: &LeaseConfig) {
+    env.storage().instance().set(&DataKey::LeaseConfig, config);
+}
+
+pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FolderExpiry(folder_name.clone()))
+}
+
+pub fn set_folder_expiry(env: &Env, folder_name: &String, expiry: u64) {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    env.storage().persistent().set(&key, &expiry);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FolderOwner(folder_name.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::OwnerFolder(owner.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FolderExpiry(folder_name.clone()));
 }
