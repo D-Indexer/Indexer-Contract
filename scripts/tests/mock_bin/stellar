@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Mock Stellar CLI for scripts/tests/test_deploy_sh.py. Chain state lives in
+# $MOCK_DIR. MOCK_FAIL_ON=<name>[:<n>] fails the n-th (default first) call of
+# a subcommand (upload, deploy) or contract function (initialize, ...).
+set -euo pipefail
+M="$MOCK_DIR"
+ADDR="GBMOCKADMINAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+ARGS=("$@")
+arg() { local i; for ((i = 0; i < ${#ARGS[@]} - 1; i++)); do [[ "${ARGS[i]}" == "$1" ]] && { echo "${ARGS[i + 1]}"; return; }; done; }
+bump() { local c; c=$(($(cat "$M/count.$1" 2>/dev/null || echo 0) + 1)); echo "$c" >"$M/count.$1"; echo "$c"; }
+sign() { echo "Signing transaction: $(echo "tx$(bump tx)" | sha256sum | cut -c1-64)" >&2; }
+build_only=0
+for a in "$@"; do [[ "$a" == "--build-only" ]] && build_only=1; done
+maybe_fail() {
+  [[ -n "${MOCK_FAIL_ON:-}" && "${MOCK_FAIL_ON%%:*}" == "$1" ]] || return 0
+  local want="${MOCK_FAIL_ON#*:}"
+  [[ "$want" == "$MOCK_FAIL_ON" ]] && want=1
+  [[ "$(bump "fail.$1")" == "$want" ]] && { echo "mock: $1 interrupted" >&2; exit 1; }
+  return 0
+}
+touch "$M/templates"
+
+case "${1:-} ${2:-}" in
+  "--version "*) echo "stellar 28.1.0 (mock)" ;;
+  "keys address") echo "$ADDR" ;;
+  "keys "*) ;;
+  "contract upload")
+    ((build_only)) && { echo "XDR-upload"; exit 0; }
+    maybe_fail upload
+    sign
+    sha256sum "$(arg --wasm)" | cut -d' ' -f1
+    ;;
+  "contract deploy")
+    ((build_only)) && { echo "XDR-deploy"; exit 0; }
+    maybe_fail deploy
+    sign
+    letter="$(printf "\\x$(printf %x $((64 + $(bump deploy))))")"
+    printf 'C%s\n' "$(printf "%0.s$letter" {1..55})"
+    ;;
+  "contract id") printf 'C%s\n' "$(printf '%0.sZ' {1..55})" ;;
+  "contract fetch") cp target/stellar/indexer_contract.wasm "$(arg --out-file)" ;;
+  "contract invoke")
+    for ((i = 0; i < ${#ARGS[@]}; i++)); do [[ "${ARGS[i]}" == "--" ]] && break; done
+    fn="${ARGS[i + 1]}"
+    ((build_only)) && { echo "XDR-$fn"; exit 0; }
+    maybe_fail "$fn"
+    case "$fn" in
+      initialize)
+        sign
+        [[ ! -f "$M/admins" ]] || { echo "Error(Contract, #1)" >&2; exit 1; }
+        jq -cn --arg a "$(arg --admin)" '[$a]' >"$M/admins"
+        ;;
+      get_admins) cat "$M/admins" ;;
+      register_template)
+        sign
+        printf '%s\t%s\n' "$(arg --template_id)" "$(arg --metadata_uri)" >>"$M/templates"
+        ;;
+      list_templates) jq -R -s -c '[split("\n")[] | select(length > 0) | split("\t")[0] | tonumber]' "$M/templates" ;;
+      get_template)
+        awk -F'\t' -v id="$(arg --template_id)" '$1 == id { print $2 }' "$M/templates" \
+          | jq -R -c --argjson id "$(arg --template_id)" '{template_id: $id, metadata_uri: .}'
+        ;;
+      *) echo "mock: unknown function $fn" >&2; exit 1 ;;
+    esac
+    ;;
+  "tx simulate") cat ;;
+  "tx decode") echo '{"tx": {"tx": {"fee": 12345}}}' ;;
+  "tx hash") sha256sum | cut -c1-64 ;;
+  "tx send") cat >>"$M/sent" ;;
+  *) echo "mock: unsupported stellar $*" >&2; exit 1 ;;
+esac
