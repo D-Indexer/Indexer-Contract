@@ -81,3 +81,11 @@ pub const MAX_GUARDIANS: u32 = 5;
 /// Ledgers between `initiate_recovery` and the earliest `execute_recovery`
 /// (~3 days): the window in which the owner can `cancel_recovery`.
 pub const RECOVERY_DELAY: u32 = 3 * DAY_IN_LEDGERS;
+
+/// `revoke_folder` reason codes (documented in the README). New codes are
+/// appended, never renumbered.
+pub const REVOKE_REASON_IMPERSONATION: u32 = 1;
+pub const REVOKE_REASON_ABUSE: u32 = 2;
+pub const REVOKE_REASON_LEGAL: u32 = 3;
+/// Highest accepted reason code.
+pub const MAX_REVOKE_REASON: u32 = REVOKE_REASON_LEGAL;

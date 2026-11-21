@@ -320,3 +320,29 @@ pub fn recovery_cancelled(env: &Env, owner: &Address, new_owner: &Address) {
     }
     .publish(env);
 }
+
+/// Admin revocation of a Folder name. Indexers should drop the identity,
+/// its portfolio and template selection for `owner`.
+#[contractevent(topics = ["name_rev"], data_format = "vec")]
+pub struct FolderRevoked {
+    pub admin: Address,
+    pub folder_name: String,
+    pub owner: Address,
+    pub reason_code: u32,
+}
+
+pub fn folder_revoked(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+    owner: &Address,
+    reason_code: u32,
+) {
+    FolderRevoked {
+        admin: admin.clone(),
+        folder_name: folder_name.clone(),
+        owner: owner.clone(),
+        reason_code,
+    }
+    .publish(env);
+}

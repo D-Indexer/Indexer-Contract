@@ -21,7 +21,8 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, E
 
 use crate::errors::ContractError;
 use crate::types::{
-    AdminOp, ClaimFee, GuardianConfig, LeaseConfig, PortfolioNFT, PriceTiers, Recovery, Template,
+    AdminOp, ClaimFee, GuardianConfig, LeaseConfig, PortfolioNFT, PriceTiers, Recovery, Revocation,
+    Template,
 };
 
 #[contract]
@@ -250,6 +251,24 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
+    }
+
+    /// Admin-only removal of an abusive or impersonating name. The name is
+    /// reserved, not reassigned. `reason_code`: 1 impersonation, 2 abuse,
+    /// 3 legal.
+    pub fn revoke_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::revoke_folder(&env, &admin, &folder_name, reason_code)
+    }
+
+    /// The revocation record of `folder_name`, if an admin revoked it.
+    pub fn get_revocation(env: Env, folder_name: String) -> Option<Revocation> {
+        storage::get_revocation(&env, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {

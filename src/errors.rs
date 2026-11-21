@@ -118,4 +118,10 @@ pub enum ContractError {
     /// The guardian already approved this recovery.
     /// User message: You have already approved this recovery.
     AlreadyApproved = 37,
+    /// The Folder name was revoked by an admin and cannot be claimed.
+    /// User message: That Folder name is not available.
+    FolderRevoked = 38,
+    /// The revocation reason code is not one of the documented codes.
+    /// User message: The revocation reason is not valid.
+    InvalidReasonCode = 39,
 }

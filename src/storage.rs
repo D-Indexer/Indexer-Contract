@@ -7,7 +7,7 @@ use crate::constants::{
 use crate::errors::ContractError;
 use crate::types::{
     AdminChange, ClaimCommitment, ClaimFee, DataKey, GuardianConfig, LeaseConfig, PortfolioNFT,
-    PriceTiers, Recovery, Template,
+    PriceTiers, Recovery, Revocation, Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -474,4 +474,24 @@ pub fn rekey_identity(env: &Env, folder_name: &String, old: &Address, new: &Addr
     }
 
     persistent.remove(&DataKey::Recovery(old.clone()));
+}
+
+// ── Revocation ────────────────────────────────────────────────────────────────
+
+pub fn get_revocation(env: &Env, folder_name: &String) -> Option<Revocation> {
+    get_persistent(env, &DataKey::Revoked(folder_name.clone()))
+}
+
+pub fn set_revocation(env: &Env, folder_name: &String, revocation: &Revocation) {
+    set_persistent(env, &DataKey::Revoked(folder_name.clone()), revocation);
+}
+
+/// Removes the owner-keyed records that only make sense with a Folder: the
+/// portfolio, the template selection and any pending recovery. Guardians are
+/// kept: they protect the address, not the name.
+pub fn remove_owner_records(env: &Env, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::Portfolio(owner.clone()));
+    persistent.remove(&DataKey::UserTemplate(owner.clone()));
+    persistent.remove(&DataKey::Recovery(owner.clone()));
 }

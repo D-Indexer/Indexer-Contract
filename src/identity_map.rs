@@ -1,12 +1,12 @@
 use soroban_sdk::{xdr::ToXdr, Address, Bytes, BytesN, Env, String};
 
-use crate::access_control::require_owner;
-use crate::constants::{MIN_REVEAL_DELAY, REVEAL_WINDOW};
+use crate::access_control::{require_admin, require_owner};
+use crate::constants::{MAX_REVOKE_REASON, MIN_REVEAL_DELAY, REVEAL_WINDOW};
 use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
 use crate::storage;
-use crate::types::ClaimCommitment;
+use crate::types::{ClaimCommitment, Revocation};
 use crate::validation;
 
 /// Lease state of a Folder name that has an owner.
@@ -121,6 +121,9 @@ fn claim(
     folder_name: &String,
 ) -> Result<(), ContractError> {
     validation::require_valid_folder_name(folder_name)?;
+    if storage::get_revocation(env, folder_name).is_some() {
+        return Err(ContractError::FolderRevoked);
+    }
     if let Some(current) = storage::get_owner_folder(env, owner) {
         match lease_state(env, &current) {
             LeaseState::Released => storage::remove_folder(env, &current, owner),
@@ -203,4 +206,35 @@ pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError>
 
 pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
     storage::get_folder_expiry(env, folder_name)
+}
+
+/// Admin removal of an abusive or impersonating name. Deletes both identity
+/// mappings and the owner's portfolio, template selection and pending
+/// recovery, then reserves the name under `Revoked` so nobody (the admin
+/// included) can claim it. The former owner may claim a different name.
+pub fn revoke_folder(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+    reason_code: u32,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    if reason_code == 0 || reason_code > MAX_REVOKE_REASON {
+        return Err(ContractError::InvalidReasonCode);
+    }
+    let owner = storage::get_folder_owner(env, folder_name).ok_or(ContractError::FolderNotFound)?;
+
+    storage::remove_folder(env, folder_name, &owner);
+    storage::remove_owner_records(env, &owner);
+    storage::set_revocation(
+        env,
+        folder_name,
+        &Revocation {
+            admin: admin.clone(),
+            reason_code,
+            ledger: env.ledger().sequence(),
+        },
+    );
+    events::folder_revoked(env, admin, folder_name, &owner, reason_code);
+    Ok(())
 }

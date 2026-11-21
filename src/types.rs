@@ -65,6 +65,17 @@ pub enum DataKey {
     Guardians(Address),
     // recovery: owner -> pending Recovery
     Recovery(Address),
+    // revocation: folder_name -> Revocation; blocks re-claiming the name
+    Revoked(String),
+}
+
+/// Why and when an admin revoked a Folder name.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Revocation {
+    pub admin: Address,
+    pub reason_code: u32,
+    pub ledger: u32,
 }
 
 /// Guardians allowed to move an owner's identity, and how many must approve.
