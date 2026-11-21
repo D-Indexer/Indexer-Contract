@@ -137,6 +137,7 @@ Notes:
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_history` | `owner: Address` | `Vec<CidEntry { cid, at }>`: the last 10 CIDs with ledger timestamps, oldest first (empty if never minted) | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
 ### Error codes

@@ -17,7 +17,7 @@ use crate::errors::ContractError;
 use crate::events::{
     AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
 };
-use crate::types::{AdminOp, DataKey};
+use crate::types::{AdminOp, CidEntry, DataKey};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -2147,5 +2147,163 @@ mod onboarding {
             &name(&t, VALID_CIDV0),
         );
         expect_contract_error(res, ContractError::NotInitialized);
+    }
+}
+
+// ── Portfolio CID history ───────────────────────────────────────────────────
+
+mod cid_history {
+    use super::*;
+    use crate::constants::MAX_CID_HISTORY;
+
+    /// A valid, distinct base32 CIDv1 for each `i`: `VALID_CIDV1_RAW` with the
+    /// last two characters replaced by base32 digits of `i`.
+    fn cid(t: &TestEnv, i: u32) -> String {
+        const B32: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+        let mut s = std::string::String::from(&VALID_CIDV1_RAW[..VALID_CIDV1_RAW.len() - 2]);
+        s.push(B32[(i / 32 % 32) as usize] as char);
+        s.push(B32[(i % 32) as usize] as char);
+        String::from_str(&t.env, &s)
+    }
+
+    /// Minted owner whose history holds `cid(0)` at timestamp 1_000.
+    fn minted(t: &TestEnv) -> Address {
+        let owner = Address::generate(&t.env);
+        t.env.ledger().set_timestamp(1_000);
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, "history.folder"));
+        t.client().mint_portfolio(&owner, &1u32, &cid(t, 0));
+        owner
+    }
+
+    #[test]
+    fn unminted_owner_has_empty_history() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        assert_eq!(t.client().get_portfolio_history(&owner).len(), 0);
+    }
+
+    #[test]
+    fn mint_records_first_entry() {
+        let t = TestEnv::new();
+        let owner = minted(&t);
+        let history = t.client().get_portfolio_history(&owner);
+        assert_eq!(
+            history,
+            soroban_sdk::vec![
+                &t.env,
+                CidEntry {
+                    cid: cid(&t, 0),
+                    at: 1_000
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn claim_and_mint_records_first_entry() {
+        let t = TestEnv::new();
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        let owner = Address::generate(&t.env);
+        t.client().claim_and_mint(
+            &owner,
+            &String::from_str(&t.env, "atomic.folder"),
+            &1u32,
+            &cid(&t, 5),
+        );
+        let history = t.client().get_portfolio_history(&owner);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.get(0).unwrap().cid, cid(&t, 5));
+    }
+
+    #[test]
+    fn twelve_updates_keep_the_last_ten_in_order() {
+        let t = TestEnv::new();
+        let owner = minted(&t);
+        for i in 1..=12u32 {
+            t.env.ledger().set_timestamp(1_000 + i as u64 * 60);
+            t.client().update_portfolio(&owner, &cid(&t, i));
+            assert!(t.client().get_portfolio_history(&owner).len() <= MAX_CID_HISTORY);
+        }
+
+        // 13 CIDs were written (mint + 12 updates); the last 10 remain.
+        let history = t.client().get_portfolio_history(&owner);
+        assert_eq!(history.len(), MAX_CID_HISTORY);
+        for (pos, entry) in history.iter().enumerate() {
+            let i = pos as u32 + 3;
+            assert_eq!(entry.cid, cid(&t, i));
+            assert_eq!(entry.at, 1_000 + i as u64 * 60);
+        }
+        // The newest history entry is always the current CID.
+        assert_eq!(
+            history.last().unwrap().cid,
+            t.client().get_portfolio(&owner).ipfs_cid
+        );
+    }
+
+    #[test]
+    fn rejected_update_does_not_append() {
+        let t = TestEnv::new();
+        let owner = minted(&t);
+        let res = t
+            .client()
+            .try_update_portfolio(&owner, &String::from_str(&t.env, "bad"));
+        expect_contract_error(res, ContractError::InvalidCID);
+        assert_eq!(t.client().get_portfolio_history(&owner).len(), 1);
+    }
+
+    #[test]
+    fn history_follows_persistent_ttl_policy() {
+        let t = TestEnv::new();
+        let owner = minted(&t);
+        let key = DataKey::PortfolioHistory(owner.clone());
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+
+        // A read below the threshold re-extends it, like every other entry.
+        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
+        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
+        t.client().get_portfolio_history(&owner);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    /// Write-byte cost of `update_portfolio` with a near-empty vs. a full
+    /// history. Printed with `-- --nocapture`; the numbers are in the PR and
+    /// docs/STORAGE.md. The bound keeps a regression from going unnoticed.
+    #[test]
+    fn full_history_write_cost() {
+        let t = TestEnv::new();
+        let owner = minted(&t);
+
+        t.client().update_portfolio(&owner, &cid(&t, 1));
+        let small = t.env.cost_estimate().resources();
+
+        for i in 2..=MAX_CID_HISTORY + 1 {
+            t.client().update_portfolio(&owner, &cid(&t, i));
+        }
+        let full = t.env.cost_estimate().resources();
+        let history_xdr = {
+            use soroban_sdk::xdr::ToXdr;
+            t.client()
+                .get_portfolio_history(&owner)
+                .to_xdr(&t.env)
+                .len()
+        };
+        std::println!(
+            "CID_HISTORY update_portfolio write_bytes: 2-entry history={} full ({MAX_CID_HISTORY}) \
+             history={} delta={}; full history value XDR={history_xdr} bytes",
+            small.write_bytes,
+            full.write_bytes,
+            full.write_bytes - small.write_bytes,
+        );
+        // A full history changes the bytes written, never the entry count.
+        assert_eq!(full.write_entries, small.write_entries);
+        assert!(
+            full.write_bytes < 2_048,
+            "full-history update wrote {} bytes",
+            full.write_bytes
+        );
     }
 }

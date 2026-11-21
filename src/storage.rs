@@ -1,12 +1,13 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_CID_HISTORY, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimFee, DataKey, FeeConfig, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+    AdminChange, CidEntry, ClaimFee, DataKey, FeeConfig, LeaseConfig, PortfolioNFT, PriceTiers,
+    Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -326,6 +327,39 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+/// Portfolio CID history, oldest first. Empty for owners who never minted.
+pub fn get_portfolio_history(env: &Env, owner: &Address) -> Vec<CidEntry> {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    match env.storage().persistent().get(&key) {
+        Some(history) => {
+            extend_persistent(env, &key);
+            history
+        }
+        None => Vec::new(env),
+    }
+}
+
+/// Appends `cid` at the current ledger timestamp. When the history already
+/// holds `MAX_CID_HISTORY` entries the oldest ones are dropped, so its
+/// length never exceeds the cap.
+pub fn append_portfolio_history(env: &Env, owner: &Address, cid: &String) {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    let mut history: Vec<CidEntry> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
+    while history.len() >= MAX_CID_HISTORY {
+        history.pop_front();
+    }
+    history.push_back(CidEntry {
+        cid: cid.clone(),
+        at: env.ledger().timestamp(),
+    });
+    env.storage().persistent().set(&key, &history);
+    extend_persistent(env, &key);
 }
 
 // ── Economics ─────────────────────────────────────────────────────────────────

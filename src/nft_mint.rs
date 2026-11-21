@@ -1,11 +1,11 @@
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::access_control::require_owner;
 use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
 use crate::storage;
-use crate::types::PortfolioNFT;
+use crate::types::{CidEntry, PortfolioNFT};
 use crate::validation;
 
 pub fn mint_portfolio(
@@ -73,6 +73,7 @@ fn apply_mint(env: &Env, owner: &Address, template_id: u32, ipfs_cid: &String) {
         minted_at: env.ledger().timestamp(),
     };
     storage::save_portfolio(env, &nft);
+    storage::append_portfolio_history(env, owner, ipfs_cid);
     // Keep the user's template selection consistent with the minted portfolio.
     storage::set_user_template(env, owner, template_id);
     events::portfolio_minted(env, owner, template_id, ipfs_cid);
@@ -89,8 +90,14 @@ pub fn update_portfolio(
     let mut nft = storage::get_portfolio(env, owner)?;
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);
+    storage::append_portfolio_history(env, owner, ipfs_cid);
     events::portfolio_updated(env, owner, ipfs_cid);
     Ok(())
+}
+
+/// The owner's last `MAX_CID_HISTORY` portfolio CIDs, oldest first.
+pub fn get_portfolio_history(env: &Env, owner: &Address) -> Vec<CidEntry> {
+    storage::get_portfolio_history(env, owner)
 }
 
 pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, ContractError> {

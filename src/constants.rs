@@ -63,3 +63,7 @@ pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
 pub const MAX_PRICE_TIERS: u32 = 5;
 /// Seconds per day, used to express lease periods in days.
 pub const SECONDS_PER_DAY: u64 = 86_400;
+
+/// Number of past portfolio CIDs kept per owner in `PortfolioHistory`. The
+/// history is a ring buffer: the oldest entry is dropped once it is full.
+pub const MAX_CID_HISTORY: u32 = 10;

@@ -19,7 +19,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::{AdminOp, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
+use crate::types::{AdminOp, CidEntry, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
 
 #[contract]
 pub struct FolderContract;
@@ -307,6 +307,12 @@ impl FolderContract {
 
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
+    }
+
+    /// The owner's last `MAX_CID_HISTORY` (10) portfolio CIDs with the ledger
+    /// timestamp each was set at, oldest first. Empty if never minted.
+    pub fn get_portfolio_history(env: Env, owner: Address) -> Vec<CidEntry> {
+        nft_mint::get_portfolio_history(&env, &owner)
     }
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
