@@ -76,9 +76,10 @@ fn claim(
 
     let fee_paid = match storage::get_claim_fee(env) {
         Some(fee) if fee.amount > 0 => {
-            // Covered by the owner's require_auth above. A failed transfer
-            // aborts the whole invocation, so no name mapping is written.
-            token::Client::new(env, &fee.token).transfer(owner, &fee.treasury, &fee.amount);
+            // Covered by the payer's require_auth (the owner, or the sponsor
+            // in `sponsored_claim`). A failed transfer aborts the whole
+            // invocation, so no name mapping is written.
+            token::Client::new(env, &fee.token).transfer(payer, &fee.treasury, &fee.amount);
             fee.amount
         }
         _ => 0,
@@ -91,6 +92,7 @@ fn claim(
 
 /// Extends the owner's lease by `periods` lease periods, counted from the
 /// current expiry. Allowed before expiry and during the grace period.
+#[allow(dead_code)] // entry point dropped in a merge, see lib.rs
 pub fn renew_folder(env: &Env, owner: &Address, periods: u32) -> Result<u64, ContractError> {
     require_owner(env, owner)?;
     let lease = storage::get_lease_config(env).ok_or(ContractError::LeasesDisabled)?;
@@ -137,6 +139,7 @@ pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError>
     }
 }
 
+#[allow(dead_code)] // entry point dropped in a merge, see lib.rs
 pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
     storage::get_folder_expiry(env, folder_name)
 }

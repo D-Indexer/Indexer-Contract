@@ -47,4 +47,59 @@ pub enum DataKey {
     Portfolio(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
+    // admin membership: admin address at enumeration slot `i`
+    AdminAt(u32),
+    // admin timelock: pending queue of admin changes
+    PendingAdminChanges,
+    // admin timelock: next op ID to hand out
+    NextAdminChangeId,
+    // pricing: fee token, treasury and base fee (instance storage)
+    FeeConfig,
+    // pricing: length-based premium tiers (instance storage)
+    PriceTiers,
+    // leases: lease period and grace period (instance storage)
+    LeaseConfig,
+    // leases: folder_name -> expiry timestamp
+    FolderExpiry(String),
+}
+
+/// Kind of change queued through the admin timelock.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminOp {
+    Add,
+    Remove,
+}
+
+/// A queued admin change, executable once `eta_ledger` is reached.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminChange {
+    pub op: AdminOp,
+    pub target: Address,
+    pub eta_ledger: u32,
+}
+
+/// Premium pricing configuration used by `pricing`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeeConfig {
+    pub token: Address,
+    pub treasury: Address,
+    pub base_fee: i128,
+}
+
+/// Length-based premium tiers: `(max_label_len, amount)`, ascending.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceTiers {
+    pub by_len: Vec<(u32, i128)>,
+}
+
+/// Lease configuration; absent means permanent claims.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaseConfig {
+    pub period_secs: u64,
+    pub grace_secs: u64,
 }
