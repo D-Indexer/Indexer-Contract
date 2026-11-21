@@ -39,11 +39,13 @@ test:
 # soroban-sdk >= 26 only builds wasm through the Stellar CLI.
 build-wasm:
 	@command -v stellar >/dev/null || { echo "stellar CLI not found (expected $(STELLAR_CLI_VERSION))" >&2; exit 1; }
-	stellar contract build --locked --out-dir $(WASM_OUT_DIR)
+	# SEP-0055 revision 0.4.1 (Updated 2025-03-12): deterministic source metadata.
+	stellar contract build --locked --meta source_repo=github:D-Indexer/Indexer-Contract --out-dir $(WASM_OUT_DIR)
 
 build-optimized:
 	@command -v stellar >/dev/null || { echo "stellar CLI not found (expected $(STELLAR_CLI_VERSION))" >&2; exit 1; }
-	stellar contract build --locked --optimize --out-dir $(WASM_OUT_DIR)
+	# SEP-0055 revision 0.4.1 (Updated 2025-03-12): deterministic source metadata.
+	stellar contract build --locked --optimize --meta source_repo=github:D-Indexer/Indexer-Contract --out-dir $(WASM_OUT_DIR)
 	@sha256sum $(OPTIMIZED_WASM)
 
 # Kept for backwards compatibility with older docs.
