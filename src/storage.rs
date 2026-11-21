@@ -211,6 +211,53 @@ pub fn remove_reserved(env: &Env, folder_name: &String) {
         .remove(&DataKey::ReservedLabel(folder_name.clone()));
 }
 
+/// Ledger sequence at which `folder_name` was released, if it is still
+/// inside (or has not yet been cleared after) its cooldown.
+pub fn get_released_at(env: &Env, folder_name: &String) -> Option<u32> {
+    let key = DataKey::ReleasedAt(folder_name.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_released_at(env: &Env, folder_name: &String, ledger: u32) {
+    let key = DataKey::ReleasedAt(folder_name.clone());
+    env.storage().persistent().set(&key, &ledger);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_released_at(env: &Env, folder_name: &String) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::ReleasedAt(folder_name.clone()));
+}
+
+pub fn remove_folder_owner(env: &Env, folder_name: &String) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FolderOwner(folder_name.clone()));
+}
+
+pub fn remove_owner_folder(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::OwnerFolder(owner.clone()));
+}
+
+pub fn remove_folder_expiry(env: &Env, folder_name: &String) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FolderExpiry(folder_name.clone()));
+}
+
+pub fn remove_user_template(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::UserTemplate(owner.clone()));
+}
+
 // ── Template Registry ─────────────────────────────────────────────────────────
 
 fn extend_persistent(env: &Env, key: &DataKey) {

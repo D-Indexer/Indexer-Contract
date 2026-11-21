@@ -172,5 +172,17 @@
     "name": "FolderReserved",
     "description": "The Folder name is reserved by an admin and cannot be claimed.",
     "user_message": "That Folder name is reserved."
+  },
+  {
+    "code": 30,
+    "name": "PortfolioExists",
+    "description": "The owner still holds a minted portfolio, which must be burned first.",
+    "user_message": "Remove your portfolio before releasing this Folder."
+  },
+  {
+    "code": 31,
+    "name": "FolderReleaseCooldown",
+    "description": "The Folder name was released recently and is still cooling down.",
+    "user_message": "That Folder name was just released. Try again later."
   }
 ]

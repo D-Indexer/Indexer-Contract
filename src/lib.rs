@@ -217,6 +217,14 @@ impl FolderContract {
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
+    /// Releases the owner's Folder name. The name
+    /// is claimable again after `RELEASE_COOLDOWN_LEDGERS`. Fails with
+    /// `PortfolioExists` while the owner holds a portfolio.
+    pub fn release_folder(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::release_folder(&env, &owner)
+    }
+
     /// Reserves `folder_name` so ordinary users cannot claim it. Admin only.
     pub fn reserve_folder(
         env: Env,

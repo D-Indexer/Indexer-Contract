@@ -2203,3 +2203,182 @@ mod reservation {
         assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
     }
 }
+
+// ── Releasing a Folder name ─────────────────────────────────────────────────
+
+mod release {
+    use super::*;
+    use crate::constants::RELEASE_COOLDOWN_LEDGERS;
+    use crate::events::FolderReleased;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    fn claimed(t: &TestEnv, s: &str) -> (Address, String) {
+        let owner = Address::generate(&t.env);
+        let n = name(t, s);
+        t.client().claim_folder(&owner, &n);
+        (owner, n)
+    }
+
+    #[test]
+    fn release_frees_name_and_owner() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "rebrand.folder");
+
+        t.client().release_folder(&owner);
+
+        expect_contract_error(t.client().try_get_folder(&n), ContractError::FolderNotFound);
+        expect_contract_error(
+            t.client().try_get_identity(&owner),
+            ContractError::FolderNotFound,
+        );
+        // The owner can claim a new name straight away.
+        let fresh = name(&t, "newbrand.folder");
+        t.client().claim_folder(&owner, &fresh);
+        assert_eq!(t.client().get_identity(&owner), fresh);
+    }
+
+    #[test]
+    fn release_removes_every_key() {
+        let t = TestEnv::new();
+        let uri = template_uri(&t.env);
+        t.client().register_template(&t.admin, &1u32, &uri);
+        t.client().set_lease_config(&t.admin, &30u32, &7u32);
+        let (owner, n) = claimed(&t, "leased.folder");
+        t.client().set_user_template(&owner, &1u32);
+        assert!(t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+
+        t.client().release_folder(&owner);
+
+        assert!(!t.has_persistent(&DataKey::FolderOwner(n.clone())));
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+        // Only the cooldown marker remains, and it carries the release ledger.
+        let key = DataKey::ReleasedAt(n.clone());
+        let at: u32 = t.env.as_contract(&t.contract_id, || {
+            t.env.storage().persistent().get(&key).unwrap()
+        });
+        assert_eq!(at, t.env.ledger().sequence());
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn release_requires_the_owner_signature() {
+        let t = TestEnv::new();
+        let (owner, _) = claimed(&t, "signed.folder");
+        t.client().release_folder(&owner);
+        assert_single_auth(&t, &owner, "release_folder");
+    }
+
+    #[test]
+    fn release_fails_without_signature() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "nosig-rel.folder");
+        t.env.set_auths(&[]);
+        assert!(t.client().try_release_folder(&owner).is_err());
+        assert_eq!(t.client().get_folder(&n), owner);
+    }
+
+    #[test]
+    fn release_requires_initialization() {
+        let t = uninitialized_env();
+        let res = t.client().try_release_folder(&Address::generate(&t.env));
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+
+    #[test]
+    fn release_without_folder_fails() {
+        let t = TestEnv::new();
+        let res = t.client().try_release_folder(&Address::generate(&t.env));
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn release_twice_fails() {
+        let t = TestEnv::new();
+        let (owner, _) = claimed(&t, "twice.folder");
+        t.client().release_folder(&owner);
+        let res = t.client().try_release_folder(&owner);
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn release_with_portfolio_is_rejected() {
+        let t = TestEnv::new();
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        let (owner, n) = claimed(&t, "minted.folder");
+        t.client()
+            .mint_portfolio(&owner, &1u32, &portfolio_cid(&t.env));
+
+        let res = t.client().try_release_folder(&owner);
+        expect_contract_error(res, ContractError::PortfolioExists);
+
+        // Nothing was removed.
+        assert_eq!(t.client().get_folder(&n), owner);
+        assert_eq!(t.client().get_identity(&owner), n);
+        assert!(t.client().verify_portfolio(&owner));
+        assert!(!t.has_persistent(&DataKey::ReleasedAt(n.clone())));
+    }
+
+    #[test]
+    fn release_emits_event() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "event-rel.folder");
+        t.client().release_folder(&owner);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderReleased {
+                owner: owner.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn cooldown_boundaries() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "sniped.folder");
+        let other = Address::generate(&t.env);
+        let released_at = t.env.ledger().sequence();
+        t.client().release_folder(&owner);
+
+        // Same ledger, and the last ledger of the cooldown: still blocked.
+        let res = t.client().try_claim_folder(&other, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+        t.env
+            .ledger()
+            .set_sequence_number(released_at + RELEASE_COOLDOWN_LEDGERS - 1);
+        let res = t.client().try_claim_folder(&other, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+        // The former owner is held to the same cooldown.
+        let res = t.client().try_claim_folder(&owner, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+
+        // First ledger after the cooldown: claimable, and the marker is gone.
+        t.env
+            .ledger()
+            .set_sequence_number(released_at + RELEASE_COOLDOWN_LEDGERS);
+        t.client().claim_folder(&other, &n);
+        assert_eq!(t.client().get_folder(&n), other);
+        assert!(!t.has_persistent(&DataKey::ReleasedAt(n.clone())));
+    }
+
+    #[test]
+    fn released_name_can_be_released_again() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "cycle.folder");
+        t.client().release_folder(&owner);
+        t.advance_ledgers(RELEASE_COOLDOWN_LEDGERS);
+        t.client().claim_folder(&owner, &n);
+        t.client().release_folder(&owner);
+        let res = t.client().try_claim_folder(&owner, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+    }
+}

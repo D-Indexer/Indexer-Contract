@@ -92,4 +92,10 @@ pub enum ContractError {
     /// The Folder name is reserved by an admin and cannot be claimed.
     /// User message: That Folder name is reserved.
     FolderReserved = 29,
+    /// The owner still holds a minted portfolio, which must be burned first.
+    /// User message: Remove your portfolio before releasing this Folder.
+    PortfolioExists = 30,
+    /// The Folder name was released recently and is still cooling down.
+    /// User message: That Folder name was just released. Try again later.
+    FolderReleaseCooldown = 31,
 }

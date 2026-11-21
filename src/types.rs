@@ -95,4 +95,7 @@ pub enum DataKey {
     NextAdminChangeId,
     // identity_map: admin-reserved Folder name (full `<label>.folder`) -> true
     ReservedLabel(String),
+    // identity_map: released Folder name -> ledger sequence of the release,
+    // removed when the name is claimed again after the cooldown
+    ReleasedAt(String),
 }

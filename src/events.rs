@@ -272,6 +272,20 @@ pub fn folder_unreserved(env: &Env, admin: &Address, folder_name: &String) {
     .publish(env);
 }
 
+#[contractevent(topics = ["folder_rel"], data_format = "vec")]
+pub struct FolderReleased {
+    pub owner: Address,
+    pub folder_name: String,
+}
+
+pub fn folder_released(env: &Env, owner: &Address, folder_name: &String) {
+    FolderReleased {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["upgraded"], data_format = "vec")]
 pub struct ContractUpgraded {
     pub admin: Address,

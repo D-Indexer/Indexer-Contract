@@ -102,7 +102,8 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
 | `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
-| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderReserved` (29), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderReserved` (29), `FolderReleaseCooldown` (31), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `release_folder` | `owner: Address` | `owner` | `folder_rel` | 2, `FolderNotFound` (4), `PortfolioExists` (30) |
 | `reserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_rsv` | 2, 7, 9, 3 |
 | `unreserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_unrsv` | 2, 7, 9 |
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
@@ -121,6 +122,10 @@ Notes:
   claimed by anyone, admins included, until `unreserve_folder`. Reservations are keyed by the full
   `<label>.folder` name. Reserving a name that has an owner fails with `FolderNameTaken`; a lapsed
   lease is cleared first. Both calls are idempotent.
+- `release_folder` deletes the owner's name mapping (both directions), lease expiry and template
+  selection, so the owner can claim a new name right away. The released name can be claimed again
+  by anyone, the former owner included, once `RELEASE_COOLDOWN_LEDGERS` (~7 days) have passed. An
+  owner who holds a minted portfolio can't release; see [docs/SECURITY.md](docs/SECURITY.md).
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -163,7 +168,8 @@ Codes are stable. New errors are appended and never renumbered.
 | 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
 | 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
 | 27 | `LeasesDisabled` | 28 | `InvalidRenewal` |
-| 29 | `FolderReserved` | | |
+| 29 | `FolderReserved` | 30 | `PortfolioExists` |
+| 31 | `FolderReleaseCooldown` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -179,7 +185,7 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
    `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`,
-   `name_rsv`, `name_unrsv`.
+   `name_rsv`, `name_unrsv`, `folder_rel`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.

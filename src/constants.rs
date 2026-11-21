@@ -59,6 +59,10 @@ pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
 /// size of the pending queue stored in instance storage.
 pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
 
+/// Ledgers a released Folder name stays unclaimable (~7 days), so a name
+/// can't be sniped the moment its owner lets go of it.
+pub const RELEASE_COOLDOWN_LEDGERS: u32 = 7 * DAY_IN_LEDGERS;
+
 /// Maximum number of length-based price tiers.
 pub const MAX_PRICE_TIERS: u32 = 5;
 /// Seconds per day, used to express lease periods in days.

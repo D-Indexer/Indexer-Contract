@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, String};
 
 use crate::access_control::{require_admin, require_owner};
+use crate::constants::RELEASE_COOLDOWN_LEDGERS;
 use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
@@ -63,6 +64,12 @@ fn claim(
     if storage::is_reserved(env, folder_name) {
         return Err(ContractError::FolderReserved);
     }
+    if let Some(released_at) = storage::get_released_at(env, folder_name) {
+        if env.ledger().sequence() < released_at.saturating_add(RELEASE_COOLDOWN_LEDGERS) {
+            return Err(ContractError::FolderReleaseCooldown);
+        }
+        storage::remove_released_at(env, folder_name);
+    }
     if let Some(current) = storage::get_owner_folder(env, owner) {
         match lease_state(env, &current) {
             LeaseState::Released => storage::remove_folder(env, &current, owner),
@@ -90,6 +97,34 @@ fn claim(
         storage::set_folder_expiry(env, folder_name, expiry);
     }
     events::folder_claimed(env, owner, folder_name, fee_paid);
+    Ok(())
+}
+
+/// Gives up the owner's Folder name. Both directions of the mapping, the
+/// lease expiry and the owner's template selection are deleted, so the
+/// owner can claim a new name right away. The released name can be claimed
+/// again by anyone (the former owner included) once
+/// `RELEASE_COOLDOWN_LEDGERS` have passed.
+///
+/// Fails with `PortfolioExists` while the owner holds a minted portfolio: the
+/// portfolio is tied to the identity and must be burned first.
+pub fn release_folder(env: &Env, owner: &Address) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+    let folder_name = storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    // A lapsed lease is already up for grabs; there is nothing to release.
+    if let LeaseState::Released = lease_state(env, &folder_name) {
+        return Err(ContractError::FolderNotFound);
+    }
+    if storage::load_portfolio(env, owner).is_some() {
+        return Err(ContractError::PortfolioExists);
+    }
+
+    storage::remove_folder_owner(env, &folder_name);
+    storage::remove_owner_folder(env, owner);
+    storage::remove_folder_expiry(env, &folder_name);
+    storage::remove_user_template(env, owner);
+    storage::set_released_at(env, &folder_name, env.ledger().sequence());
+    events::folder_released(env, owner, &folder_name);
     Ok(())
 }
 
