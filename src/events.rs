@@ -68,6 +68,20 @@ pub struct AdminRemoved {
     pub target: Address,
 }
 
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["adm_q"], data_format = "vec")]
 pub struct AdminChangeQueued {
     pub admin: Address,
@@ -235,6 +249,7 @@ pub fn claim_sponsored(env: &Env, sponsor: &Address, owner: &Address, folder_nam
     .publish(env);
 }
 
+#[allow(dead_code)] // emitted by the unwired `renew_folder`
 pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: u64) {
     FolderRenewed {
         owner: owner.clone(),

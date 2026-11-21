@@ -51,3 +51,16 @@ pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
 /// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
 /// withdrawals must be split across calls, each emitting its own event.
 pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
+
+/// Delay applied to queued admin changes (~24h at ~5 seconds per ledger).
+pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
+
+/// Maximum number of admin changes that may be queued at once. Bounds the
+/// size of the pending queue stored in instance storage.
+pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
+
+/// Maximum number of length-based price tiers.
+pub const MAX_PRICE_TIERS: u32 = 5;
+/// Seconds per day, used to express lease periods in days.
+#[allow(dead_code)]
+pub const SECONDS_PER_DAY: u64 = 86_400;
