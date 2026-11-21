@@ -89,6 +89,29 @@ stellar contract invoke --id $ID --network testnet --source-account me --send=no
   get_portfolio --owner me
 ```
 
+## Contract build verification
+
+Release WASMs embed SEP-0055 contract build metadata. This repository targets
+SEP-0055 revision `0.4.1` (updated 2025-03-12), and records the source repository as:
+
+```text
+source_repo=github:D-Indexer/Indexer-Contract
+```
+
+Build and inspect it with a pinned Stellar CLI:
+
+```bash
+make build-optimized
+stellar contract info meta --wasm target/stellar/indexer_contract.wasm
+```
+
+To verify a deployment, obtain the deployed WASM hash, download the exact WASM
+from the network, and compare SHA-256 hashes. Then inspect its `source_repo`
+entry and verify that the hash has a GitHub attestation from
+`https://github.com/D-Indexer/Indexer-Contract` for the commit identified in the
+attestation. This metadata contains no timestamp or local path, so rebuilding
+the same source and pinned toolchain should reproduce the WASM.
+
 ## Public functions
 
 "Signer" is the argument that must authorize the call (`require_auth`). Every write except
