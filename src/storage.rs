@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::constants::{
     INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
@@ -243,6 +243,21 @@ pub fn get_template_list(env: &Env) -> Vec<u32> {
         }
         None => Vec::new(env),
     }
+}
+
+pub fn get_template_hash(env: &Env, template_id: u32) -> Option<BytesN<32>> {
+    let key = DataKey::TemplateHash(template_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_template_hash(env: &Env, template_id: u32, content_sha256: &BytesN<32>) {
+    let key = DataKey::TemplateHash(template_id);
+    env.storage().persistent().set(&key, content_sha256);
+    extend_persistent(env, &key);
 }
 
 pub fn get_user_template(env: &Env, owner: &Address) -> Option<u32> {

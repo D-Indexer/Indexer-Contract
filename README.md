@@ -72,6 +72,9 @@ make check                # fmt-check, cargo check, clippy -D warnings, tests, w
 
 # End-to-end check against deployments/testnet.json
 ./scripts/smoke-testnet.sh
+
+# Rebuild the recorded source commit and verify its deployed WASM hash
+make verify-deployment NETWORK=testnet
 ```
 
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers identities, overrides and mainnet.
@@ -106,6 +109,7 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
 | `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
+| `register_template_with_hash` | `admin: Address, template_id: u32, metadata_uri: String, content_sha256: BytesN<32>` | `admin` (must be an admin) | `tmpl_reg`, `tmpl_hash` | Same as `register_template` |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
@@ -115,6 +119,9 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `list_templates_page` caps `limit` at 25. A full page reads the registry list once and at most
+  25 template records from persistent storage (26 persistent reads total); `start` indexes the
+  registration-order ID list, and an index past the end returns an empty vector.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -129,7 +136,9 @@ Notes:
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
+| `get_template_hash` | `template_id: u32` | `Option<BytesN<32>>` | — |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
+| `list_templates_page` | `start: u32, limit: u32` | Up to 25 `Template` records, indexed in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |

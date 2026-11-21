@@ -21,7 +21,8 @@ The script:
    `templates/manifest.json`.
 3. Uploads the wasm and fails if the on-chain hash differs from the local sha256.
 4. Deploys and calls `initialize`, then fails unless `get_admins()` returns exactly the admin.
-5. Registers every template in `templates/manifest.json` and checks `list_templates()`.
+5. Registers every template in `templates/manifest.json` with its metadata SHA-256 and checks
+   `list_templates()`.
 6. Writes `deployments/testnet.json` with the network, RPC URL, contract ID, wasm hash, admin,
    date, source commit, toolchain, tx hashes and templates.
 
@@ -32,6 +33,17 @@ Then run the end-to-end check:
 ```bash
 ./scripts/smoke-testnet.sh
 ```
+
+To verify that the recorded source commit reproduces the deployed contract WASM:
+
+```bash
+make verify-deployment NETWORK=testnet
+```
+
+The verifier checks the recorded Rust and Stellar CLI versions, fetches the deployed WASM, builds
+`source_commit` in a temporary Git worktree, and compares both SHA-256 hashes to `wasm_hash`.
+It removes the temporary worktree on success or failure. The repository history must include
+`source_commit`.
 
 ## Mainnet
 

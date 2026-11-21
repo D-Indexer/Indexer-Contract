@@ -191,12 +191,38 @@ impl FolderContract {
         template_registry::register_template(&env, &admin, template_id, &metadata_uri)
     }
 
+    pub fn register_template_with_hash(
+        env: Env,
+        admin: Address,
+        template_id: u32,
+        metadata_uri: String,
+        content_sha256: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::register_template_with_hash(
+            &env,
+            &admin,
+            template_id,
+            &metadata_uri,
+            &content_sha256,
+        )
+    }
+
     pub fn get_template(env: Env, template_id: u32) -> Result<Template, ContractError> {
         template_registry::get_template(&env, template_id)
     }
 
+    pub fn get_template_hash(env: Env, template_id: u32) -> Option<BytesN<32>> {
+        storage::get_template_hash(&env, template_id)
+    }
+
     pub fn list_templates(env: Env) -> Vec<u32> {
         template_registry::list_templates(&env)
+    }
+
+    /// Returns up to 25 templates starting at the given index in registration order.
+    pub fn list_templates_page(env: Env, start: u32, limit: u32) -> Vec<Template> {
+        template_registry::list_templates_page(&env, start, limit)
     }
 
     pub fn set_user_template(
