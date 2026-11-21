@@ -6,7 +6,7 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, IntoVal, String, Val, Vec,
+    Address, BytesN, Env, Event as _, IntoVal, String, Val, Vec,
 };
 
 use crate::constants::{
@@ -14,7 +14,9 @@ use crate::constants::{
     PERSISTENT_BUMP_AMOUNT,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::events::{
+    AdminAdded, AdminRemoved, ContractInitialized, TemplateHashRegistered, TemplateRegistered,
+};
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -427,6 +429,35 @@ fn test_register_and_get_template() {
     let tmpl = t.client().get_template(&1u32);
     assert_eq!(tmpl.metadata_uri, uri);
     assert_eq!(tmpl.template_id, 1u32);
+}
+
+#[test]
+fn test_template_hash_registration_and_lookup() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+    let digest = BytesN::from_array(&t.env, &[42; 32]);
+
+    t.client()
+        .register_template_with_hash(&t.admin, &1, &uri, &digest);
+
+    assert_eq!(t.client().get_template_hash(&1), Some(digest.clone()));
+    assert_eq!(t.client().get_template_hash(&2), None);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [
+            TemplateRegistered {
+                template_id: 1,
+                metadata_uri: uri,
+                creator: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            TemplateHashRegistered {
+                template_id: 1,
+                content_sha256: digest,
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
+    );
 }
 
 #[test]

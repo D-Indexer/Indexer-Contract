@@ -126,12 +126,14 @@ ADMINS="$(invoke get_admins)"
 TEMPLATES_JSON="[]"
 if [[ -n "$MANIFEST" ]]; then
   echo "==> Registering templates from $MANIFEST"
-  while IFS=$'\t' read -r id uri; do
-    invoke register_template --admin "$ADMIN_ADDRESS" --template_id "$id" --metadata_uri "$uri" >/dev/null
+  while IFS=$'\t' read -r id uri content_sha256; do
+    invoke register_template_with_hash --admin "$ADMIN_ADDRESS" --template_id "$id" \
+      --metadata_uri "$uri" --content_sha256 "$content_sha256" >/dev/null
     echo "    template $id -> $uri (tx $(last_tx))"
-    TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg tx "$(last_tx)" \
-      '. + [{template_id: $id, metadata_uri: $uri, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
-  done < <(jq -r '.[] | [.template_id, .metadata_uri] | @tsv' "$MANIFEST")
+    TEMPLATES_JSON="$(jq -c --argjson id "$id" --arg uri "$uri" --arg hash "$content_sha256" \
+      --arg tx "$(last_tx)" \
+      '. + [{template_id: $id, metadata_uri: $uri, content_sha256: $hash, tx_hash: $tx}]' <<<"$TEMPLATES_JSON")"
+  done < <(jq -r '.[] | [.template_id, .metadata_uri, .content_sha256] | @tsv' "$MANIFEST")
   ON_CHAIN="$(invoke list_templates)"
   [[ "$(jq -c 'sort' <<<"$ON_CHAIN")" == "$(jq -c '[.[].template_id] | sort' "$MANIFEST")" ]] \
     || die "list_templates returned $ON_CHAIN, expected ids from $MANIFEST"

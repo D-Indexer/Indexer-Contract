@@ -39,7 +39,7 @@ pub const MAX_TEMPLATE_PAGE_SIZE: u32 = 25;
 
 /// Contract version reported by `version()`. Bump on every upgrade that
 /// changes behavior or storage layout.
-pub const CONTRACT_VERSION: u32 = 1;
+pub const CONTRACT_VERSION: u32 = 2;
 
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.

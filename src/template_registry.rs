@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
 use crate::constants::{MAX_TEMPLATES, MAX_TEMPLATE_PAGE_SIZE};
@@ -14,6 +14,32 @@ pub fn register_template(
     admin: &Address,
     template_id: u32,
     metadata_uri: &String,
+) -> Result<(), ContractError> {
+    register_template_inner(env, admin, template_id, metadata_uri, None)
+}
+
+pub fn register_template_with_hash(
+    env: &Env,
+    admin: &Address,
+    template_id: u32,
+    metadata_uri: &String,
+    content_sha256: &BytesN<32>,
+) -> Result<(), ContractError> {
+    register_template_inner(
+        env,
+        admin,
+        template_id,
+        metadata_uri,
+        Some(content_sha256),
+    )
+}
+
+fn register_template_inner(
+    env: &Env,
+    admin: &Address,
+    template_id: u32,
+    metadata_uri: &String,
+    content_sha256: Option<&BytesN<32>>,
 ) -> Result<(), ContractError> {
     require_admin(env, admin)?;
     validation::require_valid_template_id(template_id)?;
@@ -33,6 +59,10 @@ pub fn register_template(
     };
     storage::save_template_with_list(env, &template, list);
     events::template_registered(env, template_id, metadata_uri, admin);
+    if let Some(content_sha256) = content_sha256 {
+        storage::set_template_hash(env, template_id, content_sha256);
+        events::template_hash_registered(env, template_id, content_sha256);
+    }
     Ok(())
 }
 

@@ -21,7 +21,8 @@ The script:
    `templates/manifest.json`.
 3. Uploads the wasm and fails if the on-chain hash differs from the local sha256.
 4. Deploys and calls `initialize`, then fails unless `get_admins()` returns exactly the admin.
-5. Registers every template in `templates/manifest.json` and checks `list_templates()`.
+5. Registers every template in `templates/manifest.json` with its metadata SHA-256 and checks
+   `list_templates()`.
 6. Writes `deployments/testnet.json` with the network, RPC URL, contract ID, wasm hash, admin,
    date, source commit, toolchain, tx hashes and templates.
 

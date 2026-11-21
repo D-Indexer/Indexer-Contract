@@ -3,18 +3,21 @@
     "template_id": 1,
     "file": "templates/1.json",
     "cid": "bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i",
-    "metadata_uri": "ipfs://bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i"
+    "metadata_uri": "ipfs://bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i",
+    "content_sha256": "89b9bc3d9a1546ffbfb056baabca7cc89301105cd5ee4ae84cb416da119aa4fa"
   },
   {
     "template_id": 2,
     "file": "templates/2.json",
     "cid": "bafkreibl5hwjqwglhrzjepbapjzko74h5zaec5mncnw4u4crn3pejeytgi",
-    "metadata_uri": "ipfs://bafkreibl5hwjqwglhrzjepbapjzko74h5zaec5mncnw4u4crn3pejeytgi"
+    "metadata_uri": "ipfs://bafkreibl5hwjqwglhrzjepbapjzko74h5zaec5mncnw4u4crn3pejeytgi",
+    "content_sha256": "2be9ec9858cb3c72923c207a72a77f87ee4041758d136dca70516ede44931332"
   },
   {
     "template_id": 3,
     "file": "templates/3.json",
     "cid": "bafkreidb373xq4eldginonrutn4hrywugayklcoof2qjxgearzu36b4gg4",
-    "metadata_uri": "ipfs://bafkreidb373xq4eldginonrutn4hrywugayklcoof2qjxgearzu36b4gg4"
+    "metadata_uri": "ipfs://bafkreidb373xq4eldginonrutn4hrywugayklcoof2qjxgearzu36b4gg4",
+    "content_sha256": "61dff778708b1990d736349b7878e2d43030a589ce2ea09b98808e69bf078637"
   }
 ]
