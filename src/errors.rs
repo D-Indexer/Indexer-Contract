@@ -68,4 +68,28 @@ pub enum ContractError {
     /// The contract treasury holds less than the requested amount.
     /// User message: The treasury does not hold enough funds for this withdrawal.
     InsufficientBalance = 21,
+    /// The Folder name's lease has expired and is in its grace period.
+    /// User message: This Folder name has expired. The owner can still renew it.
+    FolderExpired = 22,
+    /// The price tier table is malformed.
+    /// User message: The pricing tiers are not valid.
+    InvalidPriceTiers = 23,
+    /// The configured fee is negative.
+    /// User message: The fee is not valid.
+    InvalidFee = 24,
+    /// Leases are not enabled on this contract.
+    /// User message: Folder names do not expire, so there is nothing to renew.
+    LeasesDisabled = 25,
+    /// The renewal request is invalid (zero periods, permanent name, or overflow).
+    /// User message: This Folder name cannot be renewed that way.
+    InvalidRenewal = 26,
+    /// No queued admin change has the given op ID.
+    /// User message: That admin change could not be found.
+    AdminChangeNotFound = 27,
+    /// The queued admin change's timelock has not elapsed yet.
+    /// User message: That admin change is still timelocked.
+    AdminChangeNotReady = 28,
+    /// The pending admin change queue is full.
+    /// User message: Too many admin changes are pending.
+    AdminChangeQueueFull = 29,
 }

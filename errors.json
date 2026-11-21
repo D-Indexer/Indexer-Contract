@@ -124,5 +124,53 @@
     "name": "InsufficientBalance",
     "description": "The contract treasury holds less than the requested amount.",
     "user_message": "The treasury does not hold enough funds for this withdrawal."
+  },
+  {
+    "code": 22,
+    "name": "FolderExpired",
+    "description": "The Folder name's lease has expired and is in its grace period.",
+    "user_message": "This Folder name has expired. The owner can still renew it."
+  },
+  {
+    "code": 23,
+    "name": "InvalidPriceTiers",
+    "description": "The price tier table is malformed.",
+    "user_message": "The pricing tiers are not valid."
+  },
+  {
+    "code": 24,
+    "name": "InvalidFee",
+    "description": "The configured fee is negative.",
+    "user_message": "The fee is not valid."
+  },
+  {
+    "code": 25,
+    "name": "LeasesDisabled",
+    "description": "Leases are not enabled on this contract.",
+    "user_message": "Folder names do not expire, so there is nothing to renew."
+  },
+  {
+    "code": 26,
+    "name": "InvalidRenewal",
+    "description": "The renewal request is invalid (zero periods, permanent name, or overflow).",
+    "user_message": "This Folder name cannot be renewed that way."
+  },
+  {
+    "code": 27,
+    "name": "AdminChangeNotFound",
+    "description": "No queued admin change has the given op ID.",
+    "user_message": "That admin change could not be found."
+  },
+  {
+    "code": 28,
+    "name": "AdminChangeNotReady",
+    "description": "The queued admin change's timelock has not elapsed yet.",
+    "user_message": "That admin change is still timelocked."
+  },
+  {
+    "code": 29,
+    "name": "AdminChangeQueueFull",
+    "description": "The pending admin change queue is full.",
+    "user_message": "Too many admin changes are pending."
   }
 ]
