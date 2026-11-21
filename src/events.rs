@@ -35,6 +35,8 @@ pub struct PortfolioMinted {
 pub struct PortfolioUpdated {
     pub owner: Address,
     pub ipfs_cid: String,
+    /// Appended field: the portfolio revision after this update.
+    pub revision: u32,
 }
 
 #[contractevent(topics = ["port_burn"], data_format = "vec")]
@@ -206,10 +208,11 @@ pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: 
     .publish(env);
 }
 
-pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
+pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String, revision: u32) {
     PortfolioUpdated {
         owner: owner.clone(),
         ipfs_cid: ipfs_cid.clone(),
+        revision,
     }
     .publish(env);
 }

@@ -13,6 +13,12 @@
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner; removed by `burn_portfolio` |
+| `PortfolioMeta(Address)` | persistent | `PortfolioMeta { revision, updated_at }` | one per portfolio; removed by `burn_portfolio` |
+
+`PortfolioMeta` is a separate key rather than new fields on `PortfolioNFT`, so `Portfolio`
+entries already on testnet keep decoding. A portfolio minted before this key existed has no
+`PortfolioMeta` entry: reads treat the missing key as `{ revision: 0, updated_at: minted_at }`
+without writing anything, and the next state-changing call writes `{ revision: 1, updated_at: now }`.
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now

@@ -115,6 +115,10 @@ Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
+- Each portfolio has a revision counter: 0 at mint, +1 for every `update_portfolio` and every
+  `set_user_template` while a portfolio exists. `updated_at` is the ledger timestamp of the last
+  change. Portfolios minted before revisions existed report revision 0 and `updated_at ==
+  minted_at` until their next change.
 - `burn_portfolio` deletes the portfolio record (and any portfolio-scoped keys) so the owner can
   mint again, with any template. The Folder name and selected template are kept.
 - An admin may remove itself as long as another admin remains.
@@ -137,6 +141,7 @@ Notes:
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_meta` | `owner: Address` | `PortfolioMeta { revision, updated_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
 ### Error codes

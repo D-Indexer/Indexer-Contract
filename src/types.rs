@@ -9,6 +9,17 @@ pub struct PortfolioNFT {
     pub minted_at: u64,
 }
 
+/// Per-portfolio change tracking, stored next to (not inside) `PortfolioNFT`
+/// so the XDR layout of existing `Portfolio` entries does not change.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortfolioMeta {
+    /// Number of state-changing calls since mint (0 right after mint).
+    pub revision: u32,
+    /// Ledger timestamp of the last change (`minted_at` right after mint).
+    pub updated_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
@@ -45,6 +56,8 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // nft_mint: owner -> PortfolioMeta (absent for portfolios minted before it existed)
+    PortfolioMeta(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
     // pricing: length tiers (instance)

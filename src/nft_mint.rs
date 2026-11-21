@@ -5,7 +5,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
 use crate::storage;
-use crate::types::PortfolioNFT;
+use crate::types::{PortfolioMeta, PortfolioNFT};
 use crate::validation;
 
 pub fn mint_portfolio(
@@ -35,6 +35,14 @@ pub fn mint_portfolio(
         minted_at: env.ledger().timestamp(),
     };
     storage::save_portfolio(env, &nft);
+    storage::save_portfolio_meta(
+        env,
+        owner,
+        &PortfolioMeta {
+            revision: 0,
+            updated_at: nft.minted_at,
+        },
+    );
     // Keep the user's template selection consistent with the minted portfolio.
     storage::set_user_template(env, owner, template_id);
     events::portfolio_minted(env, owner, template_id, ipfs_cid);
@@ -52,8 +60,33 @@ pub fn update_portfolio(
     let mut nft = storage::get_portfolio(env, owner)?;
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);
-    events::portfolio_updated(env, owner, ipfs_cid);
+    let meta = bump_revision(env, &nft);
+    events::portfolio_updated(env, owner, ipfs_cid, meta.revision);
     Ok(())
+}
+
+/// The portfolio's change-tracking entry. A portfolio minted before
+/// `PortfolioMeta` existed has no entry; it reads as revision 0, last
+/// updated at `minted_at`, and gets a real entry on its next change.
+pub fn portfolio_meta(env: &Env, nft: &PortfolioNFT) -> PortfolioMeta {
+    storage::get_portfolio_meta(env, &nft.owner).unwrap_or(PortfolioMeta {
+        revision: 0,
+        updated_at: nft.minted_at,
+    })
+}
+
+/// Records one state change of `nft`: revision + 1, `updated_at` = now.
+pub fn bump_revision(env: &Env, nft: &PortfolioNFT) -> PortfolioMeta {
+    let mut meta = portfolio_meta(env, nft);
+    meta.revision += 1;
+    meta.updated_at = env.ledger().timestamp();
+    storage::save_portfolio_meta(env, &nft.owner, &meta);
+    meta
+}
+
+pub fn get_portfolio_meta(env: &Env, owner: &Address) -> Result<PortfolioMeta, ContractError> {
+    let nft = storage::get_portfolio(env, owner)?;
+    Ok(portfolio_meta(env, &nft))
 }
 
 /// Deletes the owner's portfolio so they can mint again. The Folder name and

@@ -17,7 +17,7 @@ use crate::errors::ContractError;
 use crate::events::{
     AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
 };
-use crate::types::{AdminOp, DataKey};
+use crate::types::{AdminOp, DataKey, PortfolioNFT};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -2104,5 +2104,179 @@ mod burn {
         t.env.set_auths(&[]);
         assert!(t.client().try_burn_portfolio(&user).is_err());
         assert!(t.client().verify_portfolio(&user));
+    }
+}
+
+// ── Portfolio revisions ─────────────────────────────────────────────────────
+
+mod revision {
+    use super::*;
+    use crate::events::PortfolioUpdated;
+    use crate::types::PortfolioMeta;
+
+    fn set_time(t: &TestEnv, ts: u64) {
+        t.env.ledger().set_timestamp(ts);
+    }
+
+    fn cid(t: &TestEnv, i: usize) -> String {
+        let cids = [VALID_CIDV0, VALID_CIDV1_RAW];
+        String::from_str(&t.env, cids[i % 2])
+    }
+
+    #[test]
+    fn mint_starts_at_revision_zero() {
+        let t = TestEnv::new();
+        set_time(&t, 1_000);
+        let user = Address::generate(&t.env);
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, "rev.folder"));
+        t.client().mint_portfolio(&user, &1u32, &cid(&t, 0));
+
+        let minted_at = t.client().get_portfolio(&user).minted_at;
+        assert_eq!(minted_at, 1_000);
+        assert_eq!(
+            t.client().get_portfolio_meta(&user),
+            PortfolioMeta {
+                revision: 0,
+                updated_at: minted_at,
+            }
+        );
+    }
+
+    #[test]
+    fn three_updates_give_revision_three() {
+        let (t, user) = minted_env();
+        for i in 1..=3u32 {
+            let ts = 10_000 + i as u64 * 7;
+            set_time(&t, ts);
+            t.client().update_portfolio(&user, &cid(&t, i as usize));
+            let meta = t.client().get_portfolio_meta(&user);
+            assert_eq!(meta.revision, i);
+            assert_eq!(meta.updated_at, ts);
+            assert_eq!(meta.updated_at, t.env.ledger().timestamp());
+        }
+        assert_eq!(t.client().get_portfolio_meta(&user).revision, 3);
+    }
+
+    #[test]
+    fn template_change_bumps_revision() {
+        let (t, user) = minted_env();
+        t.client().register_template(
+            &t.admin,
+            &2u32,
+            &String::from_str(
+                &t.env,
+                &(std::string::String::from("ipfs://") + VALID_CIDV0),
+            ),
+        );
+        set_time(&t, 5_000);
+        t.client().set_user_template(&user, &2u32);
+        assert_eq!(
+            t.client().get_portfolio_meta(&user),
+            PortfolioMeta {
+                revision: 1,
+                updated_at: 5_000,
+            }
+        );
+        set_time(&t, 6_000);
+        t.client().update_portfolio(&user, &cid(&t, 0));
+        assert_eq!(
+            t.client().get_portfolio_meta(&user),
+            PortfolioMeta {
+                revision: 2,
+                updated_at: 6_000,
+            }
+        );
+    }
+
+    #[test]
+    fn template_change_without_portfolio_tracks_nothing() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, "nometa.folder"));
+        t.client().set_user_template(&user, &1u32);
+        assert!(!t.has_persistent(&DataKey::PortfolioMeta(user.clone())));
+        expect_contract_error(
+            t.client().try_get_portfolio_meta(&user),
+            ContractError::PortfolioNotFound,
+        );
+    }
+
+    #[test]
+    fn update_event_appends_revision() {
+        let (t, user) = minted_env();
+        t.client().update_portfolio(&user, &cid(&t, 0));
+        let c = cid(&t, 1);
+        t.client().update_portfolio(&user, &c);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [PortfolioUpdated {
+                owner: user.clone(),
+                ipfs_cid: c.clone(),
+                revision: 2,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn legacy_portfolio_without_meta_reads_revision_zero() {
+        let (t, user) = minted_env();
+        set_time(&t, 9_000);
+        // Simulate a portfolio minted before PortfolioMeta existed.
+        t.env.as_contract(&t.contract_id, || {
+            t.env
+                .storage()
+                .persistent()
+                .remove(&DataKey::PortfolioMeta(user.clone()))
+        });
+        let minted_at = t.client().get_portfolio(&user).minted_at;
+        assert_eq!(
+            t.client().get_portfolio_meta(&user),
+            PortfolioMeta {
+                revision: 0,
+                updated_at: minted_at,
+            }
+        );
+        // Reading does not write the entry.
+        assert!(!t.has_persistent(&DataKey::PortfolioMeta(user.clone())));
+
+        t.client().update_portfolio(&user, &cid(&t, 0));
+        assert_eq!(
+            t.client().get_portfolio_meta(&user),
+            PortfolioMeta {
+                revision: 1,
+                updated_at: 9_000,
+            }
+        );
+    }
+
+    #[test]
+    fn burn_removes_meta_and_remint_restarts_at_zero() {
+        let (t, user) = minted_env();
+        t.client().update_portfolio(&user, &cid(&t, 0));
+        t.client().burn_portfolio(&user);
+        assert!(!t.has_persistent(&DataKey::PortfolioMeta(user.clone())));
+
+        t.client().mint_portfolio(&user, &1u32, &cid(&t, 1));
+        assert_eq!(t.client().get_portfolio_meta(&user).revision, 0);
+    }
+
+    #[test]
+    fn portfolio_nft_layout_unchanged() {
+        let (t, user) = minted_env();
+        let nft = t.client().get_portfolio(&user);
+        // Still exactly owner, template_id, ipfs_cid, minted_at.
+        let _ = PortfolioNFT {
+            owner: nft.owner,
+            template_id: nft.template_id,
+            ipfs_cid: nft.ipfs_cid,
+            minted_at: nft.minted_at,
+        };
     }
 }

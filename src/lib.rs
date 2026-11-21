@@ -19,7 +19,9 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::{AdminOp, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
+use crate::types::{
+    AdminOp, ClaimFee, LeaseConfig, PortfolioMeta, PortfolioNFT, PriceTiers, Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -287,6 +289,13 @@ impl FolderContract {
 
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
+    }
+
+    /// Revision counter and last-change timestamp of the owner's portfolio.
+    /// Portfolios minted before revisions were tracked report revision 0 and
+    /// `updated_at == minted_at` until their next change.
+    pub fn get_portfolio_meta(env: Env, owner: Address) -> Result<PortfolioMeta, ContractError> {
+        nft_mint::get_portfolio_meta(&env, &owner)
     }
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {

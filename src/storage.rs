@@ -6,7 +6,7 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioMeta, PortfolioNFT, PriceTiers, Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -316,12 +316,29 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
     );
 }
 
+/// Returns the stored change-tracking entry, if any. Portfolios minted before
+/// `PortfolioMeta` existed have none; see `nft_mint::portfolio_meta`.
+pub fn get_portfolio_meta(env: &Env, owner: &Address) -> Option<PortfolioMeta> {
+    let key = DataKey::PortfolioMeta(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn save_portfolio_meta(env: &Env, owner: &Address, meta: &PortfolioMeta) {
+    let key = DataKey::PortfolioMeta(owner.clone());
+    env.storage().persistent().set(&key, meta);
+    extend_persistent(env, &key);
+}
+
 /// Removes every portfolio-scoped key of `owner`. The identity mapping and
 /// `UserTemplate` are owner-scoped and deliberately left in place.
 pub fn remove_portfolio(env: &Env, owner: &Address) {
-    env.storage()
-        .persistent()
-        .remove(&DataKey::Portfolio(owner.clone()));
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::Portfolio(owner.clone()));
+    persistent.remove(&DataKey::PortfolioMeta(owner.clone()));
 }
 
 // ── Economics ─────────────────────────────────────────────────────────────────
