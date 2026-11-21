@@ -1,11 +1,14 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    CLAIM_COMMIT_TTL, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{ClaimFee, DataKey, PortfolioNFT, Template};
+use crate::types::{
+    AdminChange, ClaimCommitment, ClaimFee, DataKey, GuardianConfig, LeaseConfig, PortfolioNFT,
+    PriceTiers, Recovery, Revocation, Template,
+};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -35,7 +38,7 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
     let mut admins = Vec::new(env);
     let mut i = 0u32;
     while i < count {
-        if let Some(admin) = env.storage().instance().get(&DataKey::Admin(i)) {
+        if let Some(admin) = env.storage().instance().get(&DataKey::AdminAt(i)) {
             admins.push_back(admin);
         }
         i += 1;
@@ -66,41 +69,39 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
         return false;
     }
     let count = admin_count(env);
-    env.storage()
-        .instance()
-        .set(&DataKey::Admin(address.clone()), &());
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminCount, &(count + 1));
+    let instance = env.storage().instance();
+    instance.set(&DataKey::Admin(address.clone()), &count);
+    instance.set(&DataKey::AdminAt(count), address);
+    instance.set(&DataKey::AdminCount, &(count + 1));
     true
 }
 
 /// Removes `address` from the admins. Returns `false` if it was not one.
+/// The last slot is moved into the freed one so `AdminAt` stays dense.
 pub fn remove_admin_entry(env: &Env, address: &Address) -> bool {
     if !is_admin(env, address) {
         return false;
     }
-    env.storage()
-        .instance()
-        .remove(&DataKey::Admin(address.clone()));
     let count = admin_count(env);
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminCount, &(count - 1));
+    let instance = env.storage().instance();
+    let slot: u32 = instance.get(&DataKey::Admin(address.clone())).unwrap_or(0);
+    let last = count - 1;
+    if slot != last {
+        let moved: Address = instance.get(&DataKey::AdminAt(last)).unwrap();
+        instance.set(&DataKey::AdminAt(slot), &moved);
+        instance.set(&DataKey::Admin(moved), &slot);
+    }
+    instance.remove(&DataKey::AdminAt(last));
+    instance.remove(&DataKey::Admin(address.clone()));
+    instance.set(&DataKey::AdminCount, &last);
     true
 }
 
 /// Replaces the whole admin set (used by `initialize`).
 pub fn save_admins(env: &Env, admins: &Vec<Address>) {
-    let count = admin_count(env);
-    let mut i = 0u32;
-    while i < count {
-        if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin(i)) {
-            env.storage().instance().remove(&DataKey::Admin(admin));
-        }
-        i += 1;
+    for admin in get_admins(env).iter() {
+        remove_admin_entry(env, &admin);
     }
-    env.storage().instance().set(&DataKey::AdminCount, &0u32);
     for admin in admins.iter() {
         add_admin_entry(env, &admin);
     }
@@ -213,10 +214,6 @@ pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
     result
 }
 
-pub fn save_template(env: &Env, template: &Template) {
-    save_template_with_list(env, template, get_template_list(env));
-}
-
 /// Saves a template reusing an already-loaded registry list, avoiding a second
 /// read of `TemplateList` in write paths that had to load it for validation.
 pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32>) {
@@ -270,13 +267,7 @@ pub fn set_user_template(env: &Env, owner: &Address, template_id: u32) {
 
 // ── Portfolio NFT ─────────────────────────────────────────────────────────────
 
-pub fn portfolio_exists(env: &Env, owner: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .has(&DataKey::Portfolio(owner.clone()))
-}
-
-/// Single-read variant of `portfolio_exists` + `get_portfolio`: returns the
+/// Single-read existence check + `get_portfolio`: returns the
 /// stored portfolio (if any) and extends its TTL, so write paths do not pay
 /// for a `has` followed by a `get`.
 pub fn load_portfolio(env: &Env, owner: &Address) -> Option<PortfolioNFT> {
@@ -326,4 +317,181 @@ pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
 
 pub fn set_claim_fee(env: &Env, fee: &ClaimFee) {
     env.storage().instance().set(&DataKey::ClaimFee, fee);
+}
+
+// ── Pricing ───────────────────────────────────────────────────────────────────
+
+pub fn get_price_tiers(env: &Env) -> PriceTiers {
+    env.storage()
+        .instance()
+        .get(&DataKey::PriceTiers)
+        .unwrap_or(PriceTiers {
+            by_len: Vec::new(env),
+        })
+}
+
+pub fn set_price_tiers(env: &Env, tiers: &PriceTiers) {
+    env.storage().instance().set(&DataKey::PriceTiers, tiers);
+}
+
+// ── Leases ────────────────────────────────────────────────────────────────────
+
+pub fn get_lease_config(env: &Env) -> Option<LeaseConfig> {
+    env.storage().instance().get(&DataKey::LeaseConfig)
+}
+
+pub fn set_lease_config(env: &Env, config: &Option<LeaseConfig>) {
+    match config {
+        Some(c) => env.storage().instance().set(&DataKey::LeaseConfig, c),
+        None => env.storage().instance().remove(&DataKey::LeaseConfig),
+    }
+}
+
+pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_folder_expiry(env: &Env, folder_name: &String, expiry: u64) {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    env.storage().persistent().set(&key, &expiry);
+    extend_persistent(env, &key);
+}
+
+/// Removes every key of a released Folder: both directions of the identity
+/// mapping (the reverse one only if it still points at this name) and the
+/// expiry entry.
+pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::FolderOwner(folder_name.clone()));
+    persistent.remove(&DataKey::FolderExpiry(folder_name.clone()));
+    let owner_key = DataKey::OwnerFolder(owner.clone());
+    if persistent.get::<_, String>(&owner_key).as_ref() == Some(folder_name) {
+        persistent.remove(&owner_key);
+    }
+}
+
+// ── Commit-reveal claims ──────────────────────────────────────────────────────
+
+/// Claim commits are short-lived, so they live in temporary storage and are
+/// never restored once expired.
+pub fn get_claim_commit(env: &Env, owner: &Address) -> Option<ClaimCommitment> {
+    env.storage()
+        .temporary()
+        .get(&DataKey::ClaimCommit(owner.clone()))
+}
+
+pub fn set_claim_commit(env: &Env, owner: &Address, commit: &ClaimCommitment) {
+    let key = DataKey::ClaimCommit(owner.clone());
+    env.storage().temporary().set(&key, commit);
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, CLAIM_COMMIT_TTL, CLAIM_COMMIT_TTL);
+}
+
+pub fn remove_claim_commit(env: &Env, owner: &Address) {
+    env.storage()
+        .temporary()
+        .remove(&DataKey::ClaimCommit(owner.clone()));
+}
+
+// ── Recovery ──────────────────────────────────────────────────────────────────
+
+/// Reads a persistent entry, extending its TTL when present.
+fn get_persistent<V: soroban_sdk::TryFromVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+) -> Option<V> {
+    let result = env.storage().persistent().get(key);
+    if result.is_some() {
+        extend_persistent(env, key);
+    }
+    result
+}
+
+fn set_persistent<V: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+    value: &V,
+) {
+    env.storage().persistent().set(key, value);
+    extend_persistent(env, key);
+}
+
+pub fn get_guardians(env: &Env, owner: &Address) -> Option<GuardianConfig> {
+    get_persistent(env, &DataKey::Guardians(owner.clone()))
+}
+
+pub fn set_guardians(env: &Env, owner: &Address, config: &GuardianConfig) {
+    set_persistent(env, &DataKey::Guardians(owner.clone()), config);
+}
+
+pub fn get_recovery(env: &Env, owner: &Address) -> Option<Recovery> {
+    get_persistent(env, &DataKey::Recovery(owner.clone()))
+}
+
+pub fn set_recovery(env: &Env, owner: &Address, recovery: &Recovery) {
+    set_persistent(env, &DataKey::Recovery(owner.clone()), recovery);
+}
+
+pub fn remove_recovery(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Recovery(owner.clone()));
+}
+
+/// Moves every owner-keyed record of `folder_name` from `old` to `new`:
+/// both identity mappings, the portfolio (with its `owner` field updated),
+/// the template selection and the guardian configuration. No key of `old`
+/// survives.
+pub fn rekey_identity(env: &Env, folder_name: &String, old: &Address, new: &Address) {
+    let persistent = env.storage().persistent();
+
+    persistent.remove(&DataKey::OwnerFolder(old.clone()));
+    set_folder_owner(env, folder_name, new);
+
+    let portfolio_key = DataKey::Portfolio(old.clone());
+    if let Some(mut portfolio) = persistent.get::<_, PortfolioNFT>(&portfolio_key) {
+        persistent.remove(&portfolio_key);
+        portfolio.owner = new.clone();
+        save_portfolio(env, &portfolio);
+    }
+
+    let template_key = DataKey::UserTemplate(old.clone());
+    if let Some(template_id) = persistent.get::<_, u32>(&template_key) {
+        persistent.remove(&template_key);
+        set_user_template(env, new, template_id);
+    }
+
+    let guardians_key = DataKey::Guardians(old.clone());
+    if let Some(config) = persistent.get::<_, GuardianConfig>(&guardians_key) {
+        persistent.remove(&guardians_key);
+        set_guardians(env, new, &config);
+    }
+
+    persistent.remove(&DataKey::Recovery(old.clone()));
+}
+
+// ── Revocation ────────────────────────────────────────────────────────────────
+
+pub fn get_revocation(env: &Env, folder_name: &String) -> Option<Revocation> {
+    get_persistent(env, &DataKey::Revoked(folder_name.clone()))
+}
+
+pub fn set_revocation(env: &Env, folder_name: &String, revocation: &Revocation) {
+    set_persistent(env, &DataKey::Revoked(folder_name.clone()), revocation);
+}
+
+/// Removes the owner-keyed records that only make sense with a Folder: the
+/// portfolio, the template selection and any pending recovery. Guardians are
+/// kept: they protect the address, not the name.
+pub fn remove_owner_records(env: &Env, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::Portfolio(owner.clone()));
+    persistent.remove(&DataKey::UserTemplate(owner.clone()));
+    persistent.remove(&DataKey::Recovery(owner.clone()));
 }

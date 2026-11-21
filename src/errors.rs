@@ -68,4 +68,60 @@ pub enum ContractError {
     /// The contract treasury holds less than the requested amount.
     /// User message: The treasury does not hold enough funds for this withdrawal.
     InsufficientBalance = 21,
+    /// No queued admin change has the given op ID.
+    /// User message: That admin change does not exist.
+    AdminChangeNotFound = 22,
+    /// The queued admin change is still inside its timelock.
+    /// User message: That admin change cannot be executed yet.
+    AdminChangeNotReady = 23,
+    /// The admin change queue is full.
+    /// User message: Too many admin changes are pending. Execute or cancel one first.
+    AdminChangeQueueFull = 24,
+    /// The Folder lease has expired and is in its grace period.
+    /// User message: This Folder has expired. Its owner can still renew it.
+    FolderExpired = 25,
+    /// The price tier table is malformed.
+    /// User message: The price tiers are not valid.
+    InvalidPriceTiers = 26,
+    /// A lease renewal request is invalid or overflows.
+    /// User message: This Folder cannot be renewed that way.
+    InvalidRenewal = 27,
+    /// Leases are not enabled.
+    /// User message: Folder leases are not enabled.
+    LeasesDisabled = 28,
+    /// No live claim commitment exists for the owner (never made, already
+    /// revealed, or older than the reveal window).
+    /// User message: We could not find your reservation. Please reserve the name again.
+    CommitmentNotFound = 29,
+    /// The revealed name, salt and owner do not hash to the stored commitment.
+    /// User message: The name or secret does not match your reservation.
+    CommitmentMismatch = 30,
+    /// The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.
+    /// User message: Your reservation is not ready yet. Please wait a few seconds and try again.
+    RevealTooEarly = 31,
+    /// The guardian list or threshold is invalid (more than `MAX_GUARDIANS`,
+    /// duplicates, the owner itself, or a threshold outside `1..=len`).
+    /// User message: The guardian settings are not valid.
+    InvalidGuardians = 32,
+    /// The caller is not a guardian of this owner.
+    /// User message: You are not a guardian of this Folder.
+    NotGuardian = 33,
+    /// A recovery is already pending for this owner.
+    /// User message: A recovery is already in progress for this Folder.
+    RecoveryInProgress = 34,
+    /// No recovery is pending for this owner.
+    /// User message: There is no recovery in progress for this Folder.
+    RecoveryNotFound = 35,
+    /// The recovery lacks approvals or its delay has not passed.
+    /// User message: This recovery cannot be completed yet.
+    RecoveryNotReady = 36,
+    /// The guardian already approved this recovery.
+    /// User message: You have already approved this recovery.
+    AlreadyApproved = 37,
+    /// The Folder name was revoked by an admin and cannot be claimed.
+    /// User message: That Folder name is not available.
+    FolderRevoked = 38,
+    /// The revocation reason code is not one of the documented codes.
+    /// User message: The revocation reason is not valid.
+    InvalidReasonCode = 39,
 }

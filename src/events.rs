@@ -243,3 +243,106 @@ pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: 
     }
     .publish(env);
 }
+
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["rec_init"], data_format = "vec")]
+pub struct RecoveryInitiated {
+    pub guardian: Address,
+    pub owner: Address,
+    pub new_owner: Address,
+}
+
+#[contractevent(topics = ["rec_appr"], data_format = "vec")]
+pub struct RecoveryApproved {
+    pub guardian: Address,
+    pub owner: Address,
+    /// Approvals collected so far, including this one.
+    pub approvals: u32,
+}
+
+#[contractevent(topics = ["rec_exec"], data_format = "vec")]
+pub struct RecoveryExecuted {
+    pub owner: Address,
+    pub new_owner: Address,
+    pub folder_name: String,
+}
+
+#[contractevent(topics = ["rec_cancel"], data_format = "vec")]
+pub struct RecoveryCancelled {
+    pub owner: Address,
+    pub new_owner: Address,
+}
+
+pub fn recovery_initiated(env: &Env, guardian: &Address, owner: &Address, new_owner: &Address) {
+    RecoveryInitiated {
+        guardian: guardian.clone(),
+        owner: owner.clone(),
+        new_owner: new_owner.clone(),
+    }
+    .publish(env);
+}
+
+pub fn recovery_approved(env: &Env, guardian: &Address, owner: &Address, approvals: u32) {
+    RecoveryApproved {
+        guardian: guardian.clone(),
+        owner: owner.clone(),
+        approvals,
+    }
+    .publish(env);
+}
+
+pub fn recovery_executed(env: &Env, owner: &Address, new_owner: &Address, folder_name: &String) {
+    RecoveryExecuted {
+        owner: owner.clone(),
+        new_owner: new_owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
+pub fn recovery_cancelled(env: &Env, owner: &Address, new_owner: &Address) {
+    RecoveryCancelled {
+        owner: owner.clone(),
+        new_owner: new_owner.clone(),
+    }
+    .publish(env);
+}
+
+/// Admin revocation of a Folder name. Indexers should drop the identity,
+/// its portfolio and template selection for `owner`.
+#[contractevent(topics = ["name_rev"], data_format = "vec")]
+pub struct FolderRevoked {
+    pub admin: Address,
+    pub folder_name: String,
+    pub owner: Address,
+    pub reason_code: u32,
+}
+
+pub fn folder_revoked(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+    owner: &Address,
+    reason_code: u32,
+) {
+    FolderRevoked {
+        admin: admin.clone(),
+        folder_name: folder_name.clone(),
+        owner: owner.clone(),
+        reason_code,
+    }
+    .publish(env);
+}

@@ -8,6 +8,7 @@ mod events;
 mod identity_map;
 mod nft_mint;
 mod pricing;
+mod recovery;
 mod storage;
 mod template_registry;
 mod types;
@@ -16,13 +17,13 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::ClaimFee;
-use crate::types::PortfolioNFT;
-use crate::types::Template;
-use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
+use crate::types::{
+    AdminOp, ClaimFee, GuardianConfig, LeaseConfig, PortfolioNFT, PriceTiers, Recovery, Revocation,
+    Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -72,21 +73,13 @@ impl FolderContract {
     }
 
     /// Executes a queued admin change once its ETA ledger has passed.
-    pub fn execute_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn execute_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::execute_admin_change(&env, &admin, op_id)
     }
 
     /// Cancels a queued admin change before it is executed.
-    pub fn cancel_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
     }
@@ -123,6 +116,26 @@ impl FolderContract {
         economics::withdraw(&env, &admin, &token, &to, amount)
     }
 
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    /// Labels longer than every tier pay the `ClaimFee` amount.
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to claim `folder_name` (or to renew it for one period).
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
     /// Returns this contract's balance of `token`.
     pub fn treasury_balance(env: Env, token: Address) -> i128 {
         economics::treasury_balance(&env, &token)
@@ -138,7 +151,7 @@ impl FolderContract {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract(ContractExecutable::Wasm(new_wasm_hash.clone()));
         events::contract_upgraded(&env, &admin, &new_wasm_hash);
         Ok(())
     }
@@ -146,6 +159,41 @@ impl FolderContract {
     /// Returns the contract version (`CONTRACT_VERSION`).
     pub fn version(_env: Env) -> u32 {
         constants::CONTRACT_VERSION
+    }
+
+    // ── Leases ────────────────────────────────────────────────────────────────
+
+    /// Enables leases of `period_days` with a `grace_days` grace period for
+    /// new claims. `period_days == 0` restores permanent mode (the default).
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        period_days: u32,
+        grace_days: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let config = (period_days > 0).then(|| LeaseConfig {
+            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
+            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
+        });
+        storage::set_lease_config(&env, &config);
+        Ok(())
+    }
+
+    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
+        storage::get_lease_config(&env)
+    }
+
+    /// Extends the owner's lease by `periods`; returns the new expiry.
+    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        identity_map::renew_folder(&env, &owner, periods)
+    }
+
+    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
+    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
+        identity_map::get_folder_expiry(&env, &folder_name)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -157,6 +205,40 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
+    }
+
+    /// Phase 1 of a front-running-resistant claim. `commitment` is
+    /// `sha256(folder_name_bytes || salt || owner_xdr)`; see `claim_commitment`.
+    pub fn commit_claim(
+        env: Env,
+        owner: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::commit_claim(&env, &owner, &commitment)
+    }
+
+    /// Phase 2: reveals the committed name at least `MIN_REVEAL_DELAY` and at
+    /// most `REVEAL_WINDOW` ledgers after `commit_claim`, then claims it.
+    pub fn reveal_claim(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::reveal_claim(&env, &owner, &folder_name, &salt)
+    }
+
+    /// Computes the commitment `commit_claim` expects. Clients should compute
+    /// it locally: simulating this call shows the name to the RPC node.
+    pub fn claim_commitment(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> BytesN<32> {
+        identity_map::claim_commitment(&env, &owner, &folder_name, &salt)
     }
 
     /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
@@ -171,12 +253,86 @@ impl FolderContract {
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
+    /// Admin-only removal of an abusive or impersonating name. The name is
+    /// reserved, not reassigned. `reason_code`: 1 impersonation, 2 abuse,
+    /// 3 legal.
+    pub fn revoke_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::revoke_folder(&env, &admin, &folder_name, reason_code)
+    }
+
+    /// The revocation record of `folder_name`, if an admin revoked it.
+    pub fn get_revocation(env: Env, folder_name: String) -> Option<Revocation> {
+        storage::get_revocation(&env, &folder_name)
+    }
+
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
         identity_map::get_folder(&env, &folder_name)
     }
 
     pub fn get_identity(env: Env, owner: Address) -> Result<String, ContractError> {
         identity_map::get_identity(&env, &owner)
+    }
+
+    // ── Recovery ──────────────────────────────────────────────────────────────
+
+    /// Nominates up to `MAX_GUARDIANS` guardians, `threshold` of whom must
+    /// approve a recovery. Replaces any previous set.
+    pub fn set_guardians(
+        env: Env,
+        owner: Address,
+        guardians: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::set_guardians(&env, &owner, &guardians, threshold)
+    }
+
+    pub fn get_guardians(env: Env, owner: Address) -> Option<GuardianConfig> {
+        storage::get_guardians(&env, &owner)
+    }
+
+    /// A guardian proposes moving `owner`'s identity to `new_owner`; counts as
+    /// that guardian's approval.
+    pub fn initiate_recovery(
+        env: Env,
+        guardian: Address,
+        owner: Address,
+        new_owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::initiate_recovery(&env, &guardian, &owner, &new_owner)
+    }
+
+    pub fn approve_recovery(
+        env: Env,
+        guardian: Address,
+        owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::approve_recovery(&env, &guardian, &owner)
+    }
+
+    /// Completes a recovery with `threshold` approvals once `RECOVERY_DELAY`
+    /// ledgers have passed. Unsigned; returns the new owner.
+    pub fn execute_recovery(env: Env, owner: Address) -> Result<Address, ContractError> {
+        require_initialized(&env)?;
+        recovery::execute_recovery(&env, &owner)
+    }
+
+    /// Cancels a pending recovery. Signed by the current owner.
+    pub fn cancel_recovery(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::cancel_recovery(&env, &owner)
+    }
+
+    pub fn get_recovery(env: Env, owner: Address) -> Option<Recovery> {
+        storage::get_recovery(&env, &owner)
     }
 
     // ── Template Registry ─────────────────────────────────────────────────────
@@ -240,5 +396,25 @@ impl FolderContract {
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
+    }
+
+    /// `true` only if `ipfs_cid` is exactly the owner's current portfolio CID.
+    /// `InvalidCID` for a malformed CID; `false` when there is no portfolio.
+    pub fn verify_portfolio_cid(
+        env: Env,
+        owner: Address,
+        ipfs_cid: String,
+    ) -> Result<bool, ContractError> {
+        nft_mint::verify_portfolio_cid(&env, &owner, &ipfs_cid)
+    }
+
+    /// `verify_portfolio_cid` for whoever currently owns `folder_name`.
+    /// `false` for an unclaimed, expired or released name.
+    pub fn verify_folder_portfolio(
+        env: Env,
+        folder_name: String,
+        ipfs_cid: String,
+    ) -> Result<bool, ContractError> {
+        nft_mint::verify_folder_portfolio(&env, &folder_name, &ipfs_cid)
     }
 }

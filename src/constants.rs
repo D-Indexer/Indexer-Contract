@@ -51,3 +51,41 @@ pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
 /// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
 /// withdrawals must be split across calls, each emitting its own event.
 pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
+
+/// Delay applied to queued admin changes (~24h at ~5 seconds per ledger).
+pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
+
+/// Maximum number of admin changes that may be queued at once. Bounds the
+/// size of the pending queue stored in instance storage.
+pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
+
+/// Maximum number of length-based price tiers.
+pub const MAX_PRICE_TIERS: u32 = 5;
+/// Seconds per day, used to express lease periods in days.
+pub const SECONDS_PER_DAY: u64 = 86_400;
+
+/// Minimum number of ledgers between `commit_claim` and `reveal_claim`
+/// (~50s). An observer who learns the name from a pending reveal can only
+/// commit it in that ledger, so they cannot reveal before the honest reveal
+/// lands. The margin covers a reveal delayed by congestion.
+pub const MIN_REVEAL_DELAY: u32 = 10;
+/// Number of ledgers after `commit_claim` during which the commit can be
+/// revealed (~1 day). Older commits are treated as missing.
+pub const REVEAL_WINDOW: u32 = DAY_IN_LEDGERS;
+/// TTL of a claim commit in temporary storage: just above the reveal window,
+/// so the entry outlives every ledger in which it can still be revealed.
+pub const CLAIM_COMMIT_TTL: u32 = REVEAL_WINDOW + 1;
+
+/// Maximum number of recovery guardians per owner.
+pub const MAX_GUARDIANS: u32 = 5;
+/// Ledgers between `initiate_recovery` and the earliest `execute_recovery`
+/// (~3 days): the window in which the owner can `cancel_recovery`.
+pub const RECOVERY_DELAY: u32 = 3 * DAY_IN_LEDGERS;
+
+/// `revoke_folder` reason codes (documented in the README). New codes are
+/// appended, never renumbered.
+pub const REVOKE_REASON_IMPERSONATION: u32 = 1;
+pub const REVOKE_REASON_ABUSE: u32 = 2;
+pub const REVOKE_REASON_LEGAL: u32 = 3;
+/// Highest accepted reason code.
+pub const MAX_REVOKE_REASON: u32 = REVOKE_REASON_LEGAL;

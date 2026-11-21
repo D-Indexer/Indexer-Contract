@@ -22,8 +22,12 @@ Compatibility rules:
 | Topic | Struct | Data (in order) | Emitted by |
 |---|---|---|---|
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
-| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
-| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
+| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `execute_admin_change` (`Add`) |
+| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `execute_admin_change` (`Remove`) |
+| `adm_q` | `AdminChangeQueued` | `admin: Address`, `op_id: u32`, `target: Address`, `eta_ledger: u32` | `queue_admin_change` |
+| `adm_ex` | `AdminChangeExecuted` | `admin: Address`, `op_id: u32`, `target: Address` | `execute_admin_change` |
+| `adm_cx` | `AdminChangeCancelled` | `admin: Address`, `op_id: u32`, `target: Address` | `cancel_admin_change` |
+| `upgraded` | `ContractUpgraded` | `admin: Address`, `new_wasm_hash: BytesN<32>` | `upgrade` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
@@ -31,6 +35,12 @@ Compatibility rules:
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+| `claim_spon` | `ClaimSponsored` | `sponsor: Address`, `owner: Address`, `folder_name: String` | `sponsored_claim` (after `folder_cl`) |
+| `folder_rn` | `FolderRenewed` | `owner: Address`, `folder_name: String`, `expiry: u64` | `renew_folder` |
+| `rec_init` | `RecoveryInitiated` | `guardian: Address`, `owner: Address`, `new_owner: Address` | `initiate_recovery` |
+| `rec_appr` | `RecoveryApproved` | `guardian: Address`, `owner: Address`, `approvals: u32` (count so far) | `approve_recovery` |
+| `rec_exec` | `RecoveryExecuted` | `owner: Address` (old), `new_owner: Address`, `folder_name: String` | `execute_recovery` |
+| `rec_cancel` | `RecoveryCancelled` | `owner: Address`, `new_owner: Address` | `cancel_recovery` |
 
 ### Changes in the economics / soroban-sdk 29 update
 
@@ -61,6 +71,8 @@ Compatibility rules:
 | `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
 | `claim_spon` | Record the sponsor of the claim |
 | `folder_rn` | Update the Folder's lease expiry |
+| `rec_init` / `rec_appr` / `rec_cancel` | Track the pending recovery (for owner and guardian notifications) |
+| `rec_exec` | Re-key the identity: move the Folder name, portfolio and template selection from `owner` to `new_owner` and drop every record of `owner` |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
