@@ -98,4 +98,7 @@ pub enum ContractError {
     /// The Folder name was released recently and is still cooling down.
     /// User message: That Folder name was just released. Try again later.
     FolderReleaseCooldown = 31,
+    /// The batch read has more entries than `MAX_BATCH_READ`.
+    /// User message: Too many items requested at once.
+    BatchTooLarge = 32,
 }

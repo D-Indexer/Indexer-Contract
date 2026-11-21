@@ -184,5 +184,11 @@
     "name": "FolderReleaseCooldown",
     "description": "The Folder name was released recently and is still cooling down.",
     "user_message": "That Folder name was just released. Try again later."
+  },
+  {
+    "code": 32,
+    "name": "BatchTooLarge",
+    "description": "The batch read has more entries than `MAX_BATCH_READ`.",
+    "user_message": "Too many items requested at once."
   }
 ]

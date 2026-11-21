@@ -139,6 +139,8 @@ Notes:
 | `get_admins` | — | `Vec<Address>` (empty before `initialize`) | — |
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
+| `get_folders` | `names: Vec<String>` (at most `MAX_BATCH_READ` = 50) | `Vec<Option<Address>>`, same order as `names` | `BatchTooLarge` (32) |
+| `get_identities` | `owners: Vec<Address>` (at most 50) | `Vec<Option<String>>`, same order as `owners` | `BatchTooLarge` (32) |
 | `is_reserved` | `folder_name: String` | `bool`: whether an admin reserved the name | — |
 | `get_folder_meta` | `folder_name: String` | `FolderMeta { claimed_at: u64, claimed_ledger: u32 }` | `FolderNotFound` (4), `FolderExpired` (25) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
@@ -148,6 +150,13 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+
+`get_folders` and `get_identities` resolve a whole page of profiles in one RPC simulation. Each
+element equals the matching `get_folder` / `get_identity` result, with any error (unclaimed,
+malformed, expired) mapped to `None`, so one bad entry doesn't fail the batch. Inputs longer than
+`MAX_BATCH_READ` fail with `BatchTooLarge`. A full 50-item batch costs about 8.0M CPU
+instructions and 2.2 MB of memory (`get_folders`), or 4.4M and 0.9 MB (`get_identities`). A
+test pins the ceilings at 10M CPU and 3 MB.
 
 `get_folder_meta` returns the ledger close time (`claimed_at`, Unix seconds) and ledger sequence
 (`claimed_ledger`) of the current claim. Every claim writes it in the same invocation as
@@ -177,7 +186,7 @@ Codes are stable. New errors are appended and never renumbered.
 | 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
 | 27 | `LeasesDisabled` | 28 | `InvalidRenewal` |
 | 29 | `FolderReserved` | 30 | `PortfolioExists` |
-| 31 | `FolderReleaseCooldown` | | |
+| 31 | `FolderReleaseCooldown` | 32 | `BatchTooLarge` |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and

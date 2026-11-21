@@ -1,7 +1,7 @@
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
-use crate::constants::RELEASE_COOLDOWN_LEDGERS;
+use crate::constants::{MAX_BATCH_READ, RELEASE_COOLDOWN_LEDGERS};
 use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
@@ -228,6 +228,36 @@ pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError>
         LeaseState::Grace => Err(ContractError::FolderExpired),
         LeaseState::Released => Err(ContractError::FolderNotFound),
     }
+}
+
+/// Batch form of `get_folder`: one entry per input name, in input order.
+/// Any name `get_folder` would reject (unclaimed, malformed, expired)
+/// yields `None` instead of failing the batch.
+pub fn get_folders(env: &Env, names: &Vec<String>) -> Result<Vec<Option<Address>>, ContractError> {
+    if names.len() > MAX_BATCH_READ {
+        return Err(ContractError::BatchTooLarge);
+    }
+    let mut out = Vec::new(env);
+    for name in names.iter() {
+        out.push_back(get_folder(env, &name).ok());
+    }
+    Ok(out)
+}
+
+/// Batch form of `get_identity`: one entry per input owner, in input order.
+/// Any owner `get_identity` would reject yields `None`.
+pub fn get_identities(
+    env: &Env,
+    owners: &Vec<Address>,
+) -> Result<Vec<Option<String>>, ContractError> {
+    if owners.len() > MAX_BATCH_READ {
+        return Err(ContractError::BatchTooLarge);
+    }
+    let mut out = Vec::new(env);
+    for owner in owners.iter() {
+        out.push_back(get_identity(env, &owner).ok());
+    }
+    Ok(out)
 }
 
 pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {

@@ -256,6 +256,24 @@ impl FolderContract {
         identity_map::get_folder(&env, &folder_name)
     }
 
+    /// Resolves up to `MAX_BATCH_READ` names in one call. The output matches
+    /// the input order; names `get_folder` would reject map to `None`.
+    pub fn get_folders(
+        env: Env,
+        names: Vec<String>,
+    ) -> Result<Vec<Option<Address>>, ContractError> {
+        identity_map::get_folders(&env, &names)
+    }
+
+    /// Resolves up to `MAX_BATCH_READ` owners in one call. The output matches
+    /// the input order; owners `get_identity` would reject map to `None`.
+    pub fn get_identities(
+        env: Env,
+        owners: Vec<Address>,
+    ) -> Result<Vec<Option<String>>, ContractError> {
+        identity_map::get_identities(&env, &owners)
+    }
+
     /// When and at which ledger `folder_name` was claimed. Fails with
     /// `FolderNotFound` for unclaimed names and for names claimed before this
     /// metadata was introduced.

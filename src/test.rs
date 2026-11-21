@@ -2515,3 +2515,187 @@ mod folder_meta {
         assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
     }
 }
+
+// ── Batch reads ─────────────────────────────────────────────────────────────
+
+mod batch_reads {
+    use super::*;
+    use crate::constants::MAX_BATCH_READ;
+
+    /// Documented ceiling for a full `MAX_BATCH_READ` batch where every entry
+    /// resolves (the most expensive case). Measured values are in the PR.
+    pub const BATCH_CPU_BUDGET: u64 = 10_000_000;
+    pub const BATCH_MEM_BUDGET: u64 = 3_000_000;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    /// Claims `count` distinct names and returns (owners, names).
+    fn claim_many(t: &TestEnv, count: u32) -> (Vec<Address>, Vec<String>) {
+        let mut owners = Vec::new(&t.env);
+        let mut names = Vec::new(&t.env);
+        for i in 0..count {
+            let owner = Address::generate(&t.env);
+            let n = String::from_str(&t.env, &std::format!("batch-{i:03}.folder"));
+            t.client().claim_folder(&owner, &n);
+            owners.push_back(owner);
+            names.push_back(n);
+        }
+        (owners, names)
+    }
+
+    /// Each batch element must equal the corresponding single-item read.
+    fn assert_matches_single_reads(t: &TestEnv, names: &Vec<String>, owners: &Vec<Address>) {
+        let folders = t.client().get_folders(names);
+        assert_eq!(folders.len(), names.len());
+        for (i, n) in names.iter().enumerate() {
+            let single = t.client().try_get_folder(&n).ok().map(|r| r.unwrap());
+            assert_eq!(folders.get(i as u32).unwrap(), single);
+        }
+        let identities = t.client().get_identities(owners);
+        assert_eq!(identities.len(), owners.len());
+        for (i, o) in owners.iter().enumerate() {
+            let single = t.client().try_get_identity(&o).ok().map(|r| r.unwrap());
+            assert_eq!(identities.get(i as u32).unwrap(), single);
+        }
+    }
+
+    #[test]
+    fn mixed_existing_missing_and_invalid_entries() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, 3);
+        let stranger = Address::generate(&t.env);
+
+        let query = soroban_sdk::vec![
+            &t.env,
+            names.get(2).unwrap(),
+            name(&t, "missing.folder"),
+            names.get(0).unwrap(),
+            name(&t, "NOT A NAME"),
+            name(&t, ""),
+            names.get(1).unwrap(),
+        ];
+        assert_eq!(
+            t.client().get_folders(&query),
+            soroban_sdk::vec![
+                &t.env,
+                Some(owners.get(2).unwrap()),
+                None,
+                Some(owners.get(0).unwrap()),
+                None,
+                None,
+                Some(owners.get(1).unwrap()),
+            ]
+        );
+
+        let query = soroban_sdk::vec![
+            &t.env,
+            stranger.clone(),
+            owners.get(1).unwrap(),
+            owners.get(0).unwrap(),
+        ];
+        assert_eq!(
+            t.client().get_identities(&query),
+            soroban_sdk::vec![
+                &t.env,
+                None,
+                Some(names.get(1).unwrap()),
+                Some(names.get(0).unwrap()),
+            ]
+        );
+        let mut all_names = names.clone();
+        all_names.push_back(name(&t, "missing.folder"));
+        let mut all_owners = owners.clone();
+        all_owners.push_back(stranger);
+        assert_matches_single_reads(&t, &all_names, &all_owners);
+    }
+
+    #[test]
+    fn expired_and_released_entries_match_single_reads() {
+        let t = TestEnv::new();
+        t.client().set_lease_config(&t.admin, &1u32, &1u32);
+        let (owners, names) = claim_many(&t, 2);
+        // First owner releases; the second lease lapses into its grace period.
+        t.client().release_folder(&owners.get(0).unwrap());
+        t.env
+            .ledger()
+            .with_mut(|l| l.timestamp += crate::constants::SECONDS_PER_DAY);
+        expect_contract_error(
+            t.client().try_get_folder(&names.get(1).unwrap()),
+            ContractError::FolderExpired,
+        );
+        assert_eq!(
+            t.client().get_folders(&names),
+            soroban_sdk::vec![&t.env, None, None]
+        );
+        assert_matches_single_reads(&t, &names, &owners);
+    }
+
+    #[test]
+    fn duplicates_are_answered_in_place() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, 1);
+        let n = names.get(0).unwrap();
+        let o = owners.get(0).unwrap();
+        assert_eq!(
+            t.client()
+                .get_folders(&soroban_sdk::vec![&t.env, n.clone(), n.clone()]),
+            soroban_sdk::vec![&t.env, Some(o.clone()), Some(o.clone())]
+        );
+    }
+
+    #[test]
+    fn empty_input_returns_empty_output() {
+        let t = TestEnv::new();
+        assert_eq!(t.client().get_folders(&Vec::new(&t.env)).len(), 0);
+        assert_eq!(t.client().get_identities(&Vec::new(&t.env)).len(), 0);
+    }
+
+    #[test]
+    fn input_exactly_at_the_cap_is_accepted() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, MAX_BATCH_READ);
+        assert_eq!(names.len(), MAX_BATCH_READ);
+        assert_matches_single_reads(&t, &names, &owners);
+    }
+
+    #[test]
+    fn cap_plus_one_is_rejected() {
+        let t = TestEnv::new();
+        let mut names = Vec::new(&t.env);
+        let mut owners = Vec::new(&t.env);
+        for _ in 0..=MAX_BATCH_READ {
+            names.push_back(name(&t, "same.folder"));
+            owners.push_back(Address::generate(&t.env));
+        }
+        expect_contract_error(
+            t.client().try_get_folders(&names),
+            ContractError::BatchTooLarge,
+        );
+        expect_contract_error(
+            t.client().try_get_identities(&owners),
+            ContractError::BatchTooLarge,
+        );
+    }
+
+    #[test]
+    fn full_batch_stays_within_documented_budget() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, MAX_BATCH_READ);
+
+        t.client().get_folders(&names);
+        let b = t.env.cost_estimate().budget();
+        let (cpu, mem) = (b.cpu_instruction_cost(), b.memory_bytes_cost());
+        std::println!("BUDGET get_folders[{MAX_BATCH_READ}] cpu={cpu} mem={mem}");
+        assert!(cpu <= BATCH_CPU_BUDGET, "get_folders cpu {cpu}");
+        assert!(mem <= BATCH_MEM_BUDGET, "get_folders mem {mem}");
+
+        t.client().get_identities(&owners);
+        let b = t.env.cost_estimate().budget();
+        let (cpu, mem) = (b.cpu_instruction_cost(), b.memory_bytes_cost());
+        std::println!("BUDGET get_identities[{MAX_BATCH_READ}] cpu={cpu} mem={mem}");
+        assert!(cpu <= BATCH_CPU_BUDGET, "get_identities cpu {cpu}");
+        assert!(mem <= BATCH_MEM_BUDGET, "get_identities mem {mem}");
+    }
+}

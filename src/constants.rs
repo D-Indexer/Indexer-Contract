@@ -63,6 +63,11 @@ pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
 /// can't be sniped the moment its owner lets go of it.
 pub const RELEASE_COOLDOWN_LEDGERS: u32 = 7 * DAY_IN_LEDGERS;
 
+/// Maximum number of entries accepted by the batch reads `get_folders` and
+/// `get_identities`. Keeps one call well inside the per-transaction CPU,
+/// memory and footprint limits.
+pub const MAX_BATCH_READ: u32 = 50;
+
 /// Maximum number of length-based price tiers.
 pub const MAX_PRICE_TIERS: u32 = 5;
 /// Seconds per day, used to express lease periods in days.
