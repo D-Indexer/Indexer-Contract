@@ -61,6 +61,27 @@ pub enum DataKey {
     FolderExpiry(String),
     // commit-reveal: owner -> pending ClaimCommitment (temporary storage)
     ClaimCommit(Address),
+    // recovery: owner -> GuardianConfig
+    Guardians(Address),
+    // recovery: owner -> pending Recovery
+    Recovery(Address),
+}
+
+/// Guardians allowed to move an owner's identity, and how many must approve.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuardianConfig {
+    pub guardians: Vec<Address>,
+    pub threshold: u32,
+}
+
+/// A pending identity recovery to `new_owner`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recovery {
+    pub new_owner: Address,
+    pub approvals: Vec<Address>,
+    pub initiated_ledger: u32,
 }
 
 /// A hidden Folder claim made by `commit_claim`: `commitment` is

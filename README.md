@@ -114,6 +114,11 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_lease_config` | `admin: Address, period_days: u32, grace_days: u32` | `admin` (must be an admin) | — | 2, 7 |
 | `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
+| `set_guardians` | `owner: Address, guardians: Vec<Address>, threshold: u32` | `owner` | — | 2, 4, `RecoveryInProgress` (34), `InvalidGuardians` (32) |
+| `initiate_recovery` | `guardian: Address, owner: Address, new_owner: Address` | `guardian` | `rec_init` | 2, `NotGuardian` (33), 4, 34, `FolderAlreadyClaimed` (16) |
+| `approve_recovery` | `guardian: Address, owner: Address` | `guardian` | `rec_appr` | 2, 33, `RecoveryNotFound` (35), `AlreadyApproved` (37) |
+| `execute_recovery` | `owner: Address` | none (anyone) | `rec_exec` | 2, 35, `RecoveryNotReady` (36), 4, 16 |
+| `cancel_recovery` | `owner: Address` | `owner` | `rec_cancel` | 2, 35 |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
@@ -142,6 +147,22 @@ Notes:
   `claim_folder` stays available. It needs one transaction instead of two and no wait, and most
   names are not worth front-running. The cost of that convenience is that a single-step claim can
   be front-run.
+- **Guardian recovery.** Every write needs `owner.require_auth()`, so a lost key would lose the
+  Folder for good. `set_guardians` nominates up to `MAX_GUARDIANS` (5) distinct guardians (not the
+  owner) and a `threshold` in `1..=len`; calling it again replaces the set. A guardian starts a
+  recovery to a `new_owner` with `initiate_recovery`, which counts as that guardian's approval.
+  Other guardians call `approve_recovery`. Once `threshold` approvals are in and `RECOVERY_DELAY`
+  (~3 days) has passed, anyone can call `execute_recovery`; it needs no signature because the
+  owner has lost their key. Execution moves `FolderOwner`, `OwnerFolder`, `Portfolio` (with
+  `owner` updated), `UserTemplate` and the guardian set to `new_owner`, and removes every key
+  of the old owner.
+  - **Defence against malicious guardians:** until execution, the current owner can
+    `cancel_recovery`. Approvals do not carry over to a later recovery. While a recovery is
+    pending, `set_guardians` is refused, so the guardians cannot be swapped mid-recovery.
+  - `new_owner` must not hold a Folder or a portfolio. This is checked when the recovery starts and
+    again when it executes.
+  - Only one recovery per owner can be pending. Recovery state is persistent and is deleted on
+    execute or cancel.
 - Admin changes are timelocked: `queue_admin_change` schedules them, and any admin can run
   `execute_admin_change` once `ADMIN_TIMELOCK_LEDGERS` (~24h) have passed, or `cancel_admin_change`
   before then. An admin may remove itself as long as another admin remains.
@@ -171,6 +192,8 @@ Notes:
 | `get_folder_expiry` | `folder_name: String` | `Option<u64>` lease expiry timestamp | — |
 | `version` | — | `u32` contract version | — |
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
+| `get_guardians` | `owner: Address` | `Option<GuardianConfig { guardians, threshold }>` | — |
+| `get_recovery` | `owner: Address` | `Option<Recovery { new_owner, approvals, initiated_ledger }>` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
@@ -196,7 +219,10 @@ Codes are stable. New errors are appended and never renumbered.
 | 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
 | 27 | `InvalidRenewal` | 28 | `LeasesDisabled` |
 | 29 | `CommitmentNotFound` | 30 | `CommitmentMismatch` |
-| 31 | `RevealTooEarly` | | |
+| 31 | `RevealTooEarly` | 32 | `InvalidGuardians` |
+| 33 | `NotGuardian` | 34 | `RecoveryInProgress` |
+| 35 | `RecoveryNotFound` | 36 | `RecoveryNotReady` |
+| 37 | `AlreadyApproved` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -212,7 +238,8 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
    `adm_q`, `adm_ex`, `adm_cx`, `upgraded`, `folder_cl`, `claim_spon`, `folder_rn`, `tmpl_reg`,
-   `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`, `rec_init`, `rec_appr`, `rec_exec`,
+   `rec_cancel`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.

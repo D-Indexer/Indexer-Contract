@@ -75,3 +75,9 @@ pub const REVEAL_WINDOW: u32 = DAY_IN_LEDGERS;
 /// TTL of a claim commit in temporary storage: just above the reveal window,
 /// so the entry outlives every ledger in which it can still be revealed.
 pub const CLAIM_COMMIT_TTL: u32 = REVEAL_WINDOW + 1;
+
+/// Maximum number of recovery guardians per owner.
+pub const MAX_GUARDIANS: u32 = 5;
+/// Ledgers between `initiate_recovery` and the earliest `execute_recovery`
+/// (~3 days): the window in which the owner can `cancel_recovery`.
+pub const RECOVERY_DELAY: u32 = 3 * DAY_IN_LEDGERS;

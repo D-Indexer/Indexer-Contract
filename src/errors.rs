@@ -99,4 +99,23 @@ pub enum ContractError {
     /// The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.
     /// User message: Your reservation is not ready yet. Please wait a few seconds and try again.
     RevealTooEarly = 31,
+    /// The guardian list or threshold is invalid (more than `MAX_GUARDIANS`,
+    /// duplicates, the owner itself, or a threshold outside `1..=len`).
+    /// User message: The guardian settings are not valid.
+    InvalidGuardians = 32,
+    /// The caller is not a guardian of this owner.
+    /// User message: You are not a guardian of this Folder.
+    NotGuardian = 33,
+    /// A recovery is already pending for this owner.
+    /// User message: A recovery is already in progress for this Folder.
+    RecoveryInProgress = 34,
+    /// No recovery is pending for this owner.
+    /// User message: There is no recovery in progress for this Folder.
+    RecoveryNotFound = 35,
+    /// The recovery lacks approvals or its delay has not passed.
+    /// User message: This recovery cannot be completed yet.
+    RecoveryNotReady = 36,
+    /// The guardian already approved this recovery.
+    /// User message: You have already approved this recovery.
+    AlreadyApproved = 37,
 }

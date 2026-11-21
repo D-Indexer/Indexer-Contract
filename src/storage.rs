@@ -6,8 +6,8 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimCommitment, ClaimFee, DataKey, LeaseConfig, PortfolioNFT, PriceTiers,
-    Template,
+    AdminChange, ClaimCommitment, ClaimFee, DataKey, GuardianConfig, LeaseConfig, PortfolioNFT,
+    PriceTiers, Recovery, Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -397,4 +397,81 @@ pub fn remove_claim_commit(env: &Env, owner: &Address) {
     env.storage()
         .temporary()
         .remove(&DataKey::ClaimCommit(owner.clone()));
+}
+
+// ── Recovery ──────────────────────────────────────────────────────────────────
+
+/// Reads a persistent entry, extending its TTL when present.
+fn get_persistent<V: soroban_sdk::TryFromVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+) -> Option<V> {
+    let result = env.storage().persistent().get(key);
+    if result.is_some() {
+        extend_persistent(env, key);
+    }
+    result
+}
+
+fn set_persistent<V: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+    value: &V,
+) {
+    env.storage().persistent().set(key, value);
+    extend_persistent(env, key);
+}
+
+pub fn get_guardians(env: &Env, owner: &Address) -> Option<GuardianConfig> {
+    get_persistent(env, &DataKey::Guardians(owner.clone()))
+}
+
+pub fn set_guardians(env: &Env, owner: &Address, config: &GuardianConfig) {
+    set_persistent(env, &DataKey::Guardians(owner.clone()), config);
+}
+
+pub fn get_recovery(env: &Env, owner: &Address) -> Option<Recovery> {
+    get_persistent(env, &DataKey::Recovery(owner.clone()))
+}
+
+pub fn set_recovery(env: &Env, owner: &Address, recovery: &Recovery) {
+    set_persistent(env, &DataKey::Recovery(owner.clone()), recovery);
+}
+
+pub fn remove_recovery(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Recovery(owner.clone()));
+}
+
+/// Moves every owner-keyed record of `folder_name` from `old` to `new`:
+/// both identity mappings, the portfolio (with its `owner` field updated),
+/// the template selection and the guardian configuration. No key of `old`
+/// survives.
+pub fn rekey_identity(env: &Env, folder_name: &String, old: &Address, new: &Address) {
+    let persistent = env.storage().persistent();
+
+    persistent.remove(&DataKey::OwnerFolder(old.clone()));
+    set_folder_owner(env, folder_name, new);
+
+    let portfolio_key = DataKey::Portfolio(old.clone());
+    if let Some(mut portfolio) = persistent.get::<_, PortfolioNFT>(&portfolio_key) {
+        persistent.remove(&portfolio_key);
+        portfolio.owner = new.clone();
+        save_portfolio(env, &portfolio);
+    }
+
+    let template_key = DataKey::UserTemplate(old.clone());
+    if let Some(template_id) = persistent.get::<_, u32>(&template_key) {
+        persistent.remove(&template_key);
+        set_user_template(env, new, template_id);
+    }
+
+    let guardians_key = DataKey::Guardians(old.clone());
+    if let Some(config) = persistent.get::<_, GuardianConfig>(&guardians_key) {
+        persistent.remove(&guardians_key);
+        set_guardians(env, new, &config);
+    }
+
+    persistent.remove(&DataKey::Recovery(old.clone()));
 }

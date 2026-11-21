@@ -184,5 +184,41 @@
     "name": "RevealTooEarly",
     "description": "The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.",
     "user_message": "Your reservation is not ready yet. Please wait a few seconds and try again."
+  },
+  {
+    "code": 32,
+    "name": "InvalidGuardians",
+    "description": "The guardian list or threshold is invalid (more than `MAX_GUARDIANS`, duplicates, the owner itself, or a threshold outside `1..=len`).",
+    "user_message": "The guardian settings are not valid."
+  },
+  {
+    "code": 33,
+    "name": "NotGuardian",
+    "description": "The caller is not a guardian of this owner.",
+    "user_message": "You are not a guardian of this Folder."
+  },
+  {
+    "code": 34,
+    "name": "RecoveryInProgress",
+    "description": "A recovery is already pending for this owner.",
+    "user_message": "A recovery is already in progress for this Folder."
+  },
+  {
+    "code": 35,
+    "name": "RecoveryNotFound",
+    "description": "No recovery is pending for this owner.",
+    "user_message": "There is no recovery in progress for this Folder."
+  },
+  {
+    "code": 36,
+    "name": "RecoveryNotReady",
+    "description": "The recovery lacks approvals or its delay has not passed.",
+    "user_message": "This recovery cannot be completed yet."
+  },
+  {
+    "code": 37,
+    "name": "AlreadyApproved",
+    "description": "The guardian already approved this recovery.",
+    "user_message": "You have already approved this recovery."
   }
 ]

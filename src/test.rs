@@ -2628,3 +2628,413 @@ mod commit_reveal {
         expect_contract_error(res, ContractError::NotInitialized);
     }
 }
+
+// ── Guardian recovery ───────────────────────────────────────────────────────
+
+mod recovery {
+    use super::*;
+    use crate::constants::{MAX_GUARDIANS, RECOVERY_DELAY};
+    use crate::events::{RecoveryApproved, RecoveryCancelled, RecoveryExecuted, RecoveryInitiated};
+    use crate::types::GuardianConfig;
+
+    struct RecEnv {
+        t: TestEnv,
+        owner: Address,
+        name: String,
+        guardians: std::vec::Vec<Address>,
+        new_owner: Address,
+    }
+
+    /// An owner with a Folder, a minted portfolio and `n` guardians of which
+    /// `threshold` must approve.
+    fn rec_env(n: usize, threshold: u32) -> RecEnv {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "lost-key.folder");
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        t.client().claim_folder(&owner, &name);
+        t.client()
+            .mint_portfolio(&owner, &1u32, &portfolio_cid(&t.env));
+        let guardians: std::vec::Vec<Address> = (0..n).map(|_| Address::generate(&t.env)).collect();
+        t.client()
+            .set_guardians(&owner, &vec_of(&t.env, &guardians), &threshold);
+        let new_owner = Address::generate(&t.env);
+        RecEnv {
+            t,
+            owner,
+            name,
+            guardians,
+            new_owner,
+        }
+    }
+
+    fn vec_of(env: &Env, items: &[Address]) -> Vec<Address> {
+        let mut v = Vec::new(env);
+        for a in items {
+            v.push_back(a.clone());
+        }
+        v
+    }
+
+    fn wait_delay(t: &TestEnv) {
+        let seq = t.env.ledger().sequence();
+        t.env.ledger().set_sequence_number(seq + RECOVERY_DELAY);
+    }
+
+    fn assert_no_keys_for(t: &TestEnv, who: &Address) {
+        t.env.as_contract(&t.contract_id, || {
+            let p = t.env.storage().persistent();
+            for key in [
+                DataKey::OwnerFolder(who.clone()),
+                DataKey::Portfolio(who.clone()),
+                DataKey::UserTemplate(who.clone()),
+                DataKey::Guardians(who.clone()),
+                DataKey::Recovery(who.clone()),
+            ] {
+                assert!(!p.has(&key), "stale key left for old owner");
+            }
+        });
+    }
+
+    #[test]
+    fn full_lifecycle_threshold_one() {
+        let r = rec_env(1, 1);
+        let t = &r.t;
+        let g = &r.guardians[0];
+
+        t.client().initiate_recovery(g, &r.owner, &r.new_owner);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [RecoveryInitiated {
+                guardian: g.clone(),
+                owner: r.owner.clone(),
+                new_owner: r.new_owner.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        let pending = t.client().get_recovery(&r.owner).unwrap();
+        assert_eq!(pending.new_owner, r.new_owner);
+        assert_eq!(pending.approvals.len(), 1);
+
+        wait_delay(t);
+        assert_eq!(t.client().execute_recovery(&r.owner), r.new_owner);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [RecoveryExecuted {
+                owner: r.owner.clone(),
+                new_owner: r.new_owner.clone(),
+                folder_name: r.name.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+
+        // The identity, portfolio, template and guardians moved.
+        assert_eq!(t.client().get_folder(&r.name), r.new_owner);
+        assert_eq!(t.client().get_identity(&r.new_owner), r.name);
+        let nft = t.client().get_portfolio(&r.new_owner);
+        assert_eq!(nft.owner, r.new_owner);
+        assert_eq!(nft.ipfs_cid, portfolio_cid(&t.env));
+        assert_eq!(t.client().get_user_template(&r.new_owner), Some(1u32));
+        assert_eq!(
+            t.client().get_guardians(&r.new_owner),
+            Some(GuardianConfig {
+                guardians: vec_of(&t.env, &r.guardians),
+                threshold: 1,
+            })
+        );
+        assert_eq!(t.client().get_recovery(&r.owner), None);
+
+        // Old owner is gone everywhere.
+        expect_contract_error(
+            t.client().try_get_identity(&r.owner),
+            ContractError::FolderNotFound,
+        );
+        expect_contract_error(
+            t.client().try_get_portfolio(&r.owner),
+            ContractError::PortfolioNotFound,
+        );
+        assert_eq!(t.client().get_user_template(&r.owner), None);
+        assert_no_keys_for(t, &r.owner);
+
+        // The new key controls the identity.
+        let new_cid = String::from_str(&t.env, VALID_CIDV0);
+        t.client().update_portfolio(&r.new_owner, &new_cid);
+        expect_contract_error(
+            t.client().try_update_portfolio(&r.owner, &new_cid),
+            ContractError::PortfolioNotFound,
+        );
+        // The old address is free to start over.
+        t.client()
+            .claim_folder(&r.owner, &String::from_str(&t.env, "fresh.folder"));
+    }
+
+    #[test]
+    fn threshold_three_needs_three_approvals() {
+        let r = rec_env(5, 3);
+        let t = &r.t;
+        let g = &r.guardians;
+
+        t.client().initiate_recovery(&g[0], &r.owner, &r.new_owner);
+        t.client().approve_recovery(&g[1], &r.owner);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [RecoveryApproved {
+                guardian: g[1].clone(),
+                owner: r.owner.clone(),
+                approvals: 2,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+
+        // Delay passed but only 2 of 3 approvals.
+        wait_delay(t);
+        expect_contract_error(
+            t.client().try_execute_recovery(&r.owner),
+            ContractError::RecoveryNotReady,
+        );
+
+        t.client().approve_recovery(&g[4], &r.owner);
+        t.client().execute_recovery(&r.owner);
+        assert_eq!(t.client().get_folder(&r.name), r.new_owner);
+        assert_no_keys_for(t, &r.owner);
+    }
+
+    #[test]
+    fn delay_boundary() {
+        let r = rec_env(1, 1);
+        let t = &r.t;
+        t.env.ledger().set_sequence_number(500);
+        t.client()
+            .initiate_recovery(&r.guardians[0], &r.owner, &r.new_owner);
+
+        t.env.ledger().set_sequence_number(500 + RECOVERY_DELAY - 1);
+        expect_contract_error(
+            t.client().try_execute_recovery(&r.owner),
+            ContractError::RecoveryNotReady,
+        );
+        t.env.ledger().set_sequence_number(500 + RECOVERY_DELAY);
+        t.client().execute_recovery(&r.owner);
+        assert_eq!(t.client().get_folder(&r.name), r.new_owner);
+    }
+
+    #[test]
+    fn owner_cancel_race() {
+        let r = rec_env(3, 2);
+        let t = &r.t;
+        let g = &r.guardians;
+        t.client().initiate_recovery(&g[0], &r.owner, &r.new_owner);
+        t.client().approve_recovery(&g[1], &r.owner);
+
+        // The owner still has their key and cancels in the last ledger
+        // before the recovery becomes executable.
+        let seq = t.env.ledger().sequence();
+        t.env.ledger().set_sequence_number(seq + RECOVERY_DELAY - 1);
+        t.client().cancel_recovery(&r.owner);
+        assert_single_auth(t, &r.owner, "cancel_recovery");
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [RecoveryCancelled {
+                owner: r.owner.clone(),
+                new_owner: r.new_owner.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().get_recovery(&r.owner), None);
+
+        wait_delay(t);
+        expect_contract_error(
+            t.client().try_execute_recovery(&r.owner),
+            ContractError::RecoveryNotFound,
+        );
+        expect_contract_error(
+            t.client().try_approve_recovery(&g[2], &r.owner),
+            ContractError::RecoveryNotFound,
+        );
+        assert_eq!(t.client().get_folder(&r.name), r.owner);
+
+        // Approvals do not carry over to a new recovery.
+        t.client().initiate_recovery(&g[2], &r.owner, &r.new_owner);
+        wait_delay(t);
+        expect_contract_error(
+            t.client().try_execute_recovery(&r.owner),
+            ContractError::RecoveryNotReady,
+        );
+    }
+
+    #[test]
+    fn cancel_after_execution_fails() {
+        let r = rec_env(1, 1);
+        let t = &r.t;
+        t.client()
+            .initiate_recovery(&r.guardians[0], &r.owner, &r.new_owner);
+        wait_delay(t);
+        t.client().execute_recovery(&r.owner);
+        expect_contract_error(
+            t.client().try_cancel_recovery(&r.owner),
+            ContractError::RecoveryNotFound,
+        );
+        assert_eq!(t.client().get_folder(&r.name), r.new_owner);
+    }
+
+    #[test]
+    fn duplicate_approval_rejected() {
+        let r = rec_env(3, 2);
+        let t = &r.t;
+        let g = &r.guardians;
+        t.client().initiate_recovery(&g[0], &r.owner, &r.new_owner);
+
+        // The initiator's approval is already counted.
+        expect_contract_error(
+            t.client().try_approve_recovery(&g[0], &r.owner),
+            ContractError::AlreadyApproved,
+        );
+        t.client().approve_recovery(&g[1], &r.owner);
+        expect_contract_error(
+            t.client().try_approve_recovery(&g[1], &r.owner),
+            ContractError::AlreadyApproved,
+        );
+        assert_eq!(
+            t.client().get_recovery(&r.owner).unwrap().approvals.len(),
+            2
+        );
+    }
+
+    #[test]
+    fn non_guardians_cannot_act() {
+        let r = rec_env(2, 1);
+        let t = &r.t;
+        let stranger = Address::generate(&t.env);
+        expect_contract_error(
+            t.client()
+                .try_initiate_recovery(&stranger, &r.owner, &r.new_owner),
+            ContractError::NotGuardian,
+        );
+        t.client()
+            .initiate_recovery(&r.guardians[0], &r.owner, &r.new_owner);
+        expect_contract_error(
+            t.client().try_approve_recovery(&stranger, &r.owner),
+            ContractError::NotGuardian,
+        );
+        // An owner without guardians cannot be recovered.
+        let other = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&other, &String::from_str(&t.env, "other.folder"));
+        expect_contract_error(
+            t.client()
+                .try_initiate_recovery(&r.guardians[0], &other, &r.new_owner),
+            ContractError::NotGuardian,
+        );
+    }
+
+    #[test]
+    fn only_one_recovery_at_a_time() {
+        let r = rec_env(2, 1);
+        let t = &r.t;
+        t.client()
+            .initiate_recovery(&r.guardians[0], &r.owner, &r.new_owner);
+        expect_contract_error(
+            t.client()
+                .try_initiate_recovery(&r.guardians[1], &r.owner, &Address::generate(&t.env)),
+            ContractError::RecoveryInProgress,
+        );
+        // Guardians cannot be swapped while a recovery is pending.
+        expect_contract_error(
+            t.client().try_set_guardians(
+                &r.owner,
+                &vec_of(&t.env, &[Address::generate(&t.env)]),
+                &1,
+            ),
+            ContractError::RecoveryInProgress,
+        );
+    }
+
+    #[test]
+    fn new_owner_must_not_hold_a_folder() {
+        let r = rec_env(1, 1);
+        let t = &r.t;
+        let g = &r.guardians[0];
+        let holder = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&holder, &String::from_str(&t.env, "holder.folder"));
+        expect_contract_error(
+            t.client().try_initiate_recovery(g, &r.owner, &holder),
+            ContractError::FolderAlreadyClaimed,
+        );
+        expect_contract_error(
+            t.client().try_initiate_recovery(g, &r.owner, &r.owner),
+            ContractError::FolderAlreadyClaimed,
+        );
+
+        // new_owner claims a Folder after initiation: execution is refused.
+        t.client().initiate_recovery(g, &r.owner, &r.new_owner);
+        t.client()
+            .claim_folder(&r.new_owner, &String::from_str(&t.env, "sneaky.folder"));
+        wait_delay(t);
+        expect_contract_error(
+            t.client().try_execute_recovery(&r.owner),
+            ContractError::FolderAlreadyClaimed,
+        );
+        assert_eq!(t.client().get_folder(&r.name), r.owner);
+    }
+
+    #[test]
+    fn set_guardians_validation() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let gs: std::vec::Vec<Address> = (0..=MAX_GUARDIANS)
+            .map(|_| Address::generate(&t.env))
+            .collect();
+        let five = vec_of(&t.env, &gs[..5]);
+
+        expect_contract_error(
+            t.client().try_set_guardians(&owner, &five, &1),
+            ContractError::FolderNotFound,
+        );
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, "guarded.folder"));
+
+        for (guardians, threshold) in [
+            (vec_of(&t.env, &gs), 1),
+            (five.clone(), 0),
+            (five.clone(), 6),
+            (Vec::new(&t.env), 0),
+            (vec_of(&t.env, &[gs[0].clone(), gs[0].clone()]), 1),
+            (vec_of(&t.env, &[gs[0].clone(), owner.clone()]), 1),
+        ] {
+            expect_contract_error(
+                t.client().try_set_guardians(&owner, &guardians, &threshold),
+                ContractError::InvalidGuardians,
+            );
+        }
+
+        t.client().set_guardians(&owner, &five, &5);
+        assert_single_auth(&t, &owner, "set_guardians");
+        t.client()
+            .set_guardians(&owner, &vec_of(&t.env, &gs[..1]), &1);
+        assert_eq!(t.client().get_guardians(&owner).unwrap().guardians.len(), 1);
+    }
+
+    #[test]
+    fn recovery_auth() {
+        let r = rec_env(1, 1);
+        let t = &r.t;
+        let g = &r.guardians[0];
+
+        t.client().initiate_recovery(g, &r.owner, &r.new_owner);
+        assert_single_auth(t, g, "initiate_recovery");
+
+        t.env.set_auths(&[]);
+        assert!(t.client().try_cancel_recovery(&r.owner).is_err());
+        assert!(t
+            .client()
+            .try_set_guardians(&r.owner, &vec_of(&t.env, core::slice::from_ref(g)), &1)
+            .is_err());
+        assert!(t.client().try_approve_recovery(g, &r.owner).is_err());
+        // Execution needs no signature at all.
+        wait_delay(t);
+        t.client().execute_recovery(&r.owner);
+        assert!(t.env.auths().is_empty());
+        assert_eq!(t.client().get_folder(&r.name), r.new_owner);
+    }
+}

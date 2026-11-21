@@ -8,6 +8,7 @@ mod events;
 mod identity_map;
 mod nft_mint;
 mod pricing;
+mod recovery;
 mod storage;
 mod template_registry;
 mod types;
@@ -19,7 +20,9 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::{AdminOp, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
+use crate::types::{
+    AdminOp, ClaimFee, GuardianConfig, LeaseConfig, PortfolioNFT, PriceTiers, Recovery, Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -255,6 +258,62 @@ impl FolderContract {
 
     pub fn get_identity(env: Env, owner: Address) -> Result<String, ContractError> {
         identity_map::get_identity(&env, &owner)
+    }
+
+    // ── Recovery ──────────────────────────────────────────────────────────────
+
+    /// Nominates up to `MAX_GUARDIANS` guardians, `threshold` of whom must
+    /// approve a recovery. Replaces any previous set.
+    pub fn set_guardians(
+        env: Env,
+        owner: Address,
+        guardians: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::set_guardians(&env, &owner, &guardians, threshold)
+    }
+
+    pub fn get_guardians(env: Env, owner: Address) -> Option<GuardianConfig> {
+        storage::get_guardians(&env, &owner)
+    }
+
+    /// A guardian proposes moving `owner`'s identity to `new_owner`; counts as
+    /// that guardian's approval.
+    pub fn initiate_recovery(
+        env: Env,
+        guardian: Address,
+        owner: Address,
+        new_owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::initiate_recovery(&env, &guardian, &owner, &new_owner)
+    }
+
+    pub fn approve_recovery(
+        env: Env,
+        guardian: Address,
+        owner: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::approve_recovery(&env, &guardian, &owner)
+    }
+
+    /// Completes a recovery with `threshold` approvals once `RECOVERY_DELAY`
+    /// ledgers have passed. Unsigned; returns the new owner.
+    pub fn execute_recovery(env: Env, owner: Address) -> Result<Address, ContractError> {
+        require_initialized(&env)?;
+        recovery::execute_recovery(&env, &owner)
+    }
+
+    /// Cancels a pending recovery. Signed by the current owner.
+    pub fn cancel_recovery(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        recovery::cancel_recovery(&env, &owner)
+    }
+
+    pub fn get_recovery(env: Env, owner: Address) -> Option<Recovery> {
+        storage::get_recovery(&env, &owner)
     }
 
     // ── Template Registry ─────────────────────────────────────────────────────
