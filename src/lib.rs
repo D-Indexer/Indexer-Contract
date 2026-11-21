@@ -199,6 +199,11 @@ impl FolderContract {
         template_registry::list_templates(&env)
     }
 
+    /// Returns up to 25 templates starting at the given index in registration order.
+    pub fn list_templates_page(env: Env, start: u32, limit: u32) -> Vec<Template> {
+        template_registry::list_templates_page(&env, start, limit)
+    }
+
     pub fn set_user_template(
         env: Env,
         owner: Address,

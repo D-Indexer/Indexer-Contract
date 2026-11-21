@@ -115,6 +115,9 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `list_templates_page` caps `limit` at 25. A full page reads the registry list once and at most
+  25 template records from persistent storage (26 persistent reads total); `start` indexes the
+  registration-order ID list, and an index past the end returns an empty vector.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -130,6 +133,7 @@ Notes:
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
+| `list_templates_page` | `start: u32, limit: u32` | Up to 25 `Template` records, indexed in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |

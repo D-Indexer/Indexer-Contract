@@ -509,6 +509,46 @@ fn test_list_templates() {
 }
 
 #[test]
+fn test_list_templates_page_covers_registry_without_overlap() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    for id in 1..=60 {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+
+    let first = t.client().list_templates_page(&0, &25);
+    let second = t.client().list_templates_page(&25, &25);
+    let third = t.client().list_templates_page(&50, &25);
+
+    assert_eq!(first.len(), 25);
+    assert_eq!(second.len(), 25);
+    assert_eq!(third.len(), 10);
+    for (offset, template) in first.iter().chain(second.iter()).chain(third.iter()).enumerate() {
+        assert_eq!(template.template_id, offset as u32 + 1);
+    }
+}
+
+#[test]
+fn test_list_templates_page_boundaries_and_limits() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    for id in 1..=3 {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+
+    assert_eq!(t.client().list_templates_page(&3, &1).len(), 0);
+    assert_eq!(t.client().list_templates_page(&4, &1).len(), 0);
+    assert_eq!(t.client().list_templates_page(&0, &0).len(), 0);
+    assert_eq!(t.client().list_templates_page(&0, &u32::MAX).len(), 3);
+}
+
+#[test]
 fn test_mint_and_get_portfolio() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
