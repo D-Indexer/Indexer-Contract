@@ -23,9 +23,33 @@ The script:
 4. Deploys and calls `initialize`, then fails unless `get_admins()` returns exactly the admin.
 5. Registers every template in `templates/manifest.json` and checks `list_templates()`.
 6. Writes `deployments/testnet.json` with the network, RPC URL, contract ID, wasm hash, admin,
-   date, source commit, toolchain, tx hashes and templates.
+   date, source commit, toolchain, tx hashes, ledgers and templates, after validating it against
+   [`deployments/schema.json`](../deployments/schema.json).
 
 Any failure stops the script with a non-zero exit code and the failing command.
+
+### Resuming a failed deploy
+
+Progress is saved to `deploy-out/<network>/state.json` after every step (wasm hash, contract ID,
+and the tx hash and ledger of each completed step). If a run fails, rerun with `--resume`: completed
+steps are skipped, the same contract ID is reused, and only templates missing from
+`list_templates()` are registered. A template that is already on-chain with a different
+`metadata_uri` than the manifest stops the script. Use `--fresh` to discard the state and deploy a
+new contract. Running without either flag while a state file exists is refused.
+
+### Deployment record
+
+`deployments/<network>.json` follows [`deployments/schema.json`](../deployments/schema.json)
+(JSON Schema 2020-12). CI validates every record with `python3 scripts/validate_deployments.py`.
+
+Indexers should start `getEvents` at `deploy_ledger`, the ledger of the deploy transaction.
+`ledgers` holds the ledger of each entry in `transactions`, and every template has a `ledger`.
+The values come from RPC `getTransaction`, or from Horizon once the transaction is older than RPC
+retention. To add them to an older record:
+
+```bash
+python3 scripts/backfill_ledgers.py backfill deployments/testnet.json
+```
 
 Then run the end-to-end check:
 
@@ -37,6 +61,27 @@ Then run the end-to-end check:
 
 `./scripts/deploy.sh mainnet` uses the same flow without Friendbot, so the identity must already
 exist and be funded. Complete [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) first.
+
+### Offline or multisig signing
+
+The mainnet admin should be a multisig or hardware-backed account whose keys never touch the
+deploy machine. With `ADMIN_ADDRESS` set to that account (it is also the source of every
+transaction), the deploy runs one step at a time: `upload_wasm`, `deploy`, `initialize`, then
+`template-<id>` for each manifest entry.
+
+```bash
+export ADMIN_ADDRESS=G...
+./scripts/deploy.sh mainnet --build-only        # writes deploy-out/mainnet/<step>.xdr and <step>.txt
+stellar tx sign --sign-with-key <signer> --network mainnet < deploy-out/mainnet/<step>.xdr > signed.xdr
+./scripts/deploy.sh mainnet --submit signed.xdr # submits, verifies and records the step
+# repeat --build-only / sign / --submit until the script writes deployments/mainnet.json
+```
+
+Each step is built only after the previous one is on-chain, so its sequence number is current
+when it is signed. `<step>.txt` lists the operation, arguments and fee for signers. The deploy
+step uses a random salt, so the contract ID is known when the XDR is built. After each submit the
+script runs the same checks as a local deploy: the on-chain wasm hash, `get_admins` and the
+template URIs, then `list_templates` after the last template.
 
 ## Upgrades
 
