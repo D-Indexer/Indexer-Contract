@@ -166,5 +166,11 @@
     "name": "AdminChangeQueueFull",
     "description": "The admin change queue is full.",
     "user_message": "Too many admin changes are already queued."
+  },
+  {
+    "code": 29,
+    "name": "StaleUpdate",
+    "description": "The portfolio's current CID does not match the expected CID.",
+    "user_message": "This portfolio was changed elsewhere. Reload it and try again."
   }
 ]

@@ -57,12 +57,38 @@ pub fn update_portfolio(
     require_owner(env, owner)?;
 
     validation::require_valid_ipfs_cid(ipfs_cid)?;
-    let mut nft = storage::get_portfolio(env, owner)?;
+    let nft = storage::get_portfolio(env, owner)?;
+    write_cid(env, nft, ipfs_cid);
+    Ok(())
+}
+
+/// Compare-and-swap variant of `update_portfolio`: writes only if the
+/// current CID equals `expected_cid`, otherwise fails with `StaleUpdate`.
+pub fn update_portfolio_if(
+    env: &Env,
+    owner: &Address,
+    ipfs_cid: &String,
+    expected_cid: &String,
+) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
+    validation::require_valid_ipfs_cid(expected_cid)?;
+    let nft = storage::get_portfolio(env, owner)?;
+    if nft.ipfs_cid != *expected_cid {
+        return Err(ContractError::StaleUpdate);
+    }
+    write_cid(env, nft, ipfs_cid);
+    Ok(())
+}
+
+/// Stores the new CID, bumps the revision and emits `port_upd`. Callers have
+/// already authorized and validated.
+fn write_cid(env: &Env, mut nft: PortfolioNFT, ipfs_cid: &String) {
     nft.ipfs_cid = ipfs_cid.clone();
     storage::save_portfolio(env, &nft);
     let meta = bump_revision(env, &nft);
-    events::portfolio_updated(env, owner, ipfs_cid, meta.revision);
-    Ok(())
+    events::portfolio_updated(env, &nft.owner, ipfs_cid, meta.revision);
 }
 
 /// The portfolio's change-tracking entry. A portfolio minted before

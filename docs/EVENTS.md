@@ -28,10 +28,15 @@ Compatibility rules:
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
-| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `revision: u32` | `update_portfolio` |
+| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `revision: u32` | `update_portfolio`, `update_portfolio_if` |
 | `port_burn` | `PortfolioBurned` | `owner: Address`, `last_ipfs_cid: String` | `burn_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+
+### Changes in the compare-and-swap update
+
+- **Semantics:** `update_portfolio_if` emits the standard `port_upd`, identical to
+  `update_portfolio`. A rejected (`StaleUpdate`) call emits nothing.
 
 ### Changes in the portfolio revision update
 

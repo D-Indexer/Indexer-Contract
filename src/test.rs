@@ -2280,3 +2280,118 @@ mod revision {
         };
     }
 }
+
+// ── Compare-and-swap update ─────────────────────────────────────────────────
+
+mod cas {
+    use super::*;
+    use crate::events::PortfolioUpdated;
+
+    const CID_A: &str = VALID_CIDV1_RAW; // the CID minted_env() mints with
+    const CID_B: &str = VALID_CIDV0;
+    const CID_C: &str = "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y";
+
+    fn s(t: &TestEnv, v: &str) -> String {
+        String::from_str(&t.env, v)
+    }
+
+    #[test]
+    fn matching_base_updates_and_emits_port_upd() {
+        let (t, user) = minted_env();
+        t.client()
+            .update_portfolio_if(&user, &s(&t, CID_B), &s(&t, CID_A));
+        assert_single_auth(&t, &user, "update_portfolio_if");
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [PortfolioUpdated {
+                owner: user.clone(),
+                ipfs_cid: s(&t, CID_B),
+                revision: 1,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_B));
+    }
+
+    #[test]
+    fn second_update_from_same_base_is_stale() {
+        let (t, user) = minted_env();
+        // Two clients both read CID_A and try to replace it.
+        t.client()
+            .update_portfolio_if(&user, &s(&t, CID_B), &s(&t, CID_A));
+        expect_contract_error(
+            t.client()
+                .try_update_portfolio_if(&user, &s(&t, CID_C), &s(&t, CID_A)),
+            ContractError::StaleUpdate,
+        );
+        // The first write is kept; the rejected one changed nothing.
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_B));
+        assert_eq!(t.client().get_portfolio_meta(&user).revision, 1);
+    }
+
+    #[test]
+    fn stale_base_rejected() {
+        let (t, user) = minted_env();
+        expect_contract_error(
+            t.client()
+                .try_update_portfolio_if(&user, &s(&t, CID_C), &s(&t, CID_B)),
+            ContractError::StaleUpdate,
+        );
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_A));
+        assert_eq!(t.client().get_portfolio_meta(&user).revision, 0);
+    }
+
+    #[test]
+    fn missing_portfolio_rejected() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&user, &String::from_str(&t.env, "nocas.folder"));
+        expect_contract_error(
+            t.client()
+                .try_update_portfolio_if(&user, &s(&t, CID_B), &s(&t, CID_A)),
+            ContractError::PortfolioNotFound,
+        );
+    }
+
+    #[test]
+    fn invalid_new_cid_rejected() {
+        let (t, user) = minted_env();
+        expect_contract_error(
+            t.client()
+                .try_update_portfolio_if(&user, &s(&t, "not-a-cid"), &s(&t, CID_A)),
+            ContractError::InvalidCID,
+        );
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn invalid_expected_cid_rejected() {
+        let (t, user) = minted_env();
+        expect_contract_error(
+            t.client()
+                .try_update_portfolio_if(&user, &s(&t, CID_B), &s(&t, "not-a-cid")),
+            ContractError::InvalidCID,
+        );
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn requires_owner_signature() {
+        let (t, user) = minted_env();
+        t.env.set_auths(&[]);
+        assert!(t
+            .client()
+            .try_update_portfolio_if(&user, &s(&t, CID_B), &s(&t, CID_A))
+            .is_err());
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn plain_update_still_unconditional() {
+        let (t, user) = minted_env();
+        t.client().update_portfolio(&user, &s(&t, CID_B));
+        t.client().update_portfolio(&user, &s(&t, CID_C));
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_C));
+    }
+}

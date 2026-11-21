@@ -89,4 +89,7 @@ pub enum ContractError {
     /// The admin change queue is full.
     /// User message: Too many admin changes are already queued.
     AdminChangeQueueFull = 28,
+    /// The portfolio's current CID does not match the expected CID.
+    /// User message: This portfolio was changed elsewhere. Reload it and try again.
+    StaleUpdate = 29,
 }

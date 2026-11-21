@@ -280,6 +280,18 @@ impl FolderContract {
         nft_mint::update_portfolio(&env, &owner, &ipfs_cid)
     }
 
+    /// Compare-and-swap update: writes `ipfs_cid` only if the portfolio's
+    /// current CID is `expected_cid`, otherwise fails with `StaleUpdate`.
+    pub fn update_portfolio_if(
+        env: Env,
+        owner: Address,
+        ipfs_cid: String,
+        expected_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::update_portfolio_if(&env, &owner, &ipfs_cid, &expected_cid)
+    }
+
     /// Deletes the owner's portfolio. Keeps the Folder name and selected
     /// template; `mint_portfolio` works again afterwards.
     pub fn burn_portfolio(env: Env, owner: Address) -> Result<(), ContractError> {

@@ -109,6 +109,7 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `update_portfolio_if` | `owner: Address, ipfs_cid: String, expected_cid: String` | `owner` | `port_upd` | 2, 8 (either CID), 5, `StaleUpdate` (29) |
 | `burn_portfolio` | `owner: Address` | `owner` | `port_burn` | 2, 5 |
 
 Notes:
@@ -119,6 +120,12 @@ Notes:
   `set_user_template` while a portfolio exists. `updated_at` is the ledger timestamp of the last
   change. Portfolios minted before revisions existed report revision 0 and `updated_at ==
   minted_at` until their next change.
+- `update_portfolio_if` is a compare-and-swap: it writes only if the portfolio's current CID equals
+  `expected_cid`, otherwise it fails with `StaleUpdate` and changes nothing. Prefer it whenever more
+  than one writer can update the same portfolio (several devices, a relayer, a backend publisher):
+  pass the CID you last read as `expected_cid`, and on `StaleUpdate` re-read with `get_portfolio`,
+  merge or ask the user, and retry. `update_portfolio` stays last-write-wins and is fine for a
+  single writer.
 - `burn_portfolio` deletes the portfolio record (and any portfolio-scoped keys) so the owner can
   mint again, with any template. The Folder name and selected template are kept.
 - An admin may remove itself as long as another admin remains.
@@ -164,6 +171,7 @@ Codes are stable. New errors are appended and never renumbered.
 | 23 | `InvalidPriceTiers` | 24 | `LeasesDisabled` |
 | 25 | `InvalidRenewal` | 26 | `AdminChangeNotFound` |
 | 27 | `AdminChangeNotReady` | 28 | `AdminChangeQueueFull` |
+| 29 | `StaleUpdate` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
