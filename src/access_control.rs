@@ -22,6 +22,32 @@ pub fn require_owner(env: &Env, owner: &Address) -> Result<(), ContractError> {
     Ok(())
 }
 
+pub fn add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), ContractError> {
+    require_admin(env, caller)?;
+    if storage::is_admin(env, new_admin) {
+        return Err(ContractError::AdminAlreadyExists);
+    }
+    if storage::admin_count(env) >= MAX_ADMINS {
+        return Err(ContractError::TooManyAdmins);
+    }
+    storage::add_admin_entry(env, new_admin);
+    events::admin_added(env, caller, new_admin);
+    Ok(())
+}
+
+pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(), ContractError> {
+    require_admin(env, caller)?;
+    if !storage::is_admin(env, target) {
+        return Err(ContractError::AdminNotFound);
+    }
+    if storage::admin_count(env) == 1 {
+        return Err(ContractError::CannotRemoveLastAdmin);
+    }
+    storage::remove_admin_entry(env, target);
+    events::admin_removed(env, caller, target);
+    Ok(())
+}
+
 /// Queues an admin change and returns its op ID. The change becomes
 /// executable once `ADMIN_TIMELOCK_LEDGERS` ledgers have elapsed.
 pub fn queue_admin_change(
