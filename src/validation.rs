@@ -7,34 +7,18 @@ use crate::constants::{
 use crate::errors::ContractError;
 
 fn starts_with(bytes: &Bytes, prefix: &[u8]) -> bool {
-    if bytes.len() < prefix.len() as u32 {
-        return false;
-    }
-    let mut i = 0;
-    while i < prefix.len() {
-        if bytes.get(i as u32) != Some(prefix[i]) {
-            return false;
-        }
-        i += 1;
-    }
-    true
+    bytes.len() >= prefix.len() as u32 && prefix.iter().zip(bytes.iter()).all(|(p, b)| *p == b)
 }
 
 fn ends_with(bytes: &Bytes, suffix: &[u8]) -> bool {
     let len = bytes.len();
-    let suffix_len = suffix.len() as u32;
-    if len < suffix_len {
+    let Some(offset) = len.checked_sub(suffix.len() as u32) else {
         return false;
-    }
-    let offset = len - suffix_len;
-    let mut i = 0;
-    while i < suffix.len() {
-        if bytes.get(offset + i as u32) != Some(suffix[i]) {
-            return false;
-        }
-        i += 1;
-    }
-    true
+    };
+    suffix
+        .iter()
+        .zip(bytes.slice(offset..len).iter())
+        .all(|(s, b)| *s == b)
 }
 
 fn all_bytes(bytes: &Bytes, pred: fn(u8) -> bool) -> bool {
@@ -86,12 +70,14 @@ pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractErr
     let len = bytes.len();
     let suffix_len = FOLDER_SUFFIX.len() as u32;
     if len > MAX_FOLDER_NAME_LEN
-        || len < MIN_FOLDER_LABEL_LEN + suffix_len
+        || len < MIN_FOLDER_LABEL_LEN.saturating_add(suffix_len)
         || !ends_with(&bytes, FOLDER_SUFFIX)
     {
         return Err(ContractError::InvalidFolderName);
     }
-    let label = bytes.slice(0..len - suffix_len);
+    // `len >= MIN_FOLDER_LABEL_LEN + suffix_len` was checked above, so this
+    // subtraction never saturates.
+    let label = bytes.slice(0..len.saturating_sub(suffix_len));
     if !all_bytes(&label, is_label_byte)
         || label.first() == Some(b'-')
         || label.last() == Some(b'-')

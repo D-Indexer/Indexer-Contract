@@ -1,4 +1,15 @@
 #![no_std]
+// Contract code must fail with typed `ContractError`s, never panic (#238).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects
+    )
+)]
 
 mod access_control;
 mod constants;
