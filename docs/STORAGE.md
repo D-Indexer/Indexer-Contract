@@ -13,10 +13,41 @@
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner |
+| `PortfolioHistory(Address)` | persistent | `Vec<CidEntry { cid, at }>`, oldest first | `MAX_CID_HISTORY` = 10 entries per owner |
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now
 in persistent storage.
+
+## Portfolio CID history
+
+`PortfolioHistory(owner)` keeps the owner's last `MAX_CID_HISTORY` (10) portfolio CIDs, each with
+the ledger timestamp (`at`) at which it became the content. It is a ring buffer: `mint_portfolio`,
+`claim_and_mint` and every successful `update_portfolio` append one entry, and once 10 are stored
+the oldest is dropped. The newest entry is always the current `Portfolio.ipfs_cid`. Rejected
+calls append nothing. Read it with `get_portfolio_history(owner)`; owners who never minted get an
+empty vector.
+
+The entry follows the persistent TTL policy below like every other per-owner key: it is extended
+to 120 days on every write and on every `get_portfolio_history` read once below 90 days.
+
+Write cost, measured by the `cid_history::full_history_write_cost` test (soroban-sdk 29 cost
+estimate, 59-character CIDv1 values):
+
+| | Bytes |
+|---|---|
+| Full 10-entry history value (XDR) | 1,172 (about 117 per entry) |
+| `update_portfolio` writes, history holding 2 entries | 788 |
+| `update_portfolio` writes, history full | 1,716 |
+
+The number of written entries doesn't change once the history is full; only the size does. With
+the longest accepted CID (128 characters) a full history is roughly 1.9 KB, well under the
+network's per-entry size limit.
+
+**Burn policy.** The contract has no burn or portfolio-removal entry point. If one is added, it
+must delete `PortfolioHistory(owner)` together with `Portfolio(owner)`, so a later mint by the same
+owner starts a fresh history. Until then, history entries only leave through the ring buffer or
+by archival after 120 untouched days.
 
 ## TTL policy
 

@@ -6,11 +6,13 @@
 |---|---|
 | `initialize` | `admin` (the first admin) |
 | `add_admin`, `remove_admin`, `register_template` | `admin` argument, which must be in the admin list |
-| `claim_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
+| `claim_folder`, `set_user_template`, `mint_portfolio`, `claim_and_mint`, `update_portfolio` | `owner` |
 | All `get_*`, `list_templates`, `verify_portfolio` | none |
 
 Tests assert the exact signer for every write and check that writes fail when nobody has signed
 (`test_each_write_requires_the_right_signer`, `test_writes_fail_without_signature`).
+`claim_and_mint` takes exactly one `owner` signature, which also covers the claim fee transfer
+(`onboarding::claim_and_mint_requires_exactly_one_owner_signature`).
 
 ## State invariants
 

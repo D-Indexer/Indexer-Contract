@@ -108,11 +108,14 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
+| `claim_and_mint` | `owner: Address, folder_name: String, template_id: u32, ipfs_cid: String` | `owner` (one signature, also covers the fee transfer) | `folder_cl`, then `port_mint` | 2, 9, 16, 3, 13, 17, 8, 6; storage is untouched on any error |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
+- `claim_and_mint` is the one-transaction onboarding path: it runs every check of `claim_folder`
+  and `mint_portfolio` before writing anything, so a failure leaves no partial state.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
@@ -134,6 +137,7 @@ Notes:
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_history` | `owner: Address` | `Vec<CidEntry { cid, at }>`: the last 10 CIDs with ledger timestamps, oldest first (empty if never minted) | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
 ### Error codes
@@ -152,7 +156,11 @@ Codes are stable. New errors are appended and never renumbered.
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
 | 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
-| | | 21 | `InsufficientBalance` |
+| 22 | `FolderExpired` | 21 | `InsufficientBalance` |
+| 23 | `InvalidPriceTiers` | 27 | `AdminChangeNotFound` |
+| 24 | `InvalidFee` | 28 | `AdminChangeNotReady` |
+| 25 | `LeasesDisabled` | 29 | `AdminChangeQueueFull` |
+| 26 | `InvalidRenewal` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and

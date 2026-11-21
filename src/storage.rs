@@ -1,11 +1,14 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_CID_HISTORY, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{ClaimFee, DataKey, PortfolioNFT, Template};
+use crate::types::{
+    AdminChange, CidEntry, ClaimFee, DataKey, FeeConfig, LeaseConfig, PortfolioNFT, PriceTiers,
+    Template,
+};
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -28,14 +31,14 @@ pub fn extend_instance(env: &Env) {
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 /// Returns the admin list. Membership is stored per admin under
-/// `Admin(Address)`; the legacy `AdminList` vector is migrated on first read.
+/// `Admin(Address)` (value: the admin's slot) and enumerated through
+/// `AdminAt(slot)`; the legacy `AdminList` vector is migrated on first read.
 pub fn get_admins(env: &Env) -> Vec<Address> {
-    migrate_admin_list(env);
     let count = admin_count(env);
     let mut admins = Vec::new(env);
     let mut i = 0u32;
     while i < count {
-        if let Some(admin) = env.storage().instance().get(&DataKey::Admin(i)) {
+        if let Some(admin) = env.storage().instance().get(&DataKey::AdminAt(i)) {
             admins.push_back(admin);
         }
         i += 1;
@@ -46,6 +49,10 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
 /// Number of admins, migrating the legacy `AdminList` first if needed.
 pub fn admin_count(env: &Env) -> u32 {
     migrate_admin_list(env);
+    raw_admin_count(env)
+}
+
+fn raw_admin_count(env: &Env) -> u32 {
     env.storage()
         .instance()
         .get(&DataKey::AdminCount)
@@ -65,28 +72,35 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
     if is_admin(env, address) {
         return false;
     }
-    let count = admin_count(env);
-    env.storage()
-        .instance()
-        .set(&DataKey::Admin(address.clone()), &());
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminCount, &(count + 1));
+    insert_admin(env, address);
     true
 }
 
+fn insert_admin(env: &Env, address: &Address) {
+    let instance = env.storage().instance();
+    let slot = raw_admin_count(env);
+    instance.set(&DataKey::Admin(address.clone()), &slot);
+    instance.set(&DataKey::AdminAt(slot), address);
+    instance.set(&DataKey::AdminCount, &(slot + 1));
+}
+
 /// Removes `address` from the admins. Returns `false` if it was not one.
+/// The last slot is moved into the freed one so slots stay dense.
 pub fn remove_admin_entry(env: &Env, address: &Address) -> bool {
-    if !is_admin(env, address) {
+    migrate_admin_list(env);
+    let instance = env.storage().instance();
+    let Some(slot) = instance.get::<_, u32>(&DataKey::Admin(address.clone())) else {
         return false;
+    };
+    let last = raw_admin_count(env) - 1;
+    if slot != last {
+        let moved: Address = instance.get(&DataKey::AdminAt(last)).unwrap();
+        instance.set(&DataKey::AdminAt(slot), &moved);
+        instance.set(&DataKey::Admin(moved), &slot);
     }
-    env.storage()
-        .instance()
-        .remove(&DataKey::Admin(address.clone()));
-    let count = admin_count(env);
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminCount, &(count - 1));
+    instance.remove(&DataKey::AdminAt(last));
+    instance.remove(&DataKey::Admin(address.clone()));
+    instance.set(&DataKey::AdminCount, &last);
     true
 }
 
@@ -95,9 +109,14 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
     let count = admin_count(env);
     let mut i = 0u32;
     while i < count {
-        if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin(i)) {
+        if let Some(admin) = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::AdminAt(i))
+        {
             env.storage().instance().remove(&DataKey::Admin(admin));
         }
+        env.storage().instance().remove(&DataKey::AdminAt(i));
         i += 1;
     }
     env.storage().instance().set(&DataKey::AdminCount, &0u32);
@@ -111,10 +130,12 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
 fn migrate_admin_list(env: &Env) {
     let legacy: Option<Vec<Address>> = env.storage().instance().get(&DataKey::AdminList);
     if let Some(admins) = legacy {
-        for admin in admins.iter() {
-            add_admin_entry(env, &admin);
-        }
         env.storage().instance().remove(&DataKey::AdminList);
+        for admin in admins.iter() {
+            if !env.storage().instance().has(&DataKey::Admin(admin.clone())) {
+                insert_admin(env, &admin);
+            }
+        }
     }
 }
 
@@ -213,10 +234,6 @@ pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
     result
 }
 
-pub fn save_template(env: &Env, template: &Template) {
-    save_template_with_list(env, template, get_template_list(env));
-}
-
 /// Saves a template reusing an already-loaded registry list, avoiding a second
 /// read of `TemplateList` in write paths that had to load it for validation.
 pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32>) {
@@ -270,13 +287,7 @@ pub fn set_user_template(env: &Env, owner: &Address, template_id: u32) {
 
 // ── Portfolio NFT ─────────────────────────────────────────────────────────────
 
-pub fn portfolio_exists(env: &Env, owner: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .has(&DataKey::Portfolio(owner.clone()))
-}
-
-/// Single-read variant of `portfolio_exists` + `get_portfolio`: returns the
+/// Single-read existence check + `get_portfolio`: returns the
 /// stored portfolio (if any) and extends its TTL, so write paths do not pay
 /// for a `has` followed by a `get`.
 pub fn load_portfolio(env: &Env, owner: &Address) -> Option<PortfolioNFT> {
@@ -318,6 +329,75 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
     );
 }
 
+/// Portfolio CID history, oldest first. Empty for owners who never minted.
+pub fn get_portfolio_history(env: &Env, owner: &Address) -> Vec<CidEntry> {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    match env.storage().persistent().get(&key) {
+        Some(history) => {
+            extend_persistent(env, &key);
+            history
+        }
+        None => Vec::new(env),
+    }
+}
+
+/// Appends `cid` at the current ledger timestamp. When the history already
+/// holds `MAX_CID_HISTORY` entries the oldest ones are dropped, so its
+/// length never exceeds the cap.
+pub fn append_portfolio_history(env: &Env, owner: &Address, cid: &String) {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    let mut history: Vec<CidEntry> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
+    while history.len() >= MAX_CID_HISTORY {
+        history.pop_front();
+    }
+    history.push_back(CidEntry {
+        cid: cid.clone(),
+        at: env.ledger().timestamp(),
+    });
+    env.storage().persistent().set(&key, &history);
+    extend_persistent(env, &key);
+}
+
+// ── Token IDs ─────────────────────────────────────────────────────────────────
+
+/// Assigns the next sequential token ID to `owner` and writes both mappings.
+/// IDs start at 1 and the counter only grows, so an ID is never reused.
+pub fn assign_token_id(env: &Env, owner: &Address) -> u64 {
+    let instance = env.storage().instance();
+    let token_id: u64 = instance.get(&DataKey::NextTokenId).unwrap_or(1);
+    instance.set(&DataKey::NextTokenId, &(token_id + 1));
+
+    let token_key = DataKey::TokenOwner(token_id);
+    let owner_key = DataKey::OwnerToken(owner.clone());
+    env.storage().persistent().set(&token_key, owner);
+    env.storage().persistent().set(&owner_key, &token_id);
+    extend_persistent(env, &token_key);
+    extend_persistent(env, &owner_key);
+    token_id
+}
+
+pub fn get_owner_token(env: &Env, owner: &Address) -> Option<u64> {
+    let key = DataKey::OwnerToken(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn get_token_owner(env: &Env, token_id: u64) -> Option<Address> {
+    let key = DataKey::TokenOwner(token_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
 // ── Economics ─────────────────────────────────────────────────────────────────
 
 pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
@@ -326,4 +406,68 @@ pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {
 
 pub fn set_claim_fee(env: &Env, fee: &ClaimFee) {
     env.storage().instance().set(&DataKey::ClaimFee, fee);
+}
+
+// ── Pricing ───────────────────────────────────────────────────────────────────
+
+pub fn get_fee_config(env: &Env) -> Option<FeeConfig> {
+    env.storage().instance().get(&DataKey::FeeConfig)
+}
+
+pub fn set_fee_config(env: &Env, config: &FeeConfig) {
+    env.storage().instance().set(&DataKey::FeeConfig, config);
+}
+
+pub fn get_price_tiers(env: &Env) -> PriceTiers {
+    env.storage()
+        .instance()
+        .get(&DataKey::PriceTiers)
+        .unwrap_or(PriceTiers {
+            by_len: Vec::new(env),
+        })
+}
+
+pub fn set_price_tiers(env: &Env, tiers: &PriceTiers) {
+    env.storage().instance().set(&DataKey::PriceTiers, tiers);
+}
+
+// ── Leases ────────────────────────────────────────────────────────────────────
+
+pub fn get_lease_config(env: &Env) -> Option<LeaseConfig> {
+    env.storage().instance().get(&DataKey::LeaseConfig)
+}
+
+pub fn set_lease_config(env: &Env, config: &Option<LeaseConfig>) {
+    match config {
+        Some(c) => env.storage().instance().set(&DataKey::LeaseConfig, c),
+        None => env.storage().instance().remove(&DataKey::LeaseConfig),
+    }
+}
+
+pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_folder_expiry(env: &Env, folder_name: &String, expiry: u64) {
+    let key = DataKey::FolderExpiry(folder_name.clone());
+    env.storage().persistent().set(&key, &expiry);
+    extend_persistent(env, &key);
+}
+
+/// Removes every key of a released Folder: both directions of the identity
+/// mapping (the reverse one only if it still points at this name) and the
+/// expiry entry.
+pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::FolderOwner(folder_name.clone()));
+    persistent.remove(&DataKey::FolderExpiry(folder_name.clone()));
+    let owner_key = DataKey::OwnerFolder(owner.clone());
+    if persistent.get::<_, String>(&owner_key).as_ref() == Some(folder_name) {
+        persistent.remove(&owner_key);
+    }
 }

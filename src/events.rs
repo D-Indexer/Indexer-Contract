@@ -29,6 +29,26 @@ pub struct PortfolioMinted {
     pub owner: Address,
     pub template_id: u32,
     pub ipfs_cid: String,
+    /// Appended field: the sequential token ID assigned at mint.
+    pub token_id: u64,
+}
+
+/// Emitted by `backfill_token_id` when a portfolio minted before token IDs
+/// existed receives one.
+#[contractevent(topics = ["tok_bfill"], data_format = "vec")]
+pub struct TokenIdBackfilled {
+    pub admin: Address,
+    pub owner: Address,
+    pub token_id: u64,
+}
+
+pub fn token_id_backfilled(env: &Env, admin: &Address, owner: &Address, token_id: u64) {
+    TokenIdBackfilled {
+        admin: admin.clone(),
+        owner: owner.clone(),
+        token_id,
+    }
+    .publish(env);
 }
 
 #[contractevent(topics = ["port_upd"], data_format = "vec")]
@@ -49,6 +69,20 @@ pub struct TemplateRegistered {
 pub struct TemplateAssigned {
     pub owner: Address,
     pub template_id: u32,
+}
+
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
 }
 
 #[contractevent(topics = ["init"], data_format = "vec")]
@@ -176,11 +210,18 @@ pub fn withdrawn(env: &Env, admin: &Address, token: &Address, to: &Address, amou
     .publish(env);
 }
 
-pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: &String) {
+pub fn portfolio_minted(
+    env: &Env,
+    owner: &Address,
+    template_id: u32,
+    ipfs_cid: &String,
+    token_id: u64,
+) {
     PortfolioMinted {
         owner: owner.clone(),
         template_id,
         ipfs_cid: ipfs_cid.clone(),
+        token_id,
     }
     .publish(env);
 }

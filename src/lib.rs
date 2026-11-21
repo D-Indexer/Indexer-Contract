@@ -19,10 +19,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::ClaimFee;
-use crate::types::PortfolioNFT;
-use crate::types::Template;
-use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
+use crate::types::{AdminOp, CidEntry, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
 
 #[contract]
 pub struct FolderContract;
@@ -72,21 +69,13 @@ impl FolderContract {
     }
 
     /// Executes a queued admin change once its ETA ledger has passed.
-    pub fn execute_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn execute_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::execute_admin_change(&env, &admin, op_id)
     }
 
     /// Cancels a queued admin change before it is executed.
-    pub fn cancel_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
     }
@@ -138,7 +127,7 @@ impl FolderContract {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract(soroban_sdk::ContractExecutable::Wasm(new_wasm_hash.clone()));
         events::contract_upgraded(&env, &admin, &new_wasm_hash);
         Ok(())
     }
@@ -146,6 +135,75 @@ impl FolderContract {
     /// Returns the contract version (`CONTRACT_VERSION`).
     pub fn version(_env: Env) -> u32 {
         constants::CONTRACT_VERSION
+    }
+
+    // ── Pricing ───────────────────────────────────────────────────────────────
+
+    /// Sets the token, treasury and base fee used by length-based pricing
+    /// (`quote_claim`) and lease renewals. Without it, renewals are free.
+    pub fn set_fee_config(
+        env: Env,
+        admin: Address,
+        token: Address,
+        treasury: Address,
+        base_fee: i128,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_claim_fee(&env, &admin, &token, &treasury, base_fee)
+    }
+
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to renew `folder_name` for one lease period.
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
+    // ── Leases ────────────────────────────────────────────────────────────────
+
+    /// Enables leases of `period_days` with a `grace_days` grace period for
+    /// new claims. `period_days == 0` restores permanent mode (the default).
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        period_days: u32,
+        grace_days: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let config = (period_days > 0).then(|| LeaseConfig {
+            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
+            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
+        });
+        storage::set_lease_config(&env, &config);
+        Ok(())
+    }
+
+    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
+        storage::get_lease_config(&env)
+    }
+
+    /// Extends the owner's lease by `periods`; returns the new expiry.
+    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        identity_map::renew_folder(&env, &owner, periods)
+    }
+
+    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
+    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
+        identity_map::get_folder_expiry(&env, &folder_name)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -225,6 +283,19 @@ impl FolderContract {
         nft_mint::mint_portfolio(&env, &owner, template_id, &ipfs_cid)
     }
 
+    /// Claims `folder_name` and mints the owner's portfolio atomically: one
+    /// signature, and a failure leaves no partial state.
+    pub fn claim_and_mint(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        template_id: u32,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::claim_and_mint(&env, &owner, &folder_name, template_id, &ipfs_cid)
+    }
+
     pub fn update_portfolio(
         env: Env,
         owner: Address,
@@ -236,6 +307,35 @@ impl FolderContract {
 
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
+    }
+
+    /// Sequential token ID of the owner's portfolio (`TokenNotFound` if the
+    /// owner has no portfolio or it predates token IDs and was not backfilled).
+    pub fn token_of(env: Env, owner: Address) -> Result<u64, ContractError> {
+        nft_mint::token_of(&env, &owner)
+    }
+
+    /// Owner of portfolio token `token_id` (`TokenNotFound` if unassigned).
+    /// Also the SEP-0050 `owner_of`.
+    pub fn owner_of(env: Env, token_id: u64) -> Result<Address, ContractError> {
+        nft_mint::owner_of(&env, token_id)
+    }
+
+    /// Admin only, idempotent: assigns a token ID to a portfolio minted
+    /// before token IDs existed and returns it.
+    pub fn backfill_token_id(
+        env: Env,
+        admin: Address,
+        owner: Address,
+    ) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        nft_mint::backfill_token_id(&env, &admin, &owner)
+    }
+
+    /// The owner's last `MAX_CID_HISTORY` (10) portfolio CIDs with the ledger
+    /// timestamp each was set at, oldest first. Empty if never minted.
+    pub fn get_portfolio_history(env: Env, owner: Address) -> Vec<CidEntry> {
+        nft_mint::get_portfolio_history(&env, &owner)
     }
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {

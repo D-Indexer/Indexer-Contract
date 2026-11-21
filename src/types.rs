@@ -9,6 +9,15 @@ pub struct PortfolioNFT {
     pub minted_at: u64,
 }
 
+/// One entry of an owner's portfolio CID history: the CID and the ledger
+/// timestamp at which it became the portfolio's content.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CidEntry {
+    pub cid: String,
+    pub at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
@@ -29,8 +38,10 @@ pub struct ClaimFee {
 #[contracttype]
 pub enum DataKey {
     AdminList,
-    // admin membership: per-admin marker, `()` when the address is an admin
+    // admin membership: address -> its slot in `AdminAt`
     Admin(Address),
+    // admin membership: slot -> address, dense in `0..AdminCount`
+    AdminAt(u32),
     // admin membership: number of admins, kept in sync with `Admin(Address)`
     AdminCount,
     Initialized,
@@ -45,6 +56,72 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // nft_mint: owner -> last MAX_CID_HISTORY CidEntry values, oldest first
+    PortfolioHistory(Address),
+    // token IDs: next ID to assign, starts at 1 (instance)
+    NextTokenId,
+    // token IDs: token_id -> owner
+    TokenOwner(u64),
+    // token IDs: owner -> token_id
+    OwnerToken(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
+    // pricing: claim fee settings and length tiers (instance)
+    FeeConfig,
+    PriceTiers,
+    // leases: lease settings (instance) and folder_name -> expiry timestamp
+    LeaseConfig,
+    FolderExpiry(String),
+    // admin timelock: pending queue of admin changes (instance)
+    PendingAdminChanges,
+    // admin timelock: next op ID to hand out (instance)
+    NextAdminChangeId,
+}
+
+/// Claim fee settings used by length-based pricing and lease renewals. The
+/// fee is paid in `token` to `treasury`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeeConfig {
+    pub token: Address,
+    pub treasury: Address,
+    /// Fee for labels longer than every configured tier.
+    pub base_fee: i128,
+}
+
+/// Length-based premium pricing: `(max_label_len, amount)` pairs sorted by
+/// strictly ascending `max_label_len`. A label uses the first tier whose
+/// `max_label_len` is `>=` its length; longer labels pay `base_fee`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceTiers {
+    pub by_len: Vec<(u32, i128)>,
+}
+
+/// Lease settings. Absent (the default) means names are permanent.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaseConfig {
+    /// Length of one lease period in seconds.
+    pub period_secs: u64,
+    /// Grace period after expiry, in seconds, during which only the
+    /// previous owner can renew.
+    pub grace_secs: u64,
+}
+
+/// Kind of change queued through the admin timelock.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminOp {
+    Add,
+    Remove,
+}
+
+/// A queued admin change, executable once `eta_ledger` is reached.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminChange {
+    pub op: AdminOp,
+    pub target: Address,
+    pub eta_ledger: u32,
 }
