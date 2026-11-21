@@ -243,3 +243,134 @@ pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: 
     }
     .publish(env);
 }
+
+#[contractevent(topics = ["blk_add"], data_format = "vec")]
+pub struct AddressBlocked {
+    pub admin: Address,
+    pub address: Address,
+    pub reason_code: u32,
+}
+
+#[contractevent(topics = ["blk_rm"], data_format = "vec")]
+pub struct AddressUnblocked {
+    pub admin: Address,
+    pub address: Address,
+}
+
+pub fn address_blocked(env: &Env, admin: &Address, address: &Address, reason_code: u32) {
+    AddressBlocked {
+        admin: admin.clone(),
+        address: address.clone(),
+        reason_code,
+    }
+    .publish(env);
+}
+
+pub fn address_unblocked(env: &Env, admin: &Address, address: &Address) {
+    AddressUnblocked {
+        admin: admin.clone(),
+        address: address.clone(),
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["port_flag"], data_format = "vec")]
+pub struct PortfolioFlagSet {
+    pub admin: Address,
+    pub owner: Address,
+    pub flag: u32,
+    pub reason_code: u32,
+}
+
+pub fn portfolio_flag_set(
+    env: &Env,
+    admin: &Address,
+    owner: &Address,
+    flag: u32,
+    reason_code: u32,
+) {
+    PortfolioFlagSet {
+        admin: admin.clone(),
+        owner: owner.clone(),
+        flag,
+        reason_code,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["tmpl_sub"], data_format = "vec")]
+pub struct TemplateSubmitted {
+    pub submission_id: u32,
+    pub designer: Address,
+    pub metadata_uri: String,
+}
+
+#[contractevent(topics = ["tmpl_appr"], data_format = "vec")]
+pub struct TemplateSubmissionApproved {
+    pub admin: Address,
+    pub submission_id: u32,
+    pub template_id: u32,
+}
+
+#[contractevent(topics = ["tmpl_rej"], data_format = "vec")]
+pub struct TemplateSubmissionRejected {
+    pub admin: Address,
+    pub submission_id: u32,
+    pub reason_code: u32,
+}
+
+pub fn template_submitted(
+    env: &Env,
+    submission_id: u32,
+    designer: &Address,
+    metadata_uri: &String,
+) {
+    TemplateSubmitted {
+        submission_id,
+        designer: designer.clone(),
+        metadata_uri: metadata_uri.clone(),
+    }
+    .publish(env);
+}
+
+pub fn template_submission_approved(
+    env: &Env,
+    admin: &Address,
+    submission_id: u32,
+    template_id: u32,
+) {
+    TemplateSubmissionApproved {
+        admin: admin.clone(),
+        submission_id,
+        template_id,
+    }
+    .publish(env);
+}
+
+pub fn template_submission_rejected(
+    env: &Env,
+    admin: &Address,
+    submission_id: u32,
+    reason_code: u32,
+) {
+    TemplateSubmissionRejected {
+        admin: admin.clone(),
+        submission_id,
+        reason_code,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["upgrade"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        wasm_hash: wasm_hash.clone(),
+    }
+    .publish(env);
+}

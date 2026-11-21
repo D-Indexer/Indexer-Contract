@@ -31,6 +31,12 @@ Compatibility rules:
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+| `blk_add` | `AddressBlocked` | `admin: Address`, `address: Address`, `reason_code: u32` | `block_address` |
+| `blk_rm` | `AddressUnblocked` | `admin: Address`, `address: Address` | `unblock_address` |
+| `port_flag` | `PortfolioFlagSet` | `admin: Address`, `owner: Address`, `flag: u32`, `reason_code: u32` | `set_portfolio_flag` |
+| `tmpl_sub` | `TemplateSubmitted` | `submission_id: u32`, `designer: Address`, `metadata_uri: String` | `submit_template` |
+| `tmpl_appr` | `TemplateSubmissionApproved` | `admin: Address`, `submission_id: u32`, `template_id: u32` | `approve_submission` |
+| `tmpl_rej` | `TemplateSubmissionRejected` | `admin: Address`, `submission_id: u32`, `reason_code: u32` | `reject_submission` |
 
 ### Changes in the economics / soroban-sdk 29 update
 
@@ -65,6 +71,18 @@ Compatibility rules:
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
 | `port_upd` | Update the portfolio's `ipfs_cid` |
+
+### Portfolio moderation flags
+
+`PortfolioFlag(owner)` is the authoritative on-chain moderation signal:
+
+- `0` means no flag. The key is removed.
+- `1` means hidden. Frontends should hide the portfolio content and do not delete its record.
+- `2` means under review. Frontends should keep it visible only when their review policy allows
+  it, and backends should retain the portfolio row for audit and recovery.
+
+The backend should consume `port_flag` by setting `get_portfolio_flag(owner)` semantics:
+`(admin, owner, flag, reason_code)`. An owner `update_portfolio` must not clear an existing flag.
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also

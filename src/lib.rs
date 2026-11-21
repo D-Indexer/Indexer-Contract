@@ -20,9 +20,8 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
 use crate::types::ClaimFee;
-use crate::types::PortfolioNFT;
 use crate::types::Template;
-use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
+use crate::types::{AdminOp, PortfolioNFT};
 
 #[contract]
 pub struct FolderContract;
@@ -60,6 +59,24 @@ impl FolderContract {
         storage::get_admins(&env)
     }
 
+    pub fn add_admin(
+        env: Env,
+        admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::add_admin(&env, &admin, &new_admin)
+    }
+
+    pub fn remove_admin(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::remove_admin(&env, &admin, &target)
+    }
+
     /// Queues an admin addition; executable after `ADMIN_TIMELOCK_LEDGERS`.
     pub fn queue_admin_change(
         env: Env,
@@ -89,6 +106,59 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
+    }
+
+    pub fn block_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if storage::is_admin(&env, &addr) {
+            return Err(ContractError::CannotBlockAdmin);
+        }
+        storage::block_address(&env, &addr);
+        events::address_blocked(&env, &admin, &addr, reason_code);
+        Ok(())
+    }
+
+    pub fn unblock_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        storage::unblock_address(&env, &addr);
+        events::address_unblocked(&env, &admin, &addr);
+        Ok(())
+    }
+
+    pub fn is_blocked(env: Env, addr: Address) -> bool {
+        storage::is_blocked(&env, &addr)
+    }
+
+    pub fn set_portfolio_flag(
+        env: Env,
+        admin: Address,
+        owner: Address,
+        flag: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if flag > 2 {
+            return Err(ContractError::InvalidPortfolioFlag);
+        }
+        storage::set_portfolio_flag(&env, &owner, flag);
+        events::portfolio_flag_set(&env, &admin, &owner, flag, reason_code);
+        Ok(())
+    }
+
+    pub fn get_portfolio_flag(env: Env, owner: Address) -> u32 {
+        storage::get_portfolio_flag(&env, &owner)
     }
 
     // ── Economics ─────────────────────────────────────────────────────────────
@@ -211,6 +281,43 @@ impl FolderContract {
     /// Returns the template ID currently assigned to the owner's Folder.
     pub fn get_user_template(env: Env, owner: Address) -> Option<u32> {
         storage::get_user_template(&env, &owner)
+    }
+
+    pub fn submit_template(
+        env: Env,
+        designer: Address,
+        metadata_uri: String,
+    ) -> Result<u32, ContractError> {
+        require_initialized(&env)?;
+        template_registry::submit_template(&env, &designer, &metadata_uri)
+    }
+
+    pub fn approve_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        template_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::approve_submission(&env, &admin, submission_id, template_id)
+    }
+
+    pub fn reject_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::reject_submission(&env, &admin, submission_id, reason_code)
+    }
+
+    pub fn get_template_designer(env: Env, template_id: u32) -> Option<Address> {
+        storage::get_template_designer(&env, template_id)
+    }
+
+    pub fn get_template_usage(env: Env, template_id: u32) -> u32 {
+        storage::get_template_usage(&env, template_id)
     }
 
     // ── Portfolio NFT ─────────────────────────────────────────────────────────
