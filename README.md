@@ -100,10 +100,16 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | Function | Arguments | Signer | Event | Errors |
 |---|---|---|---|---|
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
-| `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
-| `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
+| `queue_admin_change` | `admin: Address, op: AdminOp (Add \| Remove), target: Address` | `admin` (must be an admin) | `adm_q` | 2, `Unauthorized` (7), `AdminChangeQueueFull` (24); returns the `op_id` |
+| `execute_admin_change` | `admin: Address, op_id: u32` | `admin` (must be an admin) | `adm_add` / `adm_rm`, then `adm_ex` | 2, 7, `AdminChangeNotFound` (22), `AdminChangeNotReady` (23), `AdminAlreadyExists` (10), `TooManyAdmins` (19), `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
+| `cancel_admin_change` | `admin: Address, op_id: u32` | `admin` (must be an admin) | `adm_cx` | 2, 7, 22 |
+| `upgrade` | `admin: Address, new_wasm_hash: BytesN<32>` | `admin` (must be an admin) | `upgraded` | 2, 7 |
 | `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `sponsored_claim` | `sponsor: Address, owner: Address, folder_name: String` | `sponsor` (pays the fee) and `owner` | `folder_cl`, `claim_spon` | as `claim_folder` |
+| `renew_folder` | `owner: Address, periods: u32` | `owner` (pays the fee) | `folder_rn` | 2, `LeasesDisabled` (28), `InvalidRenewal` (27), 4 |
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
+| `set_price_tiers` | `admin: Address, tiers: PriceTiers` | `admin` (must be an admin) | — | 2, 7, `InvalidPriceTiers` (26) |
+| `set_lease_config` | `admin: Address, period_days: u32, grace_days: u32` | `admin` (must be an admin) | — | 2, 7 |
 | `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
@@ -114,7 +120,12 @@ Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
-- An admin may remove itself as long as another admin remains.
+- Admin changes are timelocked: `queue_admin_change` schedules them, and any admin can run
+  `execute_admin_change` once `ADMIN_TIMELOCK_LEDGERS` (~24h) have passed, or `cancel_admin_change`
+  before then. An admin may remove itself as long as another admin remains.
+- The fee for a name is `quote_claim(name)`: the first `set_price_tiers` tier whose
+  `max_label_len` covers the label, otherwise the `set_claim_fee` amount. `sponsored_claim` charges
+  the sponsor; `renew_folder` charges the owner one fee per period.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -131,6 +142,11 @@ Notes:
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
+| `get_price_tiers` | — | `PriceTiers { by_len: Vec<(u32, i128)> }` | — |
+| `quote_claim` | `folder_name: String` | `i128` fee for one claim or lease period | `InvalidFolderName` (9) |
+| `get_lease_config` | — | `Option<LeaseConfig { period_secs, grace_secs }>` | — |
+| `get_folder_expiry` | `folder_name: String` | `Option<u64>` lease expiry timestamp | — |
+| `version` | — | `u32` contract version | — |
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
@@ -152,7 +168,10 @@ Codes are stable. New errors are appended and never renumbered.
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
 | 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
-| | | 21 | `InsufficientBalance` |
+| 21 | `InsufficientBalance` | 22 | `AdminChangeNotFound` |
+| 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
+| 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
+| 27 | `InvalidRenewal` | 28 | `LeasesDisabled` |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -167,7 +186,8 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `adm_q`, `adm_ex`, `adm_cx`, `upgraded`, `folder_cl`, `claim_spon`, `folder_rn`, `tmpl_reg`,
+   `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
