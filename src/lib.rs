@@ -378,4 +378,24 @@ impl FolderContract {
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
     }
+
+    /// `true` only if `ipfs_cid` is exactly the owner's current portfolio CID.
+    /// `InvalidCID` for a malformed CID; `false` when there is no portfolio.
+    pub fn verify_portfolio_cid(
+        env: Env,
+        owner: Address,
+        ipfs_cid: String,
+    ) -> Result<bool, ContractError> {
+        nft_mint::verify_portfolio_cid(&env, &owner, &ipfs_cid)
+    }
+
+    /// `verify_portfolio_cid` for whoever currently owns `folder_name`.
+    /// `false` for an unclaimed, expired or released name.
+    pub fn verify_folder_portfolio(
+        env: Env,
+        folder_name: String,
+        ipfs_cid: String,
+    ) -> Result<bool, ContractError> {
+        nft_mint::verify_folder_portfolio(&env, &folder_name, &ipfs_cid)
+    }
 }

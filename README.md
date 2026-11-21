@@ -197,6 +197,13 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+| `verify_portfolio_cid` | `owner: Address, ipfs_cid: String` | `bool`: `ipfs_cid` is byte-for-byte the owner's current portfolio CID; `false` with no portfolio | `InvalidCID` (8) |
+| `verify_folder_portfolio` | `folder_name: String, ipfs_cid: String` | `bool`: as above for the name's current owner; `false` for an unclaimed, expired or released name | `InvalidCID` (8), `InvalidFolderName` (9) |
+
+`verify_portfolio_cid` and `verify_folder_portfolio` let a recruiter who holds a portfolio document
+check that its CID is the owner's *current* on-chain portfolio. A CID replaced by
+`update_portfolio` returns `false`. The CID format is checked first, so `InvalidCID` means bad
+input and `false` means a mismatch or no portfolio.
 
 ### Error codes
 

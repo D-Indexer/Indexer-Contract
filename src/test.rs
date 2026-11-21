@@ -3038,3 +3038,164 @@ mod recovery {
         assert_eq!(t.client().get_folder(&r.name), r.new_owner);
     }
 }
+
+// ── Portfolio CID verification ──────────────────────────────────────────────
+
+mod verify_cid {
+    use super::*;
+
+    const OTHER_CID: &str = "bafkreie33ewzcjvpo3gldpvqgevtoy4oaygkqri3cwxqr6o6lsqc4jqvwu";
+
+    fn s(env: &Env, v: &str) -> String {
+        String::from_str(env, v)
+    }
+
+    /// `minted_env` owner holds `cidcheck.folder` with VALID_CIDV1_RAW.
+    fn name(env: &Env) -> String {
+        s(env, "cidcheck.folder")
+    }
+
+    #[test]
+    fn exact_match_is_true() {
+        let (t, user) = minted_env();
+        let cid = s(&t.env, VALID_CIDV1_RAW);
+        assert!(t.client().verify_portfolio_cid(&user, &cid));
+        assert!(t.client().verify_folder_portfolio(&name(&t.env), &cid));
+    }
+
+    #[test]
+    fn different_cid_is_false() {
+        let (t, user) = minted_env();
+        let other = s(&t.env, OTHER_CID);
+        assert!(!t.client().verify_portfolio_cid(&user, &other));
+        assert!(!t.client().verify_folder_portfolio(&name(&t.env), &other));
+        // Byte-exact: a different but valid CIDv0 of the same length class
+        // does not match either.
+        let v0 = s(&t.env, VALID_CIDV0);
+        assert!(!t.client().verify_portfolio_cid(&user, &v0));
+    }
+
+    #[test]
+    fn old_cid_is_false_after_update() {
+        let (t, user) = minted_env();
+        let old = s(&t.env, VALID_CIDV1_RAW);
+        let new = s(&t.env, VALID_CIDV0);
+        t.client().update_portfolio(&user, &new);
+
+        assert!(!t.client().verify_portfolio_cid(&user, &old));
+        assert!(!t.client().verify_folder_portfolio(&name(&t.env), &old));
+        assert!(t.client().verify_portfolio_cid(&user, &new));
+        assert!(t.client().verify_folder_portfolio(&name(&t.env), &new));
+    }
+
+    #[test]
+    fn missing_owner_or_portfolio_is_false() {
+        let (t, _) = minted_env();
+        let cid = s(&t.env, VALID_CIDV1_RAW);
+        let stranger = Address::generate(&t.env);
+        assert_eq!(
+            t.client().try_verify_portfolio_cid(&stranger, &cid),
+            Ok(Ok(false))
+        );
+
+        // Claimed a Folder but never minted.
+        let unminted = Address::generate(&t.env);
+        let unminted_name = s(&t.env, "unminted.folder");
+        t.client().claim_folder(&unminted, &unminted_name);
+        assert!(!t.client().verify_portfolio_cid(&unminted, &cid));
+        assert!(!t.client().verify_folder_portfolio(&unminted_name, &cid));
+    }
+
+    #[test]
+    fn missing_name_is_false() {
+        let (t, _) = minted_env();
+        let cid = s(&t.env, VALID_CIDV1_RAW);
+        assert_eq!(
+            t.client()
+                .try_verify_folder_portfolio(&s(&t.env, "nobody.folder"), &cid),
+            Ok(Ok(false))
+        );
+    }
+
+    #[test]
+    fn expired_lease_name_is_false() {
+        let t = TestEnv::new();
+        t.client().set_lease_config(&t.admin, &30, &7);
+        let user = Address::generate(&t.env);
+        let leased = s(&t.env, "leased.folder");
+        let cid = s(&t.env, VALID_CIDV0);
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        t.client().claim_folder(&user, &leased);
+        t.client().mint_portfolio(&user, &1u32, &cid);
+        assert!(t.client().verify_folder_portfolio(&leased, &cid));
+
+        t.env
+            .ledger()
+            .set_timestamp(30 * crate::constants::SECONDS_PER_DAY);
+        assert_eq!(
+            t.client().try_verify_folder_portfolio(&leased, &cid),
+            Ok(Ok(false))
+        );
+    }
+
+    #[test]
+    fn malformed_cid_is_an_error() {
+        let (t, user) = minted_env();
+        for bad in [
+            "",
+            "not-a-cid",
+            "Qm123",
+            "bafy!!!!",
+            "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEc0",
+        ] {
+            let bad = s(&t.env, bad);
+            expect_contract_error(
+                t.client().try_verify_portfolio_cid(&user, &bad),
+                ContractError::InvalidCID,
+            );
+            expect_contract_error(
+                t.client().try_verify_folder_portfolio(&name(&t.env), &bad),
+                ContractError::InvalidCID,
+            );
+            // The CID is checked first, even when the owner or name is missing.
+            expect_contract_error(
+                t.client()
+                    .try_verify_portfolio_cid(&Address::generate(&t.env), &bad),
+                ContractError::InvalidCID,
+            );
+            expect_contract_error(
+                t.client()
+                    .try_verify_folder_portfolio(&s(&t.env, "nobody.folder"), &bad),
+                ContractError::InvalidCID,
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_folder_name_is_an_error() {
+        let (t, _) = minted_env();
+        expect_contract_error(
+            t.client()
+                .try_verify_folder_portfolio(&s(&t.env, "Bad Name"), &s(&t.env, VALID_CIDV0)),
+            ContractError::InvalidFolderName,
+        );
+    }
+
+    #[test]
+    fn verification_is_read_only() {
+        let (t, user) = minted_env();
+        let cid = s(&t.env, VALID_CIDV1_RAW);
+        t.env.set_auths(&[]);
+        assert!(t.client().verify_portfolio_cid(&user, &cid));
+        assert!(t.client().verify_folder_portfolio(&name(&t.env), &cid));
+        assert!(t.env.auths().is_empty());
+        assert!(t
+            .env
+            .events()
+            .all()
+            .filter_by_contract(&t.contract_id)
+            .events()
+            .is_empty());
+    }
+}
