@@ -16,13 +16,13 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::ClaimFee;
-use crate::types::PortfolioNFT;
-use crate::types::Template;
-use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
+use crate::types::{
+    AdminOp, ClaimFee, LeaseConfig, PortfolioDelegate, PortfolioMeta, PortfolioNFT, PriceTiers,
+    Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -72,21 +72,13 @@ impl FolderContract {
     }
 
     /// Executes a queued admin change once its ETA ledger has passed.
-    pub fn execute_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn execute_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::execute_admin_change(&env, &admin, op_id)
     }
 
     /// Cancels a queued admin change before it is executed.
-    pub fn cancel_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
     }
@@ -103,6 +95,61 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         economics::set_claim_fee(&env, &admin, &token, amount, &treasury)
+    }
+
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    /// Tiers only apply while a claim fee is configured.
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to claim `folder_name` (or to renew it for one period).
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
+    // ── Leases ────────────────────────────────────────────────────────────────
+
+    /// Enables leases of `period_days` with a `grace_days` grace period for
+    /// new claims. `period_days == 0` restores permanent mode (the default).
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        period_days: u32,
+        grace_days: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let config = (period_days > 0).then(|| LeaseConfig {
+            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
+            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
+        });
+        storage::set_lease_config(&env, &config);
+        Ok(())
+    }
+
+    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
+        storage::get_lease_config(&env)
+    }
+
+    /// Extends the owner's lease by `periods`; returns the new expiry.
+    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        identity_map::renew_folder(&env, &owner, periods)
+    }
+
+    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
+    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
+        identity_map::get_folder_expiry(&env, &folder_name)
     }
 
     /// Returns the current claim fee configuration, if any.
@@ -138,7 +185,7 @@ impl FolderContract {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract(ContractExecutable::Wasm(new_wasm_hash.clone()));
         events::contract_upgraded(&env, &admin, &new_wasm_hash);
         Ok(())
     }
@@ -234,8 +281,68 @@ impl FolderContract {
         nft_mint::update_portfolio(&env, &owner, &ipfs_cid)
     }
 
+    /// Compare-and-swap update: writes `ipfs_cid` only if the portfolio's
+    /// current CID is `expected_cid`, otherwise fails with `StaleUpdate`.
+    pub fn update_portfolio_if(
+        env: Env,
+        owner: Address,
+        ipfs_cid: String,
+        expected_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::update_portfolio_if(&env, &owner, &ipfs_cid, &expected_cid)
+    }
+
+    /// Lets `delegate` update the owner's portfolio CID (only that) until
+    /// `expires_ledger`, inclusive. 0 means no expiry. Replaces any previous
+    /// delegate.
+    pub fn set_portfolio_delegate(
+        env: Env,
+        owner: Address,
+        delegate: Address,
+        expires_ledger: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::set_portfolio_delegate(&env, &owner, &delegate, expires_ledger)
+    }
+
+    /// Revokes the owner's portfolio delegate, if any.
+    pub fn clear_portfolio_delegate(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::clear_portfolio_delegate(&env, &owner)
+    }
+
+    /// `update_portfolio` on behalf of `owner`, signed by their delegate.
+    pub fn delegate_update_portfolio(
+        env: Env,
+        delegate: Address,
+        owner: Address,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::delegate_update_portfolio(&env, &delegate, &owner, &ipfs_cid)
+    }
+
+    pub fn get_portfolio_delegate(env: Env, owner: Address) -> Option<PortfolioDelegate> {
+        nft_mint::get_portfolio_delegate(&env, &owner)
+    }
+
+    /// Deletes the owner's portfolio. Keeps the Folder name and selected
+    /// template; `mint_portfolio` works again afterwards.
+    pub fn burn_portfolio(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::burn_portfolio(&env, &owner)
+    }
+
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
+    }
+
+    /// Revision counter and last-change timestamp of the owner's portfolio.
+    /// Portfolios minted before revisions were tracked report revision 0 and
+    /// `updated_at == minted_at` until their next change.
+    pub fn get_portfolio_meta(env: Env, owner: Address) -> Result<PortfolioMeta, ContractError> {
+        nft_mint::get_portfolio_meta(&env, &owner)
     }
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {

@@ -28,9 +28,41 @@ Compatibility rules:
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
-| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `revision: u32` | `update_portfolio`, `update_portfolio_if`, `delegate_update_portfolio` |
+| `port_burn` | `PortfolioBurned` | `owner: Address`, `last_ipfs_cid: String` | `burn_portfolio` |
+| `dlg_set` | `DelegateSet` | `owner: Address`, `delegate: Address`, `expires_ledger: u32` (0 = no expiry) | `set_portfolio_delegate` |
+| `dlg_clr` | `DelegateCleared` | `owner: Address`, `delegate: Address` | `clear_portfolio_delegate` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+
+### Changes in the portfolio delegate update
+
+- **New:** `dlg_set` and `dlg_clr`.
+- **Semantics:** `port_upd` is unchanged but can now come from a delegate
+  (`delegate_update_portfolio`). Its `owner` field is still the portfolio owner, never the
+  delegate. If you need to know who signed, read the transaction's auth entries from the
+  `getEvents` envelope / `getTransaction`.
+- `burn_portfolio` also removes the delegate without emitting `dlg_clr`; treat `port_burn` as
+  clearing it. `clear_portfolio_delegate` emits nothing when no delegate was set.
+
+### Changes in the compare-and-swap update
+
+- **Semantics:** `update_portfolio_if` emits the standard `port_upd`, identical to
+  `update_portfolio`. A rejected (`StaleUpdate`) call emits nothing.
+
+### Changes in the portfolio revision update
+
+- **Appended:** `revision` as the third field of `port_upd`: the portfolio's revision after the
+  update. Decoders that read the first two fields keep working.
+- **Semantics:** every portfolio has a revision counter (`get_portfolio_meta`). It is 0 right
+  after `port_mint` and goes up by exactly 1 per state-changing call: `update_portfolio` (which
+  emits `port_upd` with the new value) and `set_user_template` on a minted portfolio (which emits
+  `tmpl_set` only, without the revision). A burn deletes the counter; a re-mint starts again at 0.
+
+### Changes in the portfolio burn update
+
+- **New:** `port_burn`, emitted by `burn_portfolio`. `last_ipfs_cid` is the CID the portfolio
+  pointed at when it was burned, so the indexer can unpin or archive that content.
 
 ### Changes in the economics / soroban-sdk 29 update
 
@@ -62,9 +94,12 @@ Compatibility rules:
 | `claim_spon` | Record the sponsor of the claim |
 | `folder_rn` | Update the Folder's lease expiry |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
-| `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
-| `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
-| `port_upd` | Update the portfolio's `ipfs_cid` |
+| `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted (this also bumps the portfolio revision by 1) |
+| `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) with revision 0 and set the owner's template |
+| `port_upd` | Update the portfolio's `ipfs_cid` and store `revision`. If `revision` is more than the stored value + 1, an update was missed (a `tmpl_set` also counts as one): re-read with `get_portfolio` / `get_portfolio_meta`. Ignore a `port_upd` whose `revision` is not above the stored value (replay) |
+| `dlg_set` | Store the owner's delegate and `expires_ledger` (replaces any previous delegate) |
+| `dlg_clr` | Remove the owner's delegate |
+| `port_burn` | Remove the owner's delegate too, then delete (or tombstone) the owner's portfolio record. Keep the owner's identity and selected template: a burn does not touch them. A later `port_mint` for the same owner starts a new portfolio, so don't merge it with the burned one. Optionally unpin `last_ipfs_cid` |
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also

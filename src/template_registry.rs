@@ -59,6 +59,7 @@ pub fn set_user_template(
     if let Some(mut nft) = storage::load_portfolio(env, owner) {
         nft.template_id = template_id;
         storage::save_portfolio(env, &nft);
+        crate::nft_mint::bump_revision(env, &nft);
     }
     events::template_assigned(env, owner, template_id);
     Ok(())

@@ -109,11 +109,34 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `update_portfolio_if` | `owner: Address, ipfs_cid: String, expected_cid: String` | `owner` | `port_upd` | 2, 8 (either CID), 5, `StaleUpdate` (29) |
+| `set_portfolio_delegate` | `owner: Address, delegate: Address, expires_ledger: u32` | `owner` | `dlg_set` | 2, 5, `InvalidDelegate` (30) |
+| `clear_portfolio_delegate` | `owner: Address` | `owner` | `dlg_clr` (only if a delegate was set) | 2 |
+| `delegate_update_portfolio` | `delegate: Address, owner: Address, ipfs_cid: String` | `delegate` (not the owner) | `port_upd` | 2, 8, `Unauthorized` (7), `DelegateExpired` (31), 5 |
+| `burn_portfolio` | `owner: Address` | `owner` | `port_burn` | 2, 5 |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
+- Each portfolio has a revision counter: 0 at mint, +1 for every `update_portfolio` and every
+  `set_user_template` while a portfolio exists. `updated_at` is the ledger timestamp of the last
+  change. Portfolios minted before revisions existed report revision 0 and `updated_at ==
+  minted_at` until their next change.
+- `update_portfolio_if` is a compare-and-swap: it writes only if the portfolio's current CID equals
+  `expected_cid`, otherwise it fails with `StaleUpdate` and changes nothing. Prefer it whenever more
+  than one writer can update the same portfolio (several devices, a relayer, a backend publisher):
+  pass the CID you last read as `expected_cid`, and on `StaleUpdate` re-read with `get_portfolio`,
+  merge or ask the user, and retry. `update_portfolio` stays last-write-wins and is fine for a
+  single writer.
+- An owner can authorize one delegate (a backend publisher or a second device) with
+  `set_portfolio_delegate`. The delegate signs `delegate_update_portfolio` to push a new CID
+  without the owner's signature; it can't change the template, burn, re-delegate or do anything
+  else. `expires_ledger` is the last ledger sequence (inclusive) the delegate may act; 0 means no
+  expiry. Setting a new delegate replaces the old one; `clear_portfolio_delegate` revokes it, and
+  `burn_portfolio` removes it. The owner can always keep updating directly.
+- `burn_portfolio` deletes the portfolio record (and any portfolio-scoped keys) so the owner can
+  mint again, with any template. The Folder name and selected template are kept.
 - An admin may remove itself as long as another admin remains.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
@@ -134,6 +157,8 @@ Notes:
 | `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_meta` | `owner: Address` | `PortfolioMeta { revision, updated_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_delegate` | `owner: Address` | `Option<PortfolioDelegate { delegate, expires_ledger }>` | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
 ### Error codes
@@ -152,7 +177,12 @@ Codes are stable. New errors are appended and never renumbered.
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
 | 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
-| | | 21 | `InsufficientBalance` |
+| 21 | `InsufficientBalance` | 22 | `FolderExpired` |
+| 23 | `InvalidPriceTiers` | 24 | `LeasesDisabled` |
+| 25 | `InvalidRenewal` | 26 | `AdminChangeNotFound` |
+| 27 | `AdminChangeNotReady` | 28 | `AdminChangeQueueFull` |
+| 29 | `StaleUpdate` | 30 | `InvalidDelegate` |
+| 31 | `DelegateExpired` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -167,12 +197,13 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `port_burn`, `dlg_set`,
+   `dlg_clr`, `fee_set`, `withdraw`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
 4. **Apply.** Upsert by owner address: `folder_cl` → identity, `port_mint`/`port_upd` → portfolio
-   CID, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
+   CID, `port_burn` → delete the portfolio, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
    cache plus an IPFS fetch of `metadata_uri`. Timestamps and tx hashes come from the `getEvents`
    envelope (`ledger`, `ledgerClosedAt`, `txHash`).
 5. **Reconcile.** Use the read functions (`get_portfolio`, `get_identity`, `get_template`) to

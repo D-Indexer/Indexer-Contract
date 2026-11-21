@@ -35,6 +35,29 @@ pub struct PortfolioMinted {
 pub struct PortfolioUpdated {
     pub owner: Address,
     pub ipfs_cid: String,
+    /// Appended field: the portfolio revision after this update.
+    pub revision: u32,
+}
+
+#[contractevent(topics = ["port_burn"], data_format = "vec")]
+pub struct PortfolioBurned {
+    pub owner: Address,
+    /// The CID the portfolio pointed at when it was burned.
+    pub last_ipfs_cid: String,
+}
+
+#[contractevent(topics = ["dlg_set"], data_format = "vec")]
+pub struct DelegateSet {
+    pub owner: Address,
+    pub delegate: Address,
+    /// Last ledger (inclusive) the delegate may act; 0 = no expiry.
+    pub expires_ledger: u32,
+}
+
+#[contractevent(topics = ["dlg_clr"], data_format = "vec")]
+pub struct DelegateCleared {
+    pub owner: Address,
+    pub delegate: Address,
 }
 
 #[contractevent(topics = ["tmpl_reg"], data_format = "vec")]
@@ -49,6 +72,20 @@ pub struct TemplateRegistered {
 pub struct TemplateAssigned {
     pub owner: Address,
     pub template_id: u32,
+}
+
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
 }
 
 #[contractevent(topics = ["init"], data_format = "vec")]
@@ -185,10 +222,36 @@ pub fn portfolio_minted(env: &Env, owner: &Address, template_id: u32, ipfs_cid: 
     .publish(env);
 }
 
-pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String) {
+pub fn portfolio_updated(env: &Env, owner: &Address, ipfs_cid: &String, revision: u32) {
     PortfolioUpdated {
         owner: owner.clone(),
         ipfs_cid: ipfs_cid.clone(),
+        revision,
+    }
+    .publish(env);
+}
+
+pub fn portfolio_burned(env: &Env, owner: &Address, last_ipfs_cid: &String) {
+    PortfolioBurned {
+        owner: owner.clone(),
+        last_ipfs_cid: last_ipfs_cid.clone(),
+    }
+    .publish(env);
+}
+
+pub fn delegate_set(env: &Env, owner: &Address, delegate: &Address, expires_ledger: u32) {
+    DelegateSet {
+        owner: owner.clone(),
+        delegate: delegate.clone(),
+        expires_ledger,
+    }
+    .publish(env);
+}
+
+pub fn delegate_cleared(env: &Env, owner: &Address, delegate: &Address) {
+    DelegateCleared {
+        owner: owner.clone(),
+        delegate: delegate.clone(),
     }
     .publish(env);
 }
