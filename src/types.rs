@@ -93,4 +93,6 @@ pub enum DataKey {
     PendingAdminChanges,
     // admin timelock: next op ID to hand out
     NextAdminChangeId,
+    // identity_map: admin-reserved Folder name (full `<label>.folder`) -> true
+    ReservedLabel(String),
 }

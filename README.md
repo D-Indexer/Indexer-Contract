@@ -102,7 +102,9 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
 | `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
-| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderReserved` (29), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `reserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_rsv` | 2, 7, 9, 3 |
+| `unreserve_folder` | `admin: Address, folder_name: String` | `admin` (must be an admin) | `name_unrsv` | 2, 7, 9 |
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
 | `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
@@ -115,6 +117,10 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `reserve_folder` blocks a name (for example `admin.folder` or `stellar.folder`) from being
+  claimed by anyone, admins included, until `unreserve_folder`. Reservations are keyed by the full
+  `<label>.folder` name. Reserving a name that has an owner fails with `FolderNameTaken`; a lapsed
+  lease is cleared first. Both calls are idempotent.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
   `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
   contract's own address to collect fees into the contract-held treasury.
@@ -128,6 +134,7 @@ Notes:
 | `get_admins` | — | `Vec<Address>` (empty before `initialize`) | — |
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
+| `is_reserved` | `folder_name: String` | `bool`: whether an admin reserved the name | — |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
@@ -156,6 +163,7 @@ Codes are stable. New errors are appended and never renumbered.
 | 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
 | 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
 | 27 | `LeasesDisabled` | 28 | `InvalidRenewal` |
+| 29 | `FolderReserved` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -170,7 +178,8 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`,
+   `name_rsv`, `name_unrsv`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.

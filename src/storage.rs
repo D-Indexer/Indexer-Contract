@@ -188,6 +188,29 @@ pub fn get_owner_folder(env: &Env, owner: &Address) -> Option<String> {
     result
 }
 
+/// Whether an admin has reserved `folder_name`. Extends the entry TTL when
+/// it exists.
+pub fn is_reserved(env: &Env, folder_name: &String) -> bool {
+    let key = DataKey::ReservedLabel(folder_name.clone());
+    let reserved = env.storage().persistent().get(&key).unwrap_or(false);
+    if reserved {
+        extend_persistent(env, &key);
+    }
+    reserved
+}
+
+pub fn set_reserved(env: &Env, folder_name: &String) {
+    let key = DataKey::ReservedLabel(folder_name.clone());
+    env.storage().persistent().set(&key, &true);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_reserved(env: &Env, folder_name: &String) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::ReservedLabel(folder_name.clone()));
+}
+
 // ── Template Registry ─────────────────────────────────────────────────────────
 
 fn extend_persistent(env: &Env, key: &DataKey) {

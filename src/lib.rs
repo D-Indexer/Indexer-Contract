@@ -217,6 +217,31 @@ impl FolderContract {
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
+    /// Reserves `folder_name` so ordinary users cannot claim it. Admin only.
+    pub fn reserve_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::reserve_folder(&env, &admin, &folder_name)
+    }
+
+    /// Lifts a reservation made with `reserve_folder`. Admin only.
+    pub fn unreserve_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::unreserve_folder(&env, &admin, &folder_name)
+    }
+
+    /// Whether `folder_name` is reserved by an admin.
+    pub fn is_reserved(env: Env, folder_name: String) -> bool {
+        storage::is_reserved(&env, &folder_name)
+    }
+
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
         identity_map::get_folder(&env, &folder_name)
     }

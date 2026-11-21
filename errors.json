@@ -166,5 +166,11 @@
     "name": "InvalidRenewal",
     "description": "The renewal request is invalid.",
     "user_message": "This Folder cannot be renewed."
+  },
+  {
+    "code": 29,
+    "name": "FolderReserved",
+    "description": "The Folder name is reserved by an admin and cannot be claimed.",
+    "user_message": "That Folder name is reserved."
   }
 ]

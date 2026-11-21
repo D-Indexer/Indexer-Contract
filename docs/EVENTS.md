@@ -31,6 +31,14 @@ Compatibility rules:
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+| `name_rsv` | `FolderNameReserved` | `admin: Address`, `folder_name: String` | `reserve_folder` |
+| `name_unrsv` | `FolderNameUnreserved` | `admin: Address`, `folder_name: String` | `unreserve_folder` |
+
+### Changes in the reserved names update
+
+- **New:** `name_rsv` and `name_unrsv`, emitted by the admin-only `reserve_folder` and
+  `unreserve_folder`. Both are emitted even when the call doesn't change state (reserving a name
+  that is already reserved, or unreserving one that isn't).
 
 ### Changes in the economics / soroban-sdk 29 update
 
@@ -61,6 +69,7 @@ Compatibility rules:
 | `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
 | `claim_spon` | Record the sponsor of the claim |
 | `folder_rn` | Update the Folder's lease expiry |
+| `name_rsv` / `name_unrsv` | Mark / unmark `folder_name` as reserved (not claimable) |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |

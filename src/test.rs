@@ -1969,3 +1969,237 @@ fn budget_report() {
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
 }
+
+// ── Reserved Folder names ───────────────────────────────────────────────────
+
+mod reservation {
+    use super::*;
+    use crate::events::{FolderNameReserved, FolderNameUnreserved};
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    #[test]
+    fn reserve_and_unreserve_require_the_admin_signature() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+
+        t.client().reserve_folder(&t.admin, &n);
+        assert_single_auth(&t, &t.admin, "reserve_folder");
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_single_auth(&t, &t.admin, "unreserve_folder");
+    }
+
+    #[test]
+    fn non_admins_cannot_reserve_or_unreserve() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "support.folder");
+
+        let res = t.client().try_reserve_folder(&user, &n);
+        expect_contract_error(res, ContractError::Unauthorized);
+
+        t.client().reserve_folder(&t.admin, &n);
+        let res = t.client().try_unreserve_folder(&user, &n);
+        expect_contract_error(res, ContractError::Unauthorized);
+        assert!(t.client().is_reserved(&n));
+    }
+
+    #[test]
+    fn reserve_and_unreserve_fail_without_signature() {
+        let t = TestEnv::new();
+        let n = name(&t, "stellar.folder");
+        t.env.set_auths(&[]);
+        assert!(t.client().try_reserve_folder(&t.admin, &n).is_err());
+        assert!(t.client().try_unreserve_folder(&t.admin, &n).is_err());
+        assert!(!t.client().is_reserved(&n));
+    }
+
+    #[test]
+    fn reserve_and_unreserve_require_initialization() {
+        let t = uninitialized_env();
+        let n = name(&t, "folder.folder");
+        let res = t.client().try_reserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::NotInitialized);
+        let res = t.client().try_unreserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+
+    #[test]
+    fn reserved_name_cannot_be_claimed() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let sponsor = Address::generate(&t.env);
+        let n = name(&t, "admin.folder");
+
+        assert!(!t.client().is_reserved(&n));
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.client().is_reserved(&n));
+
+        let res = t.client().try_claim_folder(&user, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        let res = t.client().try_sponsored_claim(&sponsor, &user, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        // Admins are not exempt: the reservation blocks every claim.
+        let res = t.client().try_claim_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+
+        expect_contract_error(t.client().try_get_folder(&n), ContractError::FolderNotFound);
+        expect_contract_error(
+            t.client().try_get_identity(&user),
+            ContractError::FolderNotFound,
+        );
+    }
+
+    #[test]
+    fn reserving_a_taken_name_fails() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "taken.folder");
+
+        t.client().claim_folder(&user, &n);
+        let res = t.client().try_reserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::FolderNameTaken);
+        assert!(!t.client().is_reserved(&n));
+        assert_eq!(t.client().get_folder(&n), user);
+    }
+
+    #[test]
+    fn reserving_a_released_lease_clears_the_old_mapping() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "lapsed.folder");
+
+        t.client().set_lease_config(&t.admin, &1u32, &0u32);
+        t.client().claim_folder(&user, &n);
+        t.env
+            .ledger()
+            .with_mut(|l| l.timestamp += crate::constants::SECONDS_PER_DAY);
+
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.client().is_reserved(&n));
+        assert!(!t.has_persistent(&DataKey::FolderOwner(n.clone())));
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(user.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+    }
+
+    #[test]
+    fn unreserve_then_claim_round_trip() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "support.folder");
+
+        t.client().reserve_folder(&t.admin, &n);
+        t.client().unreserve_folder(&t.admin, &n);
+        assert!(!t.client().is_reserved(&n));
+        assert!(!t.has_persistent(&DataKey::ReservedLabel(n.clone())));
+
+        t.client().claim_folder(&user, &n);
+        assert_eq!(t.client().get_folder(&n), user);
+        assert_eq!(t.client().get_identity(&user), n);
+    }
+
+    #[test]
+    fn reservation_is_keyed_by_the_full_name() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.has_persistent(&DataKey::ReservedLabel(n.clone())));
+        // A different label is unaffected.
+        let user = Address::generate(&t.env);
+        t.client().claim_folder(&user, &name(&t, "admins.folder"));
+    }
+
+    #[test]
+    fn reserve_emits_event() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderNameReserved {
+                admin: t.admin.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn unreserve_emits_event() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderNameUnreserved {
+                admin: t.admin.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    /// Topic symbol and data vec length of the contract's last event, read
+    /// from the raw XDR so the wire layout is pinned independently of the
+    /// event structs.
+    fn last_event_layout(t: &TestEnv) -> (std::string::String, usize) {
+        use soroban_sdk::xdr::{ContractEventBody, ScVal};
+        let events = t.env.events().all().filter_by_contract(&t.contract_id);
+        let ContractEventBody::V0(body) = &events.events().last().unwrap().body;
+        let topic = match &body.topics[..] {
+            [ScVal::Symbol(sym)] => sym.to_utf8_string().unwrap(),
+            other => panic!("unexpected topics {other:?}"),
+        };
+        let len = match &body.data {
+            ScVal::Vec(Some(v)) => v.len(),
+            other => panic!("unexpected data {other:?}"),
+        };
+        (topic, len)
+    }
+
+    #[test]
+    fn event_topics_and_data_layout() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(last_event_layout(&t), ("name_rsv".into(), 2));
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_eq!(last_event_layout(&t), ("name_unrsv".into(), 2));
+    }
+
+    #[test]
+    fn malformed_names_are_rejected() {
+        let t = TestEnv::new();
+        for bad in [
+            "ab.folder",
+            "Admin.folder",
+            "admin",
+            "-admin.folder",
+            "admin-.folder",
+        ] {
+            let n = name(&t, bad);
+            let res = t.client().try_reserve_folder(&t.admin, &n);
+            expect_contract_error(res, ContractError::InvalidFolderName);
+            let res = t.client().try_unreserve_folder(&t.admin, &n);
+            expect_contract_error(res, ContractError::InvalidFolderName);
+        }
+    }
+
+    #[test]
+    fn reserved_key_gets_persistent_ttl() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        let key = DataKey::ReservedLabel(n.clone());
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+
+        // A read below the threshold extends it back to the full lifetime.
+        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
+        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
+        assert!(t.client().is_reserved(&n));
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+}

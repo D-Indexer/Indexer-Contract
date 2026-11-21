@@ -89,4 +89,7 @@ pub enum ContractError {
     /// The renewal request is invalid.
     /// User message: This Folder cannot be renewed.
     InvalidRenewal = 28,
+    /// The Folder name is reserved by an admin and cannot be claimed.
+    /// User message: That Folder name is reserved.
+    FolderReserved = 29,
 }

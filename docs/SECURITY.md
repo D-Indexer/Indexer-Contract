@@ -5,7 +5,7 @@
 | Function | Signer |
 |---|---|
 | `initialize` | `admin` (the first admin) |
-| `add_admin`, `remove_admin`, `register_template` | `admin` argument, which must be in the admin list |
+| `add_admin`, `remove_admin`, `register_template`, `reserve_folder`, `unreserve_folder` | `admin` argument, which must be in the admin list |
 | `claim_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
 | All `get_*`, `list_templates`, `verify_portfolio` | none |
 
@@ -21,6 +21,8 @@ Tests assert the exact signer for every write and check that writes fail when no
 - An address mints at most one portfolio. A portfolio always shows the owner's currently selected
   template.
 - Template IDs are non-zero and registered once.
+- A reserved name can't be claimed by anyone, admins included, and a name that has an owner can't
+  be reserved.
 
 ## Known risks
 

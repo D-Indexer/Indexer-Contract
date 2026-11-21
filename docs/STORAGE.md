@@ -13,6 +13,7 @@
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner |
+| `ReservedLabel(String)` | persistent | `bool` (`true`; removed on unreserve) | one per reserved name |
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now

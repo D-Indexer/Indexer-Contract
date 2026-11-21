@@ -244,6 +244,34 @@ pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: 
     .publish(env);
 }
 
+#[contractevent(topics = ["name_rsv"], data_format = "vec")]
+pub struct FolderNameReserved {
+    pub admin: Address,
+    pub folder_name: String,
+}
+
+#[contractevent(topics = ["name_unrsv"], data_format = "vec")]
+pub struct FolderNameUnreserved {
+    pub admin: Address,
+    pub folder_name: String,
+}
+
+pub fn folder_reserved(env: &Env, admin: &Address, folder_name: &String) {
+    FolderNameReserved {
+        admin: admin.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
+pub fn folder_unreserved(env: &Env, admin: &Address, folder_name: &String) {
+    FolderNameUnreserved {
+        admin: admin.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["upgraded"], data_format = "vec")]
 pub struct ContractUpgraded {
     pub admin: Address,

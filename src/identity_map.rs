@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, String};
 
-use crate::access_control::require_owner;
+use crate::access_control::{require_admin, require_owner};
 use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
@@ -60,6 +60,9 @@ fn claim(
     folder_name: &String,
 ) -> Result<(), ContractError> {
     validation::require_valid_folder_name(folder_name)?;
+    if storage::is_reserved(env, folder_name) {
+        return Err(ContractError::FolderReserved);
+    }
     if let Some(current) = storage::get_owner_folder(env, owner) {
         match lease_state(env, &current) {
             LeaseState::Released => storage::remove_folder(env, &current, owner),
@@ -87,6 +90,42 @@ fn claim(
         storage::set_folder_expiry(env, folder_name, expiry);
     }
     events::folder_claimed(env, owner, folder_name, fee_paid);
+    Ok(())
+}
+
+/// Reserves `folder_name` so it cannot be claimed. Admin only. Fails with
+/// `FolderNameTaken` if the name has an owner (active or in its grace
+/// period); a released lease is cleared first. Reserving an already
+/// reserved name is a no-op apart from the event.
+pub fn reserve_folder(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    validation::require_valid_folder_name(folder_name)?;
+    if let Some(previous) = storage::get_folder_owner(env, folder_name) {
+        match lease_state(env, folder_name) {
+            LeaseState::Released => storage::remove_folder(env, folder_name, &previous),
+            _ => return Err(ContractError::FolderNameTaken),
+        }
+    }
+    storage::set_reserved(env, folder_name);
+    events::folder_reserved(env, admin, folder_name);
+    Ok(())
+}
+
+/// Lifts a reservation so the name can be claimed again. Admin only.
+/// Unreserving a name that is not reserved is a no-op apart from the event.
+pub fn unreserve_folder(
+    env: &Env,
+    admin: &Address,
+    folder_name: &String,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    validation::require_valid_folder_name(folder_name)?;
+    storage::remove_reserved(env, folder_name);
+    events::folder_unreserved(env, admin, folder_name);
     Ok(())
 }
 
