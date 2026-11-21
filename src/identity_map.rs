@@ -76,15 +76,24 @@ fn claim(
 
     let fee_paid = match storage::get_claim_fee(env) {
         Some(fee) if fee.amount > 0 => {
-            // Covered by the owner's require_auth above. A failed transfer
-            // aborts the whole invocation, so no name mapping is written.
-            token::Client::new(env, &fee.token).transfer(owner, &fee.treasury, &fee.amount);
+            // Covered by the payer's require_auth (owner, or sponsor for a
+            // sponsored claim). A failed transfer aborts the whole
+            // invocation, so no name mapping is written.
+            token::Client::new(env, &fee.token).transfer(payer, &fee.treasury, &fee.amount);
             fee.amount
         }
         _ => 0,
     };
 
     storage::set_folder_owner(env, folder_name, owner);
+    if let Some(lease) = storage::get_lease_config(env) {
+        let expiry = env
+            .ledger()
+            .timestamp()
+            .checked_add(lease.period_secs)
+            .ok_or(ContractError::InvalidRenewal)?;
+        storage::set_folder_expiry(env, folder_name, expiry);
+    }
     events::folder_claimed(env, owner, folder_name, fee_paid);
     Ok(())
 }
