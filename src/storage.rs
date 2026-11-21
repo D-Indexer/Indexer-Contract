@@ -362,6 +362,42 @@ pub fn append_portfolio_history(env: &Env, owner: &Address, cid: &String) {
     extend_persistent(env, &key);
 }
 
+// ── Token IDs ─────────────────────────────────────────────────────────────────
+
+/// Assigns the next sequential token ID to `owner` and writes both mappings.
+/// IDs start at 1 and the counter only grows, so an ID is never reused.
+pub fn assign_token_id(env: &Env, owner: &Address) -> u64 {
+    let instance = env.storage().instance();
+    let token_id: u64 = instance.get(&DataKey::NextTokenId).unwrap_or(1);
+    instance.set(&DataKey::NextTokenId, &(token_id + 1));
+
+    let token_key = DataKey::TokenOwner(token_id);
+    let owner_key = DataKey::OwnerToken(owner.clone());
+    env.storage().persistent().set(&token_key, owner);
+    env.storage().persistent().set(&owner_key, &token_id);
+    extend_persistent(env, &token_key);
+    extend_persistent(env, &owner_key);
+    token_id
+}
+
+pub fn get_owner_token(env: &Env, owner: &Address) -> Option<u64> {
+    let key = DataKey::OwnerToken(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn get_token_owner(env: &Env, token_id: u64) -> Option<Address> {
+    let key = DataKey::TokenOwner(token_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
 // ── Economics ─────────────────────────────────────────────────────────────────
 
 pub fn get_claim_fee(env: &Env) -> Option<ClaimFee> {

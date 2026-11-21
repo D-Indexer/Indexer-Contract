@@ -58,6 +58,12 @@ pub enum DataKey {
     Portfolio(Address),
     // nft_mint: owner -> last MAX_CID_HISTORY CidEntry values, oldest first
     PortfolioHistory(Address),
+    // token IDs: next ID to assign, starts at 1 (instance)
+    NextTokenId,
+    // token IDs: token_id -> owner
+    TokenOwner(u64),
+    // token IDs: owner -> token_id
+    OwnerToken(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
     // pricing: claim fee settings and length tiers (instance)

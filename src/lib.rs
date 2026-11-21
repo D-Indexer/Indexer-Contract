@@ -309,6 +309,29 @@ impl FolderContract {
         nft_mint::get_portfolio(&env, &owner)
     }
 
+    /// Sequential token ID of the owner's portfolio (`TokenNotFound` if the
+    /// owner has no portfolio or it predates token IDs and was not backfilled).
+    pub fn token_of(env: Env, owner: Address) -> Result<u64, ContractError> {
+        nft_mint::token_of(&env, &owner)
+    }
+
+    /// Owner of portfolio token `token_id` (`TokenNotFound` if unassigned).
+    /// Also the SEP-0050 `owner_of`.
+    pub fn owner_of(env: Env, token_id: u64) -> Result<Address, ContractError> {
+        nft_mint::owner_of(&env, token_id)
+    }
+
+    /// Admin only, idempotent: assigns a token ID to a portfolio minted
+    /// before token IDs existed and returns it.
+    pub fn backfill_token_id(
+        env: Env,
+        admin: Address,
+        owner: Address,
+    ) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        nft_mint::backfill_token_id(&env, &admin, &owner)
+    }
+
     /// The owner's last `MAX_CID_HISTORY` (10) portfolio CIDs with the ledger
     /// timestamp each was set at, oldest first. Empty if never minted.
     pub fn get_portfolio_history(env: Env, owner: Address) -> Vec<CidEntry> {

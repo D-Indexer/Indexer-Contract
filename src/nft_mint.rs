@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
-use crate::access_control::require_owner;
+use crate::access_control::{require_admin, require_owner};
 use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
@@ -64,7 +64,7 @@ fn check_mint(
 }
 
 /// Write phase of a mint: stores the portfolio, syncs the template
-/// selection and emits `port_mint`. Only call it after `check_mint`.
+/// selection, assigns the next token ID and emits `port_mint`. Only call it after `check_mint`.
 fn apply_mint(env: &Env, owner: &Address, template_id: u32, ipfs_cid: &String) {
     let nft = PortfolioNFT {
         owner: owner.clone(),
@@ -76,7 +76,8 @@ fn apply_mint(env: &Env, owner: &Address, template_id: u32, ipfs_cid: &String) {
     storage::append_portfolio_history(env, owner, ipfs_cid);
     // Keep the user's template selection consistent with the minted portfolio.
     storage::set_user_template(env, owner, template_id);
-    events::portfolio_minted(env, owner, template_id, ipfs_cid);
+    let token_id = storage::assign_token_id(env, owner);
+    events::portfolio_minted(env, owner, template_id, ipfs_cid, token_id);
 }
 
 pub fn update_portfolio(
@@ -93,6 +94,34 @@ pub fn update_portfolio(
     storage::append_portfolio_history(env, owner, ipfs_cid);
     events::portfolio_updated(env, owner, ipfs_cid);
     Ok(())
+}
+
+/// Token ID of the owner's portfolio.
+pub fn token_of(env: &Env, owner: &Address) -> Result<u64, ContractError> {
+    storage::get_owner_token(env, owner).ok_or(ContractError::TokenNotFound)
+}
+
+/// Owner of portfolio token `token_id`.
+pub fn owner_of(env: &Env, token_id: u64) -> Result<Address, ContractError> {
+    storage::get_token_owner(env, token_id).ok_or(ContractError::TokenNotFound)
+}
+
+/// Assigns a token ID to a portfolio minted before token IDs existed.
+/// Admin only and idempotent: an owner that already has an ID gets the same
+/// ID back and nothing is written.
+pub fn backfill_token_id(
+    env: &Env,
+    admin: &Address,
+    owner: &Address,
+) -> Result<u64, ContractError> {
+    require_admin(env, admin)?;
+    storage::get_portfolio(env, owner)?;
+    if let Some(token_id) = storage::get_owner_token(env, owner) {
+        return Ok(token_id);
+    }
+    let token_id = storage::assign_token_id(env, owner);
+    events::token_id_backfilled(env, admin, owner, token_id);
+    Ok(token_id)
 }
 
 /// The owner's last `MAX_CID_HISTORY` portfolio CIDs, oldest first.

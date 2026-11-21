@@ -92,4 +92,7 @@ pub enum ContractError {
     /// The pending admin change queue is full.
     /// User message: Too many admin changes are pending.
     AdminChangeQueueFull = 29,
+    /// No portfolio token has the given ID, or the owner's portfolio has no token ID yet.
+    /// User message: That portfolio token does not exist.
+    TokenNotFound = 30,
 }
