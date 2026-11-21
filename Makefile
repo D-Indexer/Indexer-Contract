@@ -1,4 +1,4 @@
-.PHONY: errors-json sdk-compat help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: errors-json sdk-compat help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash verify-deployment script-check snapshot-list check clean
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
@@ -14,6 +14,7 @@ help:
 	@echo "  build-wasm    Build release WASM with Stellar CLI (unoptimized)"
 	@echo "  build-optimized Build optimized WASM with Stellar CLI -> $(OPTIMIZED_WASM)"
 	@echo "  wasm-hash     Print the sha256 (on-chain wasm hash) of the optimized WASM"
+	@echo "  verify-deployment Verify a deployment's source commit and wasm hash (NETWORK=testnet)"
 	@echo "  script-check  Validate scripts and errors.json drift"
 	@echo "  errors-json   Regenerate errors.json from src/errors.rs"
 	@echo "  sdk-compat    SDK upgrade compatibility report vs origin/main"
@@ -51,6 +52,9 @@ optimize-wasm: build-optimized
 
 wasm-hash: build-optimized
 	@sha256sum $(OPTIMIZED_WASM) | cut -d' ' -f1
+
+verify-deployment:
+	@./scripts/verify-deployment.sh "$(NETWORK)"
 
 script-check:
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done

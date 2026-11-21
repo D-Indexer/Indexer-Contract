@@ -34,6 +34,17 @@ Then run the end-to-end check:
 ./scripts/smoke-testnet.sh
 ```
 
+To verify that the recorded source commit reproduces the deployed contract WASM:
+
+```bash
+make verify-deployment NETWORK=testnet
+```
+
+The verifier checks the recorded Rust and Stellar CLI versions, fetches the deployed WASM, builds
+`source_commit` in a temporary Git worktree, and compares both SHA-256 hashes to `wasm_hash`.
+It removes the temporary worktree on success or failure. The repository history must include
+`source_commit`.
+
 ## Mainnet
 
 `./scripts/deploy.sh mainnet` uses the same flow without Friendbot, so the identity must already

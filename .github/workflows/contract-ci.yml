@@ -62,7 +62,7 @@ jobs:
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
-      - name: TTL monitor unit tests
+      - name: Python script unit tests
         run: python3 -m unittest discover -s scripts/tests
 
   supply-chain:
@@ -99,6 +99,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
@@ -112,6 +113,9 @@ jobs:
 
       - name: Build optimized wasm
         run: make build-optimized
+
+      - name: Verify recorded testnet deployment
+        run: make verify-deployment NETWORK=testnet
 
       - name: Report wasm hash
         run: |

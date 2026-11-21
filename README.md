@@ -72,6 +72,9 @@ make check                # fmt-check, cargo check, clippy -D warnings, tests, w
 
 # End-to-end check against deployments/testnet.json
 ./scripts/smoke-testnet.sh
+
+# Rebuild the recorded source commit and verify its deployed WASM hash
+make verify-deployment NETWORK=testnet
 ```
 
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers identities, overrides and mainnet.
