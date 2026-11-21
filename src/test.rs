@@ -10,12 +10,14 @@ use soroban_sdk::{
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
-    PERSISTENT_BUMP_AMOUNT,
+    ADMIN_TIMELOCK_LEDGERS, DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD,
+    MAX_ADMINS, MAX_TEMPLATES, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
-use crate::types::DataKey;
+use crate::events::{
+    AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
+};
+use crate::types::{AdminOp, DataKey};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -60,6 +62,44 @@ fn expect_contract_error<T>(
     expected: ContractError,
 ) {
     assert_eq!(result.err(), Some(Ok(expected)));
+}
+
+type TryResult = Result<(), Result<ContractError, soroban_sdk::InvokeError>>;
+
+/// Admin changes go through the timelock: queue, wait `ADMIN_TIMELOCK_LEDGERS`,
+/// execute. These helpers run the whole sequence so admin tests read as a
+/// single operation; the last invocation is always `execute_admin_change`.
+trait TimelockAdmin {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> TryResult;
+
+    fn try_add_admin(&self, admin: &Address, target: &Address) -> TryResult {
+        self.try_admin_change(admin, AdminOp::Add, target)
+    }
+    fn try_remove_admin(&self, admin: &Address, target: &Address) -> TryResult {
+        self.try_admin_change(admin, AdminOp::Remove, target)
+    }
+    fn add_admin(&self, admin: &Address, target: &Address) {
+        self.try_add_admin(admin, target).unwrap();
+    }
+    fn remove_admin(&self, admin: &Address, target: &Address) {
+        self.try_remove_admin(admin, target).unwrap();
+    }
+}
+
+impl TimelockAdmin for FolderContractClient<'_> {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> TryResult {
+        let op_id = match self.try_queue_admin_change(admin, &op, target) {
+            Ok(id) => id.unwrap(),
+            Err(e) => return Err(e),
+        };
+        self.env.ledger().with_mut(|l| {
+            l.sequence_number += ADMIN_TIMELOCK_LEDGERS;
+        });
+        match self.try_execute_admin_change(admin, &op_id) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[test]
@@ -233,14 +273,11 @@ fn authorize_owner(
             sub_invokes: &[],
         },
     }]);
-    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: t.env.ledger().timestamp(),
-        protocol_version: t.env.ledger().protocol_version(),
-        sequence_number: t.env.ledger().sequence(),
-        base_reserve: 0,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: live_until_ledger,
+    t.env.ledger().with_mut(|l| {
+        l.base_reserve = 0;
+        l.min_temp_entry_ttl = 1;
+        l.min_persistent_entry_ttl = 1;
+        l.max_entry_ttl = live_until_ledger;
     });
 }
 
@@ -411,7 +448,10 @@ fn test_relayed_claim_folder_without_owner_auth_fails() {
     }]);
 
     let res = t.client().try_claim_folder(&owner, &name);
-    assert!(res.is_err(), "relayer signature must not stand in for the owner");
+    assert!(
+        res.is_err(),
+        "relayer signature must not stand in for the owner"
+    );
     assert!(t.client().try_get_folder(&name).is_err());
 }
 
@@ -657,7 +697,9 @@ fn test_get_missing_portfolio_rejected() {
 /// Advances the ledger far enough that every persistent entry written so far
 /// has expired, then asserts the entry is gone from the live ledger.
 fn archive_persistent(t: &TestEnv, key: &DataKey) {
-    t.env.ledger().set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
+    t.env
+        .ledger()
+        .set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
     assert!(
         !t.env.storage().persistent().has(key),
         "persistent entry should be archived"
@@ -769,6 +811,7 @@ fn test_template_restore_keeps_registration() {
         &crate::types::Template {
             template_id: 1u32,
             metadata_uri: uri.clone(),
+            creator: t.admin.clone(),
         },
     );
 
@@ -799,9 +842,11 @@ fn test_portfolio_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "nft.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::Portfolio(user.clone());
     assert!(t.env.storage().persistent().has(&key));
@@ -820,7 +865,8 @@ fn test_portfolio_restore_prevents_remint() {
     let name = String::from_str(&t.env, "remint.folder");
     let cid = portfolio_cid(&t.env);
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
 
@@ -833,6 +879,7 @@ fn test_portfolio_restore_prevents_remint() {
             owner: user.clone(),
             template_id: 1u32,
             ipfs_cid: cid.clone(),
+            minted_at: t.env.ledger().timestamp(),
         },
     );
 
@@ -847,9 +894,11 @@ fn test_user_template_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "assigned.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::UserTemplate(user.clone());
     assert!(t.env.storage().persistent().has(&key));
@@ -1245,21 +1294,37 @@ fn test_admin_changes_emit_events() {
     t.client().add_admin(&t.admin, &new_admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminAdded {
-            admin: t.admin.clone(),
-            new_admin: new_admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminAdded {
+                admin: t.admin.clone(),
+                new_admin: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: t.admin.clone(),
+                op_id: 0,
+                target: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
 
     t.client().remove_admin(&new_admin, &t.admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminRemoved {
-            admin: new_admin.clone(),
-            target: t.admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminRemoved {
+                admin: new_admin.clone(),
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: new_admin.clone(),
+                op_id: 1,
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
     assert_eq!(
         t.client().get_admins(),
@@ -1523,98 +1588,9 @@ fn test_each_write_requires_the_right_signer() {
 
     let other_admin = Address::generate(&t.env);
     t.client().add_admin(&t.admin, &other_admin);
-    assert_single_auth(&t, &t.admin, "add_admin");
+    assert_single_auth(&t, &t.admin, "execute_admin_change");
     t.client().remove_admin(&other_admin, &t.admin);
-    assert_single_auth(&t, &other_admin, "remove_admin");
-}
-
-// ── Contract-account (smart wallet) owners ──────────────────────────────────
-
-/// Minimal test smart-wallet contract account: authorizes an invocation by
-/// verifying an ed25519 signature over the payload the host passes to
-/// `__check_auth`. Real auth is used (no `mock_all_auths`).
-mod smart_wallet {
-    use soroban_sdk::{
-        auth::{Context, CustomAccountInterface},
-        contract, contracterror, contractimpl,
-        crypto::Hash,
-        BytesN, Env, Vec,
-    };
-
-    #[contracterror]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum WalletError {
-        NotAuthorized = 1,
-    }
-
-    #[contract]
-    pub struct TestWallet;
-
-    #[contractimpl]
-    impl TestWallet {
-        pub fn __constructor(env: Env, public_key: BytesN<32>) {
-            env.storage().instance().set(&0u32, &public_key);
-        }
-
-        pub fn public_key(env: Env) -> BytesN<32> {
-            env.storage().instance().get(&0u32).unwrap()
-        }
-    }
-
-    #[contractimpl]
-    impl CustomAccountInterface for TestWallet {
-        type Signature = BytesN<64>;
-        type Error = WalletError;
-
-        fn __check_auth(
-            env: Env,
-            signature_payload: Hash<32>,
-            signature: BytesN<64>,
-            _auth_contexts: Vec<Context>,
-        ) -> Result<(), WalletError> {
-            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
-            env.crypto()
-                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
-            Ok(())
-        }
-    }
-}
-
-use smart_wallet::TestWallet;
-
-/// A contract-account owner plus the ed25519 key that controls it.
-struct WalletOwner {
-    address: Address,
-    signer: soroban_sdk::testutils::ed25519::SigningKey,
-}
-
-impl WalletOwner {
-    fn new(env: &Env) -> Self {
-        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
-        let public_key = signer.verifying_key();
-        let address = env.register(TestWallet, (public_key,));
-        WalletOwner { address, signer }
-    }
-
-    /// Authorizes the next invocation as this contract account, signing the
-    /// payload the host derives for it.
-    fn authorize(&self, env: &Env) {
-        let payload = env.auths().last().unwrap().1.signature_payload();
-        let signature = self.signer.sign(&payload);
-        env.set_auths(&[soroban_sdk::testutils::MockAuth {
-            address: &self.address,
-            invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                contract: &self.address,
-                fn_name: "__check_auth",
-                args: (),
-                sub_invokes: &[],
-            },
-        }]);
-        let _ = signature;
-    }
-}
-
+    assert_single_auth(&t, &other_admin, "execute_admin_change");
     let uri = String::from_str(
         &t.env,
         &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),

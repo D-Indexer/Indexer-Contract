@@ -60,7 +60,7 @@ pub fn charge(env: &Env, payer: &Address, amount: i128) {
     }
 }
 
-pub fn set_claim_fee(
+pub fn set_pricing(
     env: &Env,
     admin: &Address,
     token: &Address,
