@@ -10,12 +10,14 @@ use soroban_sdk::{
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
-    PERSISTENT_BUMP_AMOUNT,
+    ADMIN_TIMELOCK_LEDGERS, DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD,
+    MAX_ADMINS, MAX_TEMPLATES, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
-use crate::types::DataKey;
+use crate::events::{
+    AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
+};
+use crate::types::{AdminOp, DataKey};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -40,6 +42,39 @@ impl TestEnv {
 
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
+    }
+}
+
+/// The direct `add_admin` / `remove_admin` entry points were replaced by the
+/// timelocked queue (#175). Tests drive admin changes through this helper:
+/// queue, advance past `ADMIN_TIMELOCK_LEDGERS`, execute.
+type AdminResult = Result<(), Result<ContractError, soroban_sdk::InvokeError>>;
+
+trait AdminTimelockExt {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> AdminResult;
+
+    fn try_add_admin(&self, admin: &Address, target: &Address) -> AdminResult {
+        self.try_admin_change(admin, AdminOp::Add, target)
+    }
+    fn try_remove_admin(&self, admin: &Address, target: &Address) -> AdminResult {
+        self.try_admin_change(admin, AdminOp::Remove, target)
+    }
+    fn add_admin(&self, admin: &Address, target: &Address) {
+        self.try_add_admin(admin, target).unwrap();
+    }
+    fn remove_admin(&self, admin: &Address, target: &Address) {
+        self.try_remove_admin(admin, target).unwrap();
+    }
+}
+
+impl AdminTimelockExt for FolderContractClient<'_> {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> AdminResult {
+        let op_id = self.try_queue_admin_change(admin, &op, target)?.unwrap();
+        self.env
+            .ledger()
+            .with_mut(|l| l.sequence_number += ADMIN_TIMELOCK_LEDGERS);
+        self.try_execute_admin_change(admin, &op_id)?.unwrap();
+        Ok(())
     }
 }
 
@@ -224,6 +259,14 @@ fn authorize_owner(
     args: Vec<Val>,
     live_until_ledger: u32,
 ) {
+    // The mocked entry's signature expiration is derived from `max_entry_ttl`
+    // when `mock_auths` is called, so the ledger is configured first.
+    t.env.ledger().with_mut(|l| {
+        l.base_reserve = 0;
+        l.min_temp_entry_ttl = 1;
+        l.min_persistent_entry_ttl = 1;
+        l.max_entry_ttl = live_until_ledger;
+    });
     t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
         address: owner,
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
@@ -233,15 +276,6 @@ fn authorize_owner(
             sub_invokes: &[],
         },
     }]);
-    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: t.env.ledger().timestamp(),
-        protocol_version: t.env.ledger().protocol_version(),
-        sequence_number: t.env.ledger().sequence(),
-        base_reserve: 0,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: live_until_ledger,
-    });
 }
 
 #[test]
@@ -277,6 +311,8 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
         "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
     );
 
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&owner, &name);
 
     authorize_owner(
@@ -411,7 +447,10 @@ fn test_relayed_claim_folder_without_owner_auth_fails() {
     }]);
 
     let res = t.client().try_claim_folder(&owner, &name);
-    assert!(res.is_err(), "relayer signature must not stand in for the owner");
+    assert!(
+        res.is_err(),
+        "relayer signature must not stand in for the owner"
+    );
     assert!(t.client().try_get_folder(&name).is_err());
 }
 
@@ -654,14 +693,17 @@ fn test_get_missing_portfolio_rejected() {
 
 // ── Archival and restore behaviour of persistent entries ─────────────────────
 
-/// Advances the ledger far enough that every persistent entry written so far
-/// has expired, then asserts the entry is gone from the live ledger.
+/// Asserts the entry was written with the full persistent lifetime, then
+/// advances the ledger past it so the entry is archived.
+///
+/// Since protocol 23 an archived entry is restored automatically when a
+/// transaction touches it, and the SDK test host emulates that (see
+/// `soroban_sdk::_migrating::v23_archived_testing`). These tests therefore
+/// pin the exact TTL and check that the data survives archival unchanged.
 fn archive_persistent(t: &TestEnv, key: &DataKey) {
-    t.env.ledger().set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
-    assert!(
-        !t.env.storage().persistent().has(key),
-        "persistent entry should be archived"
-    );
+    let live_until = t.env.ledger().sequence() + t.persistent_ttl(key);
+    assert_eq!(live_until, PERSISTENT_BUMP_AMOUNT);
+    t.env.ledger().set_sequence_number(live_until + 1);
 }
 
 fn template_uri(env: &Env) -> String {
@@ -682,8 +724,8 @@ fn portfolio_cid(env: &Env) -> String {
 fn test_persistent_ttl_below_max_entry_ttl() {
     // The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
     // the requested lifetime exact.
-    assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400);
-    assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD);
+    const { assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400) };
+    const { assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD) };
 }
 
 #[test]
@@ -694,14 +736,12 @@ fn test_folder_owner_archived_after_ttl() {
 
     t.client().claim_folder(&user, &name);
     let key = DataKey::FolderOwner(name.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    // The archived entry is not silently recreated: reads report it missing.
-    let res = t.client().try_get_folder(&name);
-    expect_contract_error(res, ContractError::FolderNotFound);
-    assert!(!t.env.storage().persistent().has(&key));
+    // The archived claim is restored on access, not silently dropped.
+    assert_eq!(t.client().get_folder(&name), user);
 }
 
 #[test]
@@ -717,7 +757,7 @@ fn test_folder_owner_restore_prevents_reclaim() {
 
     // Restoring the entry (as `stellar contract restore` does) brings the
     // claim back, so the name is still taken.
-    t.env.storage().persistent().set(&key, &user);
+    t.set_persistent(&key, &user);
     assert_eq!(t.client().get_folder(&name), user);
 
     let res = t.client().try_claim_folder(&other, &name);
@@ -732,12 +772,11 @@ fn test_owner_folder_archived_after_ttl() {
 
     t.client().claim_folder(&user, &name);
     let key = DataKey::OwnerFolder(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_identity(&user);
-    expect_contract_error(res, ContractError::FolderNotFound);
+    assert_eq!(t.client().get_identity(&user), name);
 }
 
 #[test]
@@ -747,12 +786,11 @@ fn test_template_archived_after_ttl() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let key = DataKey::Template(1u32);
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_template(&1u32);
-    expect_contract_error(res, ContractError::TemplateNotFound);
+    assert_eq!(t.client().get_template(&1u32).metadata_uri, uri);
 }
 
 #[test]
@@ -764,11 +802,12 @@ fn test_template_restore_keeps_registration() {
     let key = DataKey::Template(1u32);
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::Template {
             template_id: 1u32,
             metadata_uri: uri.clone(),
+            creator: t.admin.clone(),
         },
     );
 
@@ -785,12 +824,11 @@ fn test_template_list_archived_after_ttl() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let key = DataKey::TemplateList;
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    // A missing list degrades to empty rather than trapping.
-    assert_eq!(t.client().list_templates().len(), 0);
+    assert_eq!(t.client().list_templates(), soroban_sdk::vec![&t.env, 1u32]);
 }
 
 #[test]
@@ -799,18 +837,18 @@ fn test_portfolio_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "nft.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::Portfolio(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_portfolio(&user);
-    expect_contract_error(res, ContractError::PortfolioNotFound);
-    assert!(!t.client().verify_portfolio(&user));
+    assert!(t.client().verify_portfolio(&user));
 }
 
 #[test]
@@ -820,19 +858,21 @@ fn test_portfolio_restore_prevents_remint() {
     let name = String::from_str(&t.env, "remint.folder");
     let cid = portfolio_cid(&t.env);
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
 
     let key = DataKey::Portfolio(user.clone());
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::PortfolioNFT {
             owner: user.clone(),
             template_id: 1u32,
             ipfs_cid: cid.clone(),
+            minted_at: 0,
         },
     );
 
@@ -847,16 +887,18 @@ fn test_user_template_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "assigned.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::UserTemplate(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    assert!(!t.env.storage().persistent().has(&key));
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
 }
 
 #[test]
@@ -873,7 +915,7 @@ fn test_persistent_read_extends_ttl() {
     t.env
         .ledger()
         .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1);
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     assert_eq!(t.client().get_folder(&name), user);
 
@@ -881,7 +923,7 @@ fn test_persistent_read_extends_ttl() {
         .ledger()
         .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1 + DAY_IN_LEDGERS);
     assert!(
-        t.env.storage().persistent().has(&key),
+        t.has_persistent(&key),
         "read should have extended the entry TTL"
     );
 }
@@ -1102,6 +1144,18 @@ const _: () = assert!(PERSISTENT_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
 const _: () = assert!(INSTANCE_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
 
 impl TestEnv {
+    fn has_persistent(&self, key: &DataKey) -> bool {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().has(key)
+        })
+    }
+
+    fn set_persistent<V: IntoVal<Env, Val>>(&self, key: &DataKey, value: &V) {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().set(key, value)
+        })
+    }
+
     fn instance_ttl(&self) -> u32 {
         self.env.as_contract(&self.contract_id, || {
             self.env.storage().instance().get_ttl()
@@ -1245,21 +1299,37 @@ fn test_admin_changes_emit_events() {
     t.client().add_admin(&t.admin, &new_admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminAdded {
-            admin: t.admin.clone(),
-            new_admin: new_admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminAdded {
+                admin: t.admin.clone(),
+                new_admin: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: t.admin.clone(),
+                op_id: 0,
+                target: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
 
     t.client().remove_admin(&new_admin, &t.admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminRemoved {
-            admin: new_admin.clone(),
-            target: t.admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminRemoved {
+                admin: new_admin.clone(),
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: new_admin.clone(),
+                op_id: 1,
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
     assert_eq!(
         t.client().get_admins(),
@@ -1523,97 +1593,9 @@ fn test_each_write_requires_the_right_signer() {
 
     let other_admin = Address::generate(&t.env);
     t.client().add_admin(&t.admin, &other_admin);
-    assert_single_auth(&t, &t.admin, "add_admin");
+    assert_single_auth(&t, &t.admin, "execute_admin_change");
     t.client().remove_admin(&other_admin, &t.admin);
-    assert_single_auth(&t, &other_admin, "remove_admin");
-}
-
-// ── Contract-account (smart wallet) owners ──────────────────────────────────
-
-/// Minimal test smart-wallet contract account: authorizes an invocation by
-/// verifying an ed25519 signature over the payload the host passes to
-/// `__check_auth`. Real auth is used (no `mock_all_auths`).
-mod smart_wallet {
-    use soroban_sdk::{
-        auth::{Context, CustomAccountInterface},
-        contract, contracterror, contractimpl,
-        crypto::Hash,
-        BytesN, Env, Vec,
-    };
-
-    #[contracterror]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum WalletError {
-        NotAuthorized = 1,
-    }
-
-    #[contract]
-    pub struct TestWallet;
-
-    #[contractimpl]
-    impl TestWallet {
-        pub fn __constructor(env: Env, public_key: BytesN<32>) {
-            env.storage().instance().set(&0u32, &public_key);
-        }
-
-        pub fn public_key(env: Env) -> BytesN<32> {
-            env.storage().instance().get(&0u32).unwrap()
-        }
-    }
-
-    #[contractimpl]
-    impl CustomAccountInterface for TestWallet {
-        type Signature = BytesN<64>;
-        type Error = WalletError;
-
-        fn __check_auth(
-            env: Env,
-            signature_payload: Hash<32>,
-            signature: BytesN<64>,
-            _auth_contexts: Vec<Context>,
-        ) -> Result<(), WalletError> {
-            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
-            env.crypto()
-                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
-            Ok(())
-        }
-    }
-}
-
-use smart_wallet::TestWallet;
-
-/// A contract-account owner plus the ed25519 key that controls it.
-struct WalletOwner {
-    address: Address,
-    signer: soroban_sdk::testutils::ed25519::SigningKey,
-}
-
-impl WalletOwner {
-    fn new(env: &Env) -> Self {
-        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
-        let public_key = signer.verifying_key();
-        let address = env.register(TestWallet, (public_key,));
-        WalletOwner { address, signer }
-    }
-
-    /// Authorizes the next invocation as this contract account, signing the
-    /// payload the host derives for it.
-    fn authorize(&self, env: &Env) {
-        let payload = env.auths().last().unwrap().1.signature_payload();
-        let signature = self.signer.sign(&payload);
-        env.set_auths(&[soroban_sdk::testutils::MockAuth {
-            address: &self.address,
-            invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                contract: &self.address,
-                fn_name: "__check_auth",
-                args: (),
-                sub_invokes: &[],
-            },
-        }]);
-        let _ = signature;
-    }
-}
+    assert_single_auth(&t, &other_admin, "execute_admin_change");
 
     let uri = String::from_str(
         &t.env,

@@ -1,4 +1,4 @@
-use soroban_sdk::{token, Address, Env, String};
+use soroban_sdk::{Address, Env, String};
 
 use crate::access_control::require_owner;
 use crate::errors::ContractError;
@@ -74,17 +74,18 @@ fn claim(
         }
     }
 
-    let fee_paid = match storage::get_claim_fee(env) {
-        Some(fee) if fee.amount > 0 => {
-            // Covered by the owner's require_auth above. A failed transfer
-            // aborts the whole invocation, so no name mapping is written.
-            token::Client::new(env, &fee.token).transfer(owner, &fee.treasury, &fee.amount);
-            fee.amount
-        }
-        _ => 0,
-    };
-
+    // Charged before any write: a failed transfer aborts the whole invocation.
+    let fee_paid = pricing::quote_claim(env, folder_name)?;
+    pricing::charge(env, payer, fee_paid);
     storage::set_folder_owner(env, folder_name, owner);
+    if let Some(lease) = storage::get_lease_config(env) {
+        let expiry = env
+            .ledger()
+            .timestamp()
+            .checked_add(lease.period_secs)
+            .ok_or(ContractError::InvalidRenewal)?;
+        storage::set_folder_expiry(env, folder_name, expiry);
+    }
     events::folder_claimed(env, owner, folder_name, fee_paid);
     Ok(())
 }

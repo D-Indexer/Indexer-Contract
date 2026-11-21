@@ -124,5 +124,47 @@
     "name": "InsufficientBalance",
     "description": "The contract treasury holds less than the requested amount.",
     "user_message": "The treasury does not hold enough funds for this withdrawal."
+  },
+  {
+    "code": 22,
+    "name": "AdminChangeNotFound",
+    "description": "No queued admin change has the given op ID.",
+    "user_message": "That admin change does not exist."
+  },
+  {
+    "code": 23,
+    "name": "AdminChangeNotReady",
+    "description": "The queued admin change's timelock has not elapsed yet.",
+    "user_message": "That admin change cannot be executed yet."
+  },
+  {
+    "code": 24,
+    "name": "AdminChangeQueueFull",
+    "description": "The maximum number of admin changes is already queued.",
+    "user_message": "Too many admin changes are pending."
+  },
+  {
+    "code": 25,
+    "name": "FolderExpired",
+    "description": "The Folder lease has expired and is in its grace period.",
+    "user_message": "This Folder has expired. The owner can still renew it."
+  },
+  {
+    "code": 26,
+    "name": "InvalidPriceTiers",
+    "description": "The price tier table is malformed.",
+    "user_message": "The price tiers are not valid."
+  },
+  {
+    "code": 27,
+    "name": "LeasesDisabled",
+    "description": "Folder leases are not enabled.",
+    "user_message": "Folder leases are not enabled."
+  },
+  {
+    "code": 28,
+    "name": "InvalidRenewal",
+    "description": "The renewal request is invalid.",
+    "user_message": "This Folder cannot be renewed."
   }
 ]

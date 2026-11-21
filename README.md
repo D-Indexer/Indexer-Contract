@@ -152,7 +152,10 @@ Codes are stable. New errors are appended and never renumbered.
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
 | 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
-| | | 21 | `InsufficientBalance` |
+| 21 | `InsufficientBalance` | 22 | `AdminChangeNotFound` |
+| 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
+| 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
+| 27 | `LeasesDisabled` | 28 | `InvalidRenewal` |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
