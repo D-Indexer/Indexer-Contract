@@ -52,11 +52,7 @@ pub fn queue_admin_change(
 
 /// Executes a queued admin change once its ETA has passed. The entry is
 /// removed before applying the change, so it can never run twice.
-pub fn execute_admin_change(
-    env: &Env,
-    caller: &Address,
-    op_id: u32,
-) -> Result<(), ContractError> {
+pub fn execute_admin_change(env: &Env, caller: &Address, op_id: u32) -> Result<(), ContractError> {
     require_admin(env, caller)?;
     let pending = storage::get_pending_admin_changes(env);
     let mut found: Option<(u32, AdminChange)> = None;
@@ -83,11 +79,7 @@ pub fn execute_admin_change(
 }
 
 /// Cancels a queued admin change that has not been executed yet.
-pub fn cancel_admin_change(
-    env: &Env,
-    caller: &Address,
-    op_id: u32,
-) -> Result<(), ContractError> {
+pub fn cancel_admin_change(env: &Env, caller: &Address, op_id: u32) -> Result<(), ContractError> {
     require_admin(env, caller)?;
     let pending = storage::get_pending_admin_changes(env);
     let mut found: Option<AdminChange> = None;
@@ -118,11 +110,7 @@ fn apply_add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(
     Ok(())
 }
 
-fn apply_remove_admin(
-    env: &Env,
-    caller: &Address,
-    target: &Address,
-) -> Result<(), ContractError> {
+fn apply_remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(), ContractError> {
     if !storage::is_admin(env, target) {
         return Err(ContractError::AdminNotFound);
     }

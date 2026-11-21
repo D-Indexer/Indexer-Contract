@@ -51,6 +51,20 @@ pub struct TemplateAssigned {
     pub template_id: u32,
 }
 
+#[contractevent(topics = ["upgraded"], data_format = "vec")]
+pub struct ContractUpgraded {
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+pub fn contract_upgraded(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    ContractUpgraded {
+        admin: admin.clone(),
+        new_wasm_hash: new_wasm_hash.clone(),
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["init"], data_format = "vec")]
 pub struct ContractInitialized {
     pub admin: Address,

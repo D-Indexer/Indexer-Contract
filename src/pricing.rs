@@ -4,7 +4,7 @@ use crate::access_control::require_admin;
 use crate::constants::{FOLDER_SUFFIX, MAX_PRICE_TIERS, MIN_FOLDER_LABEL_LEN};
 use crate::errors::ContractError;
 use crate::storage;
-use crate::types::{FeeConfig, PriceTiers};
+use crate::types::PriceTiers;
 use crate::validation;
 
 /// Validates a tier table: at most `MAX_PRICE_TIERS` entries, strictly
@@ -36,50 +36,34 @@ pub fn fee_for_label_len(tiers: &PriceTiers, base_fee: i128, label_len: u32) -> 
 }
 
 /// Fee for one claim (or one lease period) of a valid Folder name. Zero when
-/// no fee is configured.
+/// no claim fee is configured. Price tiers override the flat claim fee amount
+/// for short labels.
 pub fn quote_claim(env: &Env, folder_name: &String) -> Result<i128, ContractError> {
     validation::require_valid_folder_name(folder_name)?;
-    let Some(config) = storage::get_fee_config(env) else {
+    let Some(fee) = storage::get_claim_fee(env) else {
         return Ok(0);
     };
     let label_len = folder_name.len() - FOLDER_SUFFIX.len() as u32;
     Ok(fee_for_label_len(
         &storage::get_price_tiers(env),
-        config.base_fee,
+        fee.amount,
         label_len,
     ))
 }
 
-/// Transfers `amount` of the configured fee token from `payer` to the treasury.
-pub fn charge(env: &Env, payer: &Address, amount: i128) {
+/// Transfers `amount` of the configured fee token from `payer` to the
+/// treasury. Returns the amount actually charged.
+pub fn charge(env: &Env, payer: &Address, amount: i128) -> i128 {
     if amount <= 0 {
-        return;
+        return 0;
     }
-    if let Some(config) = storage::get_fee_config(env) {
-        token::Client::new(env, &config.token).transfer(payer, &config.treasury, &amount);
+    match storage::get_claim_fee(env) {
+        Some(fee) => {
+            token::Client::new(env, &fee.token).transfer(payer, &fee.treasury, &amount);
+            amount
+        }
+        None => 0,
     }
-}
-
-pub fn set_claim_fee(
-    env: &Env,
-    admin: &Address,
-    token: &Address,
-    treasury: &Address,
-    base_fee: i128,
-) -> Result<(), ContractError> {
-    require_admin(env, admin)?;
-    if base_fee < 0 {
-        return Err(ContractError::InvalidFee);
-    }
-    storage::set_fee_config(
-        env,
-        &FeeConfig {
-            token: token.clone(),
-            treasury: treasury.clone(),
-            base_fee,
-        },
-    );
-    Ok(())
 }
 
 pub fn set_price_tiers(
