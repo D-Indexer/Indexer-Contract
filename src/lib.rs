@@ -283,6 +283,19 @@ impl FolderContract {
         nft_mint::mint_portfolio(&env, &owner, template_id, &ipfs_cid)
     }
 
+    /// Claims `folder_name` and mints the owner's portfolio atomically: one
+    /// signature, and a failure leaves no partial state.
+    pub fn claim_and_mint(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        template_id: u32,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::claim_and_mint(&env, &owner, &folder_name, template_id, &ipfs_cid)
+    }
+
     pub fn update_portfolio(
         env: Env,
         owner: Address,

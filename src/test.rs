@@ -1982,3 +1982,170 @@ fn budget_report() {
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
 }
+
+// ── Atomic onboarding (claim_and_mint) ──────────────────────────────────────
+
+mod onboarding {
+    use super::*;
+    use crate::events::{FolderClaimed, PortfolioMinted};
+
+    fn setup() -> (TestEnv, Address) {
+        let t = TestEnv::new();
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        let owner = Address::generate(&t.env);
+        (t, owner)
+    }
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    /// No identity, portfolio or template-selection key exists for `owner`,
+    /// and `folder_name` is unowned.
+    fn assert_untouched(t: &TestEnv, owner: &Address, folder_name: &String) {
+        assert!(!t.has_persistent(&DataKey::FolderOwner(folder_name.clone())));
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+    }
+
+    #[test]
+    fn claim_and_mint_happy_path_emits_claim_then_mint() {
+        let (t, owner) = setup();
+        let folder = name(&t, "onboard.folder");
+        let cid = name(&t, VALID_CIDV1_RAW);
+
+        t.client().claim_and_mint(&owner, &folder, &1u32, &cid);
+
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [
+                FolderClaimed {
+                    owner: owner.clone(),
+                    folder_name: folder.clone(),
+                    fee_paid: 0,
+                }
+                .to_xdr(&t.env, &t.contract_id),
+                PortfolioMinted {
+                    owner: owner.clone(),
+                    template_id: 1,
+                    ipfs_cid: cid.clone(),
+                }
+                .to_xdr(&t.env, &t.contract_id),
+            ]
+        );
+        assert_eq!(t.client().get_folder(&folder), owner);
+        assert_eq!(t.client().get_identity(&owner), folder);
+        let nft = t.client().get_portfolio(&owner);
+        assert_eq!(nft.template_id, 1);
+        assert_eq!(nft.ipfs_cid, cid);
+        assert_eq!(t.client().get_user_template(&owner), Some(1));
+    }
+
+    #[test]
+    fn claim_and_mint_requires_exactly_one_owner_signature() {
+        let (t, owner) = setup();
+        t.client().claim_and_mint(
+            &owner,
+            &name(&t, "signed.folder"),
+            &1u32,
+            &name(&t, VALID_CIDV0),
+        );
+        assert_single_auth(&t, &owner, "claim_and_mint");
+    }
+
+    #[test]
+    fn claim_and_mint_fails_without_signature() {
+        let (t, owner) = setup();
+        let folder = name(&t, "nosig.folder");
+        t.env.set_auths(&[]);
+        assert!(t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0))
+            .is_err());
+        assert_untouched(&t, &owner, &folder);
+    }
+
+    #[test]
+    fn bad_name_leaves_no_state() {
+        let (t, owner) = setup();
+        let folder = name(&t, "Bad Name.folder");
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0));
+        expect_contract_error(res, ContractError::InvalidFolderName);
+        assert_untouched(&t, &owner, &folder);
+    }
+
+    #[test]
+    fn taken_name_leaves_no_state() {
+        let (t, owner) = setup();
+        let folder = name(&t, "taken.folder");
+        let first = Address::generate(&t.env);
+        t.client().claim_folder(&first, &folder);
+
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0));
+        expect_contract_error(res, ContractError::FolderNameTaken);
+        assert_eq!(t.client().get_folder(&folder), first);
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+    }
+
+    #[test]
+    fn bad_cid_leaves_no_state() {
+        let (t, owner) = setup();
+        let folder = name(&t, "badcid.folder");
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, "not-a-cid"));
+        expect_contract_error(res, ContractError::InvalidCID);
+        assert_untouched(&t, &owner, &folder);
+    }
+
+    #[test]
+    fn unknown_template_leaves_no_state() {
+        let (t, owner) = setup();
+        let folder = name(&t, "notmpl.folder");
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &7u32, &name(&t, VALID_CIDV0));
+        expect_contract_error(res, ContractError::TemplateNotFound);
+        assert_untouched(&t, &owner, &folder);
+
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &folder, &0u32, &name(&t, VALID_CIDV0));
+        expect_contract_error(res, ContractError::InvalidTemplateID);
+        assert_untouched(&t, &owner, &folder);
+    }
+
+    #[test]
+    fn owner_with_a_folder_is_rejected() {
+        let (t, owner) = setup();
+        t.client().claim_folder(&owner, &name(&t, "first.folder"));
+        let second = name(&t, "second.folder");
+        let res = t
+            .client()
+            .try_claim_and_mint(&owner, &second, &1u32, &name(&t, VALID_CIDV0));
+        expect_contract_error(res, ContractError::FolderAlreadyClaimed);
+        assert!(!t.has_persistent(&DataKey::FolderOwner(second)));
+        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+    }
+
+    #[test]
+    fn claim_and_mint_requires_initialization() {
+        let t = uninitialized_env();
+        let owner = Address::generate(&t.env);
+        let res = t.client().try_claim_and_mint(
+            &owner,
+            &name(&t, "early.folder"),
+            &1u32,
+            &name(&t, VALID_CIDV0),
+        );
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+}

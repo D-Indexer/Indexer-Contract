@@ -108,11 +108,14 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
+| `claim_and_mint` | `owner: Address, folder_name: String, template_id: u32, ipfs_cid: String` | `owner` (one signature, also covers the fee transfer) | `folder_cl`, then `port_mint` | 2, 9, 16, 3, 13, 17, 8, 6; storage is untouched on any error |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
+- `claim_and_mint` is the one-transaction onboarding path: it runs every check of `claim_folder`
+  and `mint_portfolio` before writing anything, so a failure leaves no partial state.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
