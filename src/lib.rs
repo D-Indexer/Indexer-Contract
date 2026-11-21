@@ -148,6 +148,24 @@ impl FolderContract {
         constants::CONTRACT_VERSION
     }
 
+    /// Admin-only, idempotent schema migration up to `CURRENT_STORAGE_VERSION`.
+    /// Emits `migrated` with `[from, to]` only when the version actually moves.
+    pub fn migrate(env: Env, admin: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let from = storage::get_storage_version(&env);
+        let to = storage::run_migration_step(&env, from)?;
+        if to != from {
+            events::migrated(&env, from, to);
+        }
+        Ok(())
+    }
+
+    /// Returns the current storage schema version.
+    pub fn get_storage_version(env: Env) -> u32 {
+        storage::get_storage_version(&env)
+    }
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     pub fn claim_folder(
