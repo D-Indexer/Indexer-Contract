@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +59,17 @@ pub enum DataKey {
     LeaseConfig,
     // leases: folder_name -> expiry timestamp
     FolderExpiry(String),
+    // commit-reveal: owner -> pending ClaimCommitment (temporary storage)
+    ClaimCommit(Address),
+}
+
+/// A hidden Folder claim made by `commit_claim`: `commitment` is
+/// `sha256(folder_name || salt || owner_xdr)`, `ledger` the commit ledger.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimCommitment {
+    pub commitment: BytesN<32>,
+    pub ledger: u32,
 }
 
 /// Kind of change queued through the admin timelock.

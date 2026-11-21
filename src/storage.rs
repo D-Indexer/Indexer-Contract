@@ -1,12 +1,13 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    CLAIM_COMMIT_TTL, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+    AdminChange, ClaimCommitment, ClaimFee, DataKey, LeaseConfig, PortfolioNFT, PriceTiers,
+    Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -372,4 +373,28 @@ pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
     if persistent.get::<_, String>(&owner_key).as_ref() == Some(folder_name) {
         persistent.remove(&owner_key);
     }
+}
+
+// ── Commit-reveal claims ──────────────────────────────────────────────────────
+
+/// Claim commits are short-lived, so they live in temporary storage and are
+/// never restored once expired.
+pub fn get_claim_commit(env: &Env, owner: &Address) -> Option<ClaimCommitment> {
+    env.storage()
+        .temporary()
+        .get(&DataKey::ClaimCommit(owner.clone()))
+}
+
+pub fn set_claim_commit(env: &Env, owner: &Address, commit: &ClaimCommitment) {
+    let key = DataKey::ClaimCommit(owner.clone());
+    env.storage().temporary().set(&key, commit);
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, CLAIM_COMMIT_TTL, CLAIM_COMMIT_TTL);
+}
+
+pub fn remove_claim_commit(env: &Env, owner: &Address) {
+    env.storage()
+        .temporary()
+        .remove(&DataKey::ClaimCommit(owner.clone()));
 }

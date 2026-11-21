@@ -89,4 +89,14 @@ pub enum ContractError {
     /// Leases are not enabled.
     /// User message: Folder leases are not enabled.
     LeasesDisabled = 28,
+    /// No live claim commitment exists for the owner (never made, already
+    /// revealed, or older than the reveal window).
+    /// User message: We could not find your reservation. Please reserve the name again.
+    CommitmentNotFound = 29,
+    /// The revealed name, salt and owner do not hash to the stored commitment.
+    /// User message: The name or secret does not match your reservation.
+    CommitmentMismatch = 30,
+    /// The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.
+    /// User message: Your reservation is not ready yet. Please wait a few seconds and try again.
+    RevealTooEarly = 31,
 }

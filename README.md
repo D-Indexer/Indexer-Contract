@@ -105,6 +105,8 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `cancel_admin_change` | `admin: Address, op_id: u32` | `admin` (must be an admin) | `adm_cx` | 2, 7, 22 |
 | `upgrade` | `admin: Address, new_wasm_hash: BytesN<32>` | `admin` (must be an admin) | `upgraded` | 2, 7 |
 | `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `commit_claim` | `owner: Address, commitment: BytesN<32>` | `owner` | — | 2 |
+| `reveal_claim` | `owner: Address, folder_name: String, salt: BytesN<32>` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `CommitmentNotFound` (29), `RevealTooEarly` (31), `CommitmentMismatch` (30), then as `claim_folder` |
 | `sponsored_claim` | `sponsor: Address, owner: Address, folder_name: String` | `sponsor` (pays the fee) and `owner` | `folder_cl`, `claim_spon` | as `claim_folder` |
 | `renew_folder` | `owner: Address, periods: u32` | `owner` (pays the fee) | `folder_rn` | 2, `LeasesDisabled` (28), `InvalidRenewal` (27), 4 |
 | `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
@@ -120,6 +122,26 @@ Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
+- **Front-running and commit-reveal.** `claim_folder` puts the name in the pending transaction,
+  so an observer can submit the same claim with a higher fee and take it. For names worth
+  protecting, use the two-phase claim:
+  1. Pick a random 32-byte `salt` and compute
+     `commitment = sha256(folder_name_bytes || salt || owner_xdr)` locally (`claim_commitment`
+     computes the same value, but simulating it shows the name to the RPC node).
+  2. `commit_claim(owner, commitment)`. Nothing about the name is stored or emitted. A new commit
+     replaces the previous one.
+  3. After at least `MIN_REVEAL_DELAY` (10) ledgers and within `REVEAL_WINDOW` (~1 day), call
+     `reveal_claim(owner, folder_name, salt)`. It runs the normal claim path (validation, fee,
+     `folder_cl`) and consumes the commit. If the claim fails, the commit is kept.
+
+  Someone who reads the name from a pending reveal can only commit it in that ledger. Their reveal
+  has to wait `MIN_REVEAL_DELAY` ledgers, and by then the honest reveal has landed. Because the
+  owner is part of the hash and commits are stored per owner, a copied commitment is useless.
+  Commits live in temporary storage with a TTL just above the reveal window.
+
+  `claim_folder` stays available. It needs one transaction instead of two and no wait, and most
+  names are not worth front-running. The cost of that convenience is that a single-step claim can
+  be front-run.
 - Admin changes are timelocked: `queue_admin_change` schedules them, and any admin can run
   `execute_admin_change` once `ADMIN_TIMELOCK_LEDGERS` (~24h) have passed, or `cancel_admin_change`
   before then. An admin may remove itself as long as another admin remains.
@@ -143,6 +165,7 @@ Notes:
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
 | `get_price_tiers` | — | `PriceTiers { by_len: Vec<(u32, i128)> }` | — |
+| `claim_commitment` | `owner: Address, folder_name: String, salt: BytesN<32>` | `BytesN<32>` commitment for `commit_claim` | — |
 | `quote_claim` | `folder_name: String` | `i128` fee for one claim or lease period | `InvalidFolderName` (9) |
 | `get_lease_config` | — | `Option<LeaseConfig { period_secs, grace_secs }>` | — |
 | `get_folder_expiry` | `folder_name: String` | `Option<u64>` lease expiry timestamp | — |
@@ -172,6 +195,8 @@ Codes are stable. New errors are appended and never renumbered.
 | 23 | `AdminChangeNotReady` | 24 | `AdminChangeQueueFull` |
 | 25 | `FolderExpired` | 26 | `InvalidPriceTiers` |
 | 27 | `InvalidRenewal` | 28 | `LeasesDisabled` |
+| 29 | `CommitmentNotFound` | 30 | `CommitmentMismatch` |
+| 31 | `RevealTooEarly` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and

@@ -2349,3 +2349,282 @@ mod pricing_and_leases {
         );
     }
 }
+
+// ── Commit-reveal claims ────────────────────────────────────────────────────
+
+mod commit_reveal {
+    use super::*;
+    use crate::constants::{CLAIM_COMMIT_TTL, MIN_REVEAL_DELAY, REVEAL_WINDOW};
+    use soroban_sdk::{testutils::storage::Temporary as _, xdr::ToXdr, Bytes, BytesN};
+
+    fn salt(env: &Env, byte: u8) -> BytesN<32> {
+        BytesN::from_array(env, &[byte; 32])
+    }
+
+    fn advance(t: &TestEnv, ledgers: u32) {
+        let seq = t.env.ledger().sequence();
+        t.env.ledger().set_sequence_number(seq + ledgers);
+    }
+
+    /// Commits `name` for `owner` and returns the salt used.
+    fn commit(t: &TestEnv, owner: &Address, name: &String) -> BytesN<32> {
+        let s = salt(&t.env, 7);
+        let c = t.client().claim_commitment(owner, name, &s);
+        t.client().commit_claim(owner, &c);
+        s
+    }
+
+    #[test]
+    fn commitment_matches_documented_preimage() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let s = salt(&t.env, 1);
+
+        let mut preimage = Bytes::new(&t.env);
+        preimage.append(&name.to_bytes());
+        preimage.append(&Bytes::from(s.clone()));
+        preimage.append(&owner.clone().to_xdr(&t.env));
+        let expected: BytesN<32> = t.env.crypto().sha256(&preimage).into();
+
+        assert_eq!(t.client().claim_commitment(&owner, &name, &s), expected);
+    }
+
+    #[test]
+    fn commit_then_reveal_claims_the_name() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let s = commit(&t, &owner, &name);
+
+        advance(&t, MIN_REVEAL_DELAY);
+        t.client().reveal_claim(&owner, &name, &s);
+
+        // The reveal emits the ordinary claim event.
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [crate::events::FolderClaimed {
+                owner: owner.clone(),
+                folder_name: name.clone(),
+                fee_paid: 0,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().get_folder(&name), owner);
+        assert_eq!(t.client().get_identity(&owner), name);
+        // The commit is consumed.
+        let res = t.client().try_reveal_claim(&owner, &name, &s);
+        expect_contract_error(res, ContractError::CommitmentNotFound);
+    }
+
+    #[test]
+    fn commit_does_not_reveal_or_reserve_the_name() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        commit(&t, &owner, &name);
+
+        // Nothing about the name is written or emitted at commit time.
+        assert!(t
+            .env
+            .events()
+            .all()
+            .filter_by_contract(&t.contract_id)
+            .events()
+            .is_empty());
+        expect_contract_error(
+            t.client().try_get_folder(&name),
+            ContractError::FolderNotFound,
+        );
+    }
+
+    #[test]
+    fn commit_lives_in_temporary_storage_above_the_reveal_window() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        commit(&t, &owner, &String::from_str(&t.env, "hidden.folder"));
+
+        let key = DataKey::ClaimCommit(owner.clone());
+        t.env.as_contract(&t.contract_id, || {
+            assert!(t.env.storage().temporary().has(&key));
+            assert!(!t.env.storage().persistent().has(&key));
+            assert_eq!(t.env.storage().temporary().get_ttl(&key), CLAIM_COMMIT_TTL);
+        });
+        const { assert!(CLAIM_COMMIT_TTL > REVEAL_WINDOW) };
+    }
+
+    #[test]
+    fn reveal_delay_boundary() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let s = commit(&t, &owner, &name);
+
+        let res = t.client().try_reveal_claim(&owner, &name, &s);
+        expect_contract_error(res, ContractError::RevealTooEarly);
+        advance(&t, MIN_REVEAL_DELAY - 1);
+        let res = t.client().try_reveal_claim(&owner, &name, &s);
+        expect_contract_error(res, ContractError::RevealTooEarly);
+
+        advance(&t, 1);
+        t.client().reveal_claim(&owner, &name, &s);
+        assert_eq!(t.client().get_folder(&name), owner);
+    }
+
+    #[test]
+    fn reveal_window_boundary() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "late.folder");
+        let s = commit(&t, &owner, &name);
+        advance(&t, REVEAL_WINDOW);
+        t.client().reveal_claim(&owner, &name, &s);
+
+        let other = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "later.folder");
+        let s = commit(&t, &other, &name);
+        advance(&t, REVEAL_WINDOW + 1);
+        let res = t.client().try_reveal_claim(&other, &name, &s);
+        expect_contract_error(res, ContractError::CommitmentNotFound);
+    }
+
+    #[test]
+    fn reveal_without_commit_fails() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let res = t.client().try_reveal_claim(&owner, &name, &salt(&t.env, 7));
+        expect_contract_error(res, ContractError::CommitmentNotFound);
+    }
+
+    #[test]
+    fn reveal_with_wrong_name_salt_or_owner_fails() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let s = commit(&t, &owner, &name);
+        advance(&t, MIN_REVEAL_DELAY);
+
+        let other_name = String::from_str(&t.env, "other.folder");
+        let res = t.client().try_reveal_claim(&owner, &other_name, &s);
+        expect_contract_error(res, ContractError::CommitmentMismatch);
+        let res = t.client().try_reveal_claim(&owner, &name, &salt(&t.env, 8));
+        expect_contract_error(res, ContractError::CommitmentMismatch);
+
+        // A third party cannot reuse the owner's commitment: it is stored and
+        // hashed per owner.
+        let thief = Address::generate(&t.env);
+        let stolen = t.client().claim_commitment(&owner, &name, &s);
+        t.client().commit_claim(&thief, &stolen);
+        advance(&t, MIN_REVEAL_DELAY);
+        let res = t.client().try_reveal_claim(&thief, &name, &s);
+        expect_contract_error(res, ContractError::CommitmentMismatch);
+
+        // The owner's commit survived the failed attempts.
+        t.client().reveal_claim(&owner, &name, &s);
+        assert_eq!(t.client().get_folder(&name), owner);
+    }
+
+    #[test]
+    fn observer_of_a_reveal_cannot_front_run_it() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let attacker = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "valuable.folder");
+        let s = commit(&t, &owner, &name);
+        advance(&t, MIN_REVEAL_DELAY);
+
+        // The attacker sees the pending reveal and commits the same name in
+        // the same ledger, but cannot reveal yet.
+        let attacker_salt = commit(&t, &attacker, &name);
+        let res = t
+            .client()
+            .try_reveal_claim(&attacker, &name, &attacker_salt);
+        expect_contract_error(res, ContractError::RevealTooEarly);
+
+        t.client().reveal_claim(&owner, &name, &s);
+        advance(&t, MIN_REVEAL_DELAY);
+        let res = t
+            .client()
+            .try_reveal_claim(&attacker, &name, &attacker_salt);
+        expect_contract_error(res, ContractError::FolderNameTaken);
+        assert_eq!(t.client().get_folder(&name), owner);
+    }
+
+    #[test]
+    fn recommit_replaces_previous_commit() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let first = String::from_str(&t.env, "first.folder");
+        let second = String::from_str(&t.env, "second.folder");
+        let s = commit(&t, &owner, &first);
+        advance(&t, MIN_REVEAL_DELAY);
+        commit(&t, &owner, &second);
+
+        let res = t.client().try_reveal_claim(&owner, &first, &s);
+        expect_contract_error(res, ContractError::RevealTooEarly);
+        advance(&t, MIN_REVEAL_DELAY);
+        let res = t.client().try_reveal_claim(&owner, &first, &s);
+        expect_contract_error(res, ContractError::CommitmentMismatch);
+        t.client().reveal_claim(&owner, &second, &s);
+        assert_eq!(t.client().get_identity(&owner), second);
+    }
+
+    #[test]
+    fn failed_claim_keeps_the_commit() {
+        let t = TestEnv::new();
+        let holder = Address::generate(&t.env);
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "taken.folder");
+        t.client().claim_folder(&holder, &name);
+
+        let s = commit(&t, &owner, &name);
+        advance(&t, MIN_REVEAL_DELAY);
+        let res = t.client().try_reveal_claim(&owner, &name, &s);
+        expect_contract_error(res, ContractError::FolderNameTaken);
+        t.env.as_contract(&t.contract_id, || {
+            assert!(t
+                .env
+                .storage()
+                .temporary()
+                .has(&DataKey::ClaimCommit(owner.clone())));
+        });
+    }
+
+    #[test]
+    fn commit_and_reveal_require_owner_auth() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let name = String::from_str(&t.env, "hidden.folder");
+        let s = commit(&t, &owner, &name);
+        assert_single_auth(&t, &owner, "commit_claim");
+        advance(&t, MIN_REVEAL_DELAY);
+
+        t.env.set_auths(&[]);
+        assert!(t.client().try_reveal_claim(&owner, &name, &s).is_err());
+        assert!(t
+            .client()
+            .try_commit_claim(&owner, &BytesN::from_array(&t.env, &[0; 32]))
+            .is_err());
+
+        t.env.mock_all_auths();
+        t.client().reveal_claim(&owner, &name, &s);
+        assert_single_auth(&t, &owner, "reveal_claim");
+    }
+
+    #[test]
+    fn commit_reveal_requires_initialization() {
+        let t = uninitialized_env();
+        let owner = Address::generate(&t.env);
+        let res = t
+            .client()
+            .try_commit_claim(&owner, &BytesN::from_array(&t.env, &[0; 32]));
+        expect_contract_error(res, ContractError::NotInitialized);
+        let res = t.client().try_reveal_claim(
+            &owner,
+            &String::from_str(&t.env, "hidden.folder"),
+            &salt(&t.env, 1),
+        );
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+}

@@ -203,6 +203,40 @@ impl FolderContract {
         identity_map::claim_folder(&env, &owner, &folder_name)
     }
 
+    /// Phase 1 of a front-running-resistant claim. `commitment` is
+    /// `sha256(folder_name_bytes || salt || owner_xdr)`; see `claim_commitment`.
+    pub fn commit_claim(
+        env: Env,
+        owner: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::commit_claim(&env, &owner, &commitment)
+    }
+
+    /// Phase 2: reveals the committed name at least `MIN_REVEAL_DELAY` and at
+    /// most `REVEAL_WINDOW` ledgers after `commit_claim`, then claims it.
+    pub fn reveal_claim(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::reveal_claim(&env, &owner, &folder_name, &salt)
+    }
+
+    /// Computes the commitment `commit_claim` expects. Clients should compute
+    /// it locally: simulating this call shows the name to the RPC node.
+    pub fn claim_commitment(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> BytesN<32> {
+        identity_map::claim_commitment(&env, &owner, &folder_name, &salt)
+    }
+
     /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
     /// Both must authorize.
     pub fn sponsored_claim(

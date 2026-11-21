@@ -63,3 +63,15 @@ pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
 pub const MAX_PRICE_TIERS: u32 = 5;
 /// Seconds per day, used to express lease periods in days.
 pub const SECONDS_PER_DAY: u64 = 86_400;
+
+/// Minimum number of ledgers between `commit_claim` and `reveal_claim`
+/// (~50s). An observer who learns the name from a pending reveal can only
+/// commit it in that ledger, so they cannot reveal before the honest reveal
+/// lands. The margin covers a reveal delayed by congestion.
+pub const MIN_REVEAL_DELAY: u32 = 10;
+/// Number of ledgers after `commit_claim` during which the commit can be
+/// revealed (~1 day). Older commits are treated as missing.
+pub const REVEAL_WINDOW: u32 = DAY_IN_LEDGERS;
+/// TTL of a claim commit in temporary storage: just above the reveal window,
+/// so the entry outlives every ledger in which it can still be revealed.
+pub const CLAIM_COMMIT_TTL: u32 = REVEAL_WINDOW + 1;
