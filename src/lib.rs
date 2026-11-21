@@ -179,6 +179,19 @@ impl FolderContract {
         identity_map::get_identity(&env, &owner)
     }
 
+    // ── Cross-contract resolver interface ─────────────────────────────────────
+
+    /// Resolves a Folder name to its owner. Returns `None` for unknown names so
+    /// that consumer contracts can branch without decoding an error.
+    pub fn resolve(env: Env, folder_name: String) -> Option<Address> {
+        storage::get_folder_owner(&env, &folder_name)
+    }
+
+    /// Reverse lookup: returns the Folder name owned by `owner`, or `None`.
+    pub fn reverse(env: Env, owner: Address) -> Option<String> {
+        storage::get_owner_folder(&env, &owner)
+    }
+
     // ── Template Registry ─────────────────────────────────────────────────────
 
     pub fn register_template(
@@ -240,5 +253,18 @@ impl FolderContract {
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
+    }
+
+    /// Reverse-resolves a Folder name to its portfolio NFT.
+    pub fn get_portfolio_by_folder(
+        env: Env,
+        folder_name: String,
+    ) -> Result<PortfolioNFT, ContractError> {
+        nft_mint::get_portfolio_by_folder(&env, &folder_name)
+    }
+
+    /// Returns whether the Folder name resolves to a minted portfolio.
+    pub fn verify_folder(env: Env, folder_name: String) -> Result<bool, ContractError> {
+        nft_mint::verify_folder(&env, &folder_name)
     }
 }

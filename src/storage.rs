@@ -149,17 +149,12 @@ pub fn next_admin_change_id(env: &Env) -> u32 {
 
 // ── Identity Map ──────────────────────────────────────────────────────────────
 
+/// Read-only getter: does not extend the TTL. Extensions are paid for by
+/// state-changing calls only, so simulated reads stay free of rent.
 pub fn get_folder_owner(env: &Env, folder_name: &String) -> Option<Address> {
-    let key = DataKey::FolderOwner(folder_name.clone());
-    let result = env.storage().persistent().get(&key);
-    if result.is_some() {
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_LIFETIME_THRESHOLD,
-            PERSISTENT_BUMP_AMOUNT,
-        );
-    }
-    result
+    env.storage()
+        .persistent()
+        .get(&DataKey::FolderOwner(folder_name.clone()))
 }
 
 pub fn set_folder_owner(env: &Env, folder_name: &String, owner: &Address) {
@@ -179,17 +174,11 @@ pub fn set_folder_owner(env: &Env, folder_name: &String, owner: &Address) {
     );
 }
 
+/// Read-only getter: does not extend the TTL (see `get_folder_owner`).
 pub fn get_owner_folder(env: &Env, owner: &Address) -> Option<String> {
-    let key = DataKey::OwnerFolder(owner.clone());
-    let result = env.storage().persistent().get(&key);
-    if result.is_some() {
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_LIFETIME_THRESHOLD,
-            PERSISTENT_BUMP_AMOUNT,
-        );
-    }
-    result
+    env.storage()
+        .persistent()
+        .get(&DataKey::OwnerFolder(owner.clone()))
 }
 
 // ── Template Registry ─────────────────────────────────────────────────────────
@@ -204,13 +193,9 @@ fn extend_persistent(env: &Env, key: &DataKey) {
 
 /// Templates live in persistent storage so the registry cannot grow the
 /// contract instance entry, which is loaded on every invocation.
+/// Read-only getter: does not extend the TTL (see `get_folder_owner`).
 pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
-    let key = DataKey::Template(template_id);
-    let result = env.storage().persistent().get(&key);
-    if result.is_some() {
-        extend_persistent(env, &key);
-    }
-    result
+    env.storage().persistent().get(&DataKey::Template(template_id))
 }
 
 pub fn save_template(env: &Env, template: &Template) {
@@ -234,28 +219,19 @@ pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32
     extend_persistent(env, &DataKey::TemplateList);
 }
 
+/// Read-only getter: does not extend the TTL (see `get_folder_owner`).
 pub fn get_template_list(env: &Env) -> Vec<u32> {
-    let key = DataKey::TemplateList;
-    match env.storage().persistent().get(&key) {
-        Some(list) => {
-            extend_persistent(env, &key);
-            list
-        }
-        None => Vec::new(env),
-    }
+    env.storage()
+        .persistent()
+        .get(&DataKey::TemplateList)
+        .unwrap_or(Vec::new(env))
 }
 
+/// Read-only getter: does not extend the TTL (see `get_folder_owner`).
 pub fn get_user_template(env: &Env, owner: &Address) -> Option<u32> {
-    let key = DataKey::UserTemplate(owner.clone());
-    let result = env.storage().persistent().get(&key);
-    if result.is_some() {
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_LIFETIME_THRESHOLD,
-            PERSISTENT_BUMP_AMOUNT,
-        );
-    }
-    result
+    env.storage()
+        .persistent()
+        .get(&DataKey::UserTemplate(owner.clone()))
 }
 
 pub fn set_user_template(env: &Env, owner: &Address, template_id: u32) {
