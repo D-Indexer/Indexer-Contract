@@ -20,7 +20,8 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, E
 
 use crate::errors::ContractError;
 use crate::types::{
-    AdminOp, ClaimFee, LeaseConfig, PortfolioMeta, PortfolioNFT, PriceTiers, Template,
+    AdminOp, ClaimFee, LeaseConfig, PortfolioDelegate, PortfolioMeta, PortfolioNFT, PriceTiers,
+    Template,
 };
 
 #[contract]
@@ -290,6 +291,40 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         nft_mint::update_portfolio_if(&env, &owner, &ipfs_cid, &expected_cid)
+    }
+
+    /// Lets `delegate` update the owner's portfolio CID (only that) until
+    /// `expires_ledger`, inclusive. 0 means no expiry. Replaces any previous
+    /// delegate.
+    pub fn set_portfolio_delegate(
+        env: Env,
+        owner: Address,
+        delegate: Address,
+        expires_ledger: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::set_portfolio_delegate(&env, &owner, &delegate, expires_ledger)
+    }
+
+    /// Revokes the owner's portfolio delegate, if any.
+    pub fn clear_portfolio_delegate(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::clear_portfolio_delegate(&env, &owner)
+    }
+
+    /// `update_portfolio` on behalf of `owner`, signed by their delegate.
+    pub fn delegate_update_portfolio(
+        env: Env,
+        delegate: Address,
+        owner: Address,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::delegate_update_portfolio(&env, &delegate, &owner, &ipfs_cid)
+    }
+
+    pub fn get_portfolio_delegate(env: Env, owner: Address) -> Option<PortfolioDelegate> {
+        nft_mint::get_portfolio_delegate(&env, &owner)
     }
 
     /// Deletes the owner's portfolio. Keeps the Folder name and selected

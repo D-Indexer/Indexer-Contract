@@ -2395,3 +2395,322 @@ mod cas {
         assert_eq!(t.client().get_portfolio(&user).ipfs_cid, s(&t, CID_C));
     }
 }
+
+// ── Portfolio delegate ──────────────────────────────────────────────────────
+
+mod delegate {
+    use super::*;
+    use crate::events::{DelegateCleared, DelegateSet, PortfolioUpdated};
+    use crate::types::PortfolioDelegate;
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+
+    const CID_A: &str = VALID_CIDV1_RAW; // the CID minted_env() mints with
+    const CID_B: &str = VALID_CIDV0;
+    const CID_C: &str = "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y";
+
+    fn s(t: &TestEnv, v: &str) -> String {
+        String::from_str(&t.env, v)
+    }
+
+    fn set_seq(t: &TestEnv, seq: u32) {
+        t.env.ledger().set_sequence_number(seq);
+    }
+
+    /// Minted portfolio with `delegate` authorized until `expires_ledger`.
+    fn delegated_env(expires_ledger: u32) -> (TestEnv, Address, Address) {
+        let (t, owner) = minted_env();
+        let delegate = Address::generate(&t.env);
+        t.client()
+            .set_portfolio_delegate(&owner, &delegate, &expires_ledger);
+        (t, owner, delegate)
+    }
+
+    #[test]
+    fn owner_sets_delegate_with_exact_signer_and_event() {
+        let (t, owner) = minted_env();
+        let delegate = Address::generate(&t.env);
+        t.client()
+            .set_portfolio_delegate(&owner, &delegate, &500u32);
+        assert_single_auth(&t, &owner, "set_portfolio_delegate");
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [DelegateSet {
+                owner: owner.clone(),
+                delegate: delegate.clone(),
+                expires_ledger: 500,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(
+            t.client().get_portfolio_delegate(&owner),
+            Some(PortfolioDelegate {
+                delegate,
+                expires_ledger: 500,
+            })
+        );
+    }
+
+    #[test]
+    fn delegate_updates_with_only_its_own_signature() {
+        let (t, owner, delegate) = delegated_env(0);
+        t.client()
+            .delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B));
+        // Exactly one signer, the delegate; the owner did not sign.
+        assert_single_auth(&t, &delegate, "delegate_update_portfolio");
+        // Standard, unchanged port_upd payload.
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [PortfolioUpdated {
+                owner: owner.clone(),
+                ipfs_cid: s(&t, CID_B),
+                revision: 1,
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_B));
+    }
+
+    #[test]
+    fn delegate_update_without_delegate_signature_fails() {
+        let (t, owner, delegate) = delegated_env(0);
+        // Only the owner signs: the delegate entry point still needs the delegate.
+        t.env.mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &t.contract_id,
+                fn_name: "delegate_update_portfolio",
+                args: (delegate.clone(), owner.clone(), s(&t, CID_B)).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(t
+            .client()
+            .try_delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B))
+            .is_err());
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn owner_can_still_update_directly() {
+        let (t, owner, _delegate) = delegated_env(0);
+        t.client().update_portfolio(&owner, &s(&t, CID_C));
+        assert_single_auth(&t, &owner, "update_portfolio");
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_C));
+    }
+
+    #[test]
+    fn non_delegate_rejected() {
+        let (t, owner, _delegate) = delegated_env(0);
+        let stranger = Address::generate(&t.env);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&stranger, &owner, &s(&t, CID_B)),
+            ContractError::Unauthorized,
+        );
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn no_delegate_set_rejected() {
+        let (t, owner) = minted_env();
+        let someone = Address::generate(&t.env);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&someone, &owner, &s(&t, CID_B)),
+            ContractError::Unauthorized,
+        );
+    }
+
+    #[test]
+    fn cleared_delegate_rejected() {
+        let (t, owner, delegate) = delegated_env(0);
+        t.client().clear_portfolio_delegate(&owner);
+        assert_single_auth(&t, &owner, "clear_portfolio_delegate");
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [DelegateCleared {
+                owner: owner.clone(),
+                delegate: delegate.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+        assert_eq!(t.client().get_portfolio_delegate(&owner), None);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B)),
+            ContractError::Unauthorized,
+        );
+    }
+
+    #[test]
+    fn clear_without_delegate_is_a_silent_no_op() {
+        let (t, owner) = minted_env();
+        t.client().clear_portfolio_delegate(&owner);
+        let none: [soroban_sdk::xdr::ContractEvent; 0] = [];
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            none
+        );
+    }
+
+    #[test]
+    fn replaced_delegate_rejected() {
+        let (t, owner, old) = delegated_env(0);
+        let new = Address::generate(&t.env);
+        t.client().set_portfolio_delegate(&owner, &new, &0u32);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&old, &owner, &s(&t, CID_B)),
+            ContractError::Unauthorized,
+        );
+        t.client()
+            .delegate_update_portfolio(&new, &owner, &s(&t, CID_B));
+    }
+
+    #[test]
+    fn delegate_valid_at_boundary_ledger() {
+        let (t, owner, delegate) = delegated_env(100);
+        set_seq(&t, 100);
+        t.client()
+            .delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B));
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_B));
+    }
+
+    #[test]
+    fn expired_delegate_rejected_one_ledger_after_boundary() {
+        let (t, owner, delegate) = delegated_env(100);
+        set_seq(&t, 101);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B)),
+            ContractError::DelegateExpired,
+        );
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_A));
+    }
+
+    #[test]
+    fn zero_expiry_never_expires() {
+        let (t, owner, delegate) = delegated_env(0);
+        set_seq(&t, 60 * DAY_IN_LEDGERS);
+        t.client()
+            .delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B));
+    }
+
+    #[test]
+    fn invalid_delegate_settings_rejected() {
+        let (t, owner) = minted_env();
+        let delegate = Address::generate(&t.env);
+        expect_contract_error(
+            t.client().try_set_portfolio_delegate(&owner, &owner, &0u32),
+            ContractError::InvalidDelegate,
+        );
+        set_seq(&t, 50);
+        expect_contract_error(
+            t.client()
+                .try_set_portfolio_delegate(&owner, &delegate, &49u32),
+            ContractError::InvalidDelegate,
+        );
+        // Expiring at the current ledger is allowed (valid for this ledger).
+        t.client().set_portfolio_delegate(&owner, &delegate, &50u32);
+    }
+
+    #[test]
+    fn set_delegate_requires_portfolio() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, "nodlg.folder"));
+        expect_contract_error(
+            t.client()
+                .try_set_portfolio_delegate(&owner, &Address::generate(&t.env), &0u32),
+            ContractError::PortfolioNotFound,
+        );
+    }
+
+    #[test]
+    fn delegate_invalid_cid_rejected() {
+        let (t, owner, delegate) = delegated_env(0);
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&delegate, &owner, &s(&t, "not-a-cid")),
+            ContractError::InvalidCID,
+        );
+    }
+
+    /// Only the delegate signs; owner-only entry points must fail.
+    fn as_delegate_only<A: IntoVal<Env, Vec<Val>>>(
+        t: &TestEnv,
+        delegate: &Address,
+        fn_name: &'static str,
+        args: A,
+    ) {
+        t.env.mock_auths(&[MockAuth {
+            address: delegate,
+            invoke: &MockAuthInvoke {
+                contract: &t.contract_id,
+                fn_name,
+                args: args.into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }]);
+    }
+
+    #[test]
+    fn delegate_cannot_change_template_burn_or_redelegate() {
+        let (t, owner, delegate) = delegated_env(0);
+        let other = Address::generate(&t.env);
+
+        as_delegate_only(&t, &delegate, "set_user_template", (owner.clone(), 1u32));
+        assert!(t.client().try_set_user_template(&owner, &1u32).is_err());
+
+        as_delegate_only(&t, &delegate, "burn_portfolio", (owner.clone(),));
+        assert!(t.client().try_burn_portfolio(&owner).is_err());
+
+        as_delegate_only(
+            &t,
+            &delegate,
+            "set_portfolio_delegate",
+            (owner.clone(), other.clone(), 0u32),
+        );
+        assert!(t
+            .client()
+            .try_set_portfolio_delegate(&owner, &other, &0u32)
+            .is_err());
+
+        as_delegate_only(&t, &delegate, "clear_portfolio_delegate", (owner.clone(),));
+        assert!(t.client().try_clear_portfolio_delegate(&owner).is_err());
+
+        as_delegate_only(
+            &t,
+            &delegate,
+            "update_portfolio",
+            (owner.clone(), s(&t, CID_B)),
+        );
+        assert!(t
+            .client()
+            .try_update_portfolio(&owner, &s(&t, CID_B))
+            .is_err());
+
+        t.env.mock_all_auths();
+        assert!(t.client().verify_portfolio(&owner));
+        assert_eq!(t.client().get_portfolio(&owner).ipfs_cid, s(&t, CID_A));
+        assert_eq!(
+            t.client().get_portfolio_delegate(&owner).unwrap().delegate,
+            delegate
+        );
+    }
+
+    #[test]
+    fn burn_removes_delegate() {
+        let (t, owner, delegate) = delegated_env(0);
+        t.client().burn_portfolio(&owner);
+        assert!(!t.has_persistent(&DataKey::PortfolioDelegate(owner.clone())));
+
+        t.client().mint_portfolio(&owner, &1u32, &s(&t, CID_A));
+        expect_contract_error(
+            t.client()
+                .try_delegate_update_portfolio(&delegate, &owner, &s(&t, CID_B)),
+            ContractError::Unauthorized,
+        );
+    }
+}

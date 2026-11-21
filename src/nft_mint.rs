@@ -5,7 +5,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
 use crate::storage;
-use crate::types::{PortfolioMeta, PortfolioNFT};
+use crate::types::{PortfolioDelegate, PortfolioMeta, PortfolioNFT};
 use crate::validation;
 
 pub fn mint_portfolio(
@@ -80,6 +80,68 @@ pub fn update_portfolio_if(
     }
     write_cid(env, nft, ipfs_cid);
     Ok(())
+}
+
+/// Authorizes `delegate` to update the owner's portfolio CID until
+/// `expires_ledger` (inclusive; 0 = no expiry). Replaces any previous
+/// delegate. The delegate can only call `delegate_update_portfolio`.
+pub fn set_portfolio_delegate(
+    env: &Env,
+    owner: &Address,
+    delegate: &Address,
+    expires_ledger: u32,
+) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+    if delegate == owner || (expires_ledger != 0 && expires_ledger < env.ledger().sequence()) {
+        return Err(ContractError::InvalidDelegate);
+    }
+    // Delegation is portfolio-scoped: burn_portfolio removes it.
+    storage::get_portfolio(env, owner)?;
+    storage::set_portfolio_delegate(
+        env,
+        owner,
+        &PortfolioDelegate {
+            delegate: delegate.clone(),
+            expires_ledger,
+        },
+    );
+    events::delegate_set(env, owner, delegate, expires_ledger);
+    Ok(())
+}
+
+/// Revokes the owner's delegate. A no-op (no event) when none is set.
+pub fn clear_portfolio_delegate(env: &Env, owner: &Address) -> Result<(), ContractError> {
+    require_owner(env, owner)?;
+    if let Some(current) = storage::get_portfolio_delegate(env, owner) {
+        storage::remove_portfolio_delegate(env, owner);
+        events::delegate_cleared(env, owner, &current.delegate);
+    }
+    Ok(())
+}
+
+/// `update_portfolio` signed by the owner's delegate instead of the owner.
+pub fn delegate_update_portfolio(
+    env: &Env,
+    delegate: &Address,
+    owner: &Address,
+    ipfs_cid: &String,
+) -> Result<(), ContractError> {
+    delegate.require_auth();
+
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
+    let record = storage::get_portfolio_delegate(env, owner)
+        .filter(|d| d.delegate == *delegate)
+        .ok_or(ContractError::Unauthorized)?;
+    if record.expires_ledger != 0 && env.ledger().sequence() > record.expires_ledger {
+        return Err(ContractError::DelegateExpired);
+    }
+    let nft = storage::get_portfolio(env, owner)?;
+    write_cid(env, nft, ipfs_cid);
+    Ok(())
+}
+
+pub fn get_portfolio_delegate(env: &Env, owner: &Address) -> Option<PortfolioDelegate> {
+    storage::get_portfolio_delegate(env, owner)
 }
 
 /// Stores the new CID, bumps the revision and emits `port_upd`. Callers have

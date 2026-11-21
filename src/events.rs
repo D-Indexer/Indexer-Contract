@@ -46,6 +46,20 @@ pub struct PortfolioBurned {
     pub last_ipfs_cid: String,
 }
 
+#[contractevent(topics = ["dlg_set"], data_format = "vec")]
+pub struct DelegateSet {
+    pub owner: Address,
+    pub delegate: Address,
+    /// Last ledger (inclusive) the delegate may act; 0 = no expiry.
+    pub expires_ledger: u32,
+}
+
+#[contractevent(topics = ["dlg_clr"], data_format = "vec")]
+pub struct DelegateCleared {
+    pub owner: Address,
+    pub delegate: Address,
+}
+
 #[contractevent(topics = ["tmpl_reg"], data_format = "vec")]
 pub struct TemplateRegistered {
     pub template_id: u32,
@@ -221,6 +235,23 @@ pub fn portfolio_burned(env: &Env, owner: &Address, last_ipfs_cid: &String) {
     PortfolioBurned {
         owner: owner.clone(),
         last_ipfs_cid: last_ipfs_cid.clone(),
+    }
+    .publish(env);
+}
+
+pub fn delegate_set(env: &Env, owner: &Address, delegate: &Address, expires_ledger: u32) {
+    DelegateSet {
+        owner: owner.clone(),
+        delegate: delegate.clone(),
+        expires_ledger,
+    }
+    .publish(env);
+}
+
+pub fn delegate_cleared(env: &Env, owner: &Address, delegate: &Address) {
+    DelegateCleared {
+        owner: owner.clone(),
+        delegate: delegate.clone(),
     }
     .publish(env);
 }

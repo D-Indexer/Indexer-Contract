@@ -172,5 +172,17 @@
     "name": "StaleUpdate",
     "description": "The portfolio's current CID does not match the expected CID.",
     "user_message": "This portfolio was changed elsewhere. Reload it and try again."
+  },
+  {
+    "code": 30,
+    "name": "InvalidDelegate",
+    "description": "The delegate is the owner itself, or its expiry ledger is in the past.",
+    "user_message": "That delegate setting is not valid."
+  },
+  {
+    "code": 31,
+    "name": "DelegateExpired",
+    "description": "The portfolio delegate's authorization has expired.",
+    "user_message": "This delegate's access has expired. Ask the owner to renew it."
   }
 ]

@@ -14,6 +14,7 @@
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner; removed by `burn_portfolio` |
 | `PortfolioMeta(Address)` | persistent | `PortfolioMeta { revision, updated_at }` | one per portfolio; removed by `burn_portfolio` |
+| `PortfolioDelegate(Address)` | persistent | `PortfolioDelegate { delegate, expires_ledger }` | at most one per portfolio; removed by `clear_portfolio_delegate` and `burn_portfolio` |
 
 `PortfolioMeta` is a separate key rather than new fields on `PortfolioNFT`, so `Portfolio`
 entries already on testnet keep decoding. A portfolio minted before this key existed has no

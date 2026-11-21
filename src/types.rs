@@ -20,6 +20,16 @@ pub struct PortfolioMeta {
     pub updated_at: u64,
 }
 
+/// An address allowed to update a portfolio's CID on the owner's behalf.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortfolioDelegate {
+    pub delegate: Address,
+    /// Last ledger sequence (inclusive) at which the delegate may act.
+    /// 0 means no expiry.
+    pub expires_ledger: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
@@ -58,6 +68,8 @@ pub enum DataKey {
     Portfolio(Address),
     // nft_mint: owner -> PortfolioMeta (absent for portfolios minted before it existed)
     PortfolioMeta(Address),
+    // nft_mint: owner -> PortfolioDelegate (at most one per portfolio)
+    PortfolioDelegate(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
     // pricing: length tiers (instance)

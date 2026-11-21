@@ -92,4 +92,10 @@ pub enum ContractError {
     /// The portfolio's current CID does not match the expected CID.
     /// User message: This portfolio was changed elsewhere. Reload it and try again.
     StaleUpdate = 29,
+    /// The delegate is the owner itself, or its expiry ledger is in the past.
+    /// User message: That delegate setting is not valid.
+    InvalidDelegate = 30,
+    /// The portfolio delegate's authorization has expired.
+    /// User message: This delegate's access has expired. Ask the owner to renew it.
+    DelegateExpired = 31,
 }

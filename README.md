@@ -110,6 +110,9 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
 | `update_portfolio_if` | `owner: Address, ipfs_cid: String, expected_cid: String` | `owner` | `port_upd` | 2, 8 (either CID), 5, `StaleUpdate` (29) |
+| `set_portfolio_delegate` | `owner: Address, delegate: Address, expires_ledger: u32` | `owner` | `dlg_set` | 2, 5, `InvalidDelegate` (30) |
+| `clear_portfolio_delegate` | `owner: Address` | `owner` | `dlg_clr` (only if a delegate was set) | 2 |
+| `delegate_update_portfolio` | `delegate: Address, owner: Address, ipfs_cid: String` | `delegate` (not the owner) | `port_upd` | 2, 8, `Unauthorized` (7), `DelegateExpired` (31), 5 |
 | `burn_portfolio` | `owner: Address` | `owner` | `port_burn` | 2, 5 |
 
 Notes:
@@ -126,6 +129,12 @@ Notes:
   pass the CID you last read as `expected_cid`, and on `StaleUpdate` re-read with `get_portfolio`,
   merge or ask the user, and retry. `update_portfolio` stays last-write-wins and is fine for a
   single writer.
+- An owner can authorize one delegate (a backend publisher or a second device) with
+  `set_portfolio_delegate`. The delegate signs `delegate_update_portfolio` to push a new CID
+  without the owner's signature; it can't change the template, burn, re-delegate or do anything
+  else. `expires_ledger` is the last ledger sequence (inclusive) the delegate may act; 0 means no
+  expiry. Setting a new delegate replaces the old one; `clear_portfolio_delegate` revokes it, and
+  `burn_portfolio` removes it. The owner can always keep updating directly.
 - `burn_portfolio` deletes the portfolio record (and any portfolio-scoped keys) so the owner can
   mint again, with any template. The Folder name and selected template are kept.
 - An admin may remove itself as long as another admin remains.
@@ -149,6 +158,7 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `get_portfolio_meta` | `owner: Address` | `PortfolioMeta { revision, updated_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_delegate` | `owner: Address` | `Option<PortfolioDelegate { delegate, expires_ledger }>` | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 
 ### Error codes
@@ -171,7 +181,8 @@ Codes are stable. New errors are appended and never renumbered.
 | 23 | `InvalidPriceTiers` | 24 | `LeasesDisabled` |
 | 25 | `InvalidRenewal` | 26 | `AdminChangeNotFound` |
 | 27 | `AdminChangeNotReady` | 28 | `AdminChangeQueueFull` |
-| 29 | `StaleUpdate` | | |
+| 29 | `StaleUpdate` | 30 | `InvalidDelegate` |
+| 31 | `DelegateExpired` | | |
 
 A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
 generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
@@ -186,8 +197,8 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `port_burn`, `fee_set`,
-   `withdraw`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `port_burn`, `dlg_set`,
+   `dlg_clr`, `fee_set`, `withdraw`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.

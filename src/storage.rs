@@ -6,7 +6,8 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioMeta, PortfolioNFT, PriceTiers, Template,
+    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioDelegate, PortfolioMeta, PortfolioNFT,
+    PriceTiers, Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -333,12 +334,34 @@ pub fn save_portfolio_meta(env: &Env, owner: &Address, meta: &PortfolioMeta) {
     extend_persistent(env, &key);
 }
 
+pub fn get_portfolio_delegate(env: &Env, owner: &Address) -> Option<PortfolioDelegate> {
+    let key = DataKey::PortfolioDelegate(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_portfolio_delegate(env: &Env, owner: &Address, delegate: &PortfolioDelegate) {
+    let key = DataKey::PortfolioDelegate(owner.clone());
+    env.storage().persistent().set(&key, delegate);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_portfolio_delegate(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PortfolioDelegate(owner.clone()));
+}
+
 /// Removes every portfolio-scoped key of `owner`. The identity mapping and
 /// `UserTemplate` are owner-scoped and deliberately left in place.
 pub fn remove_portfolio(env: &Env, owner: &Address) {
     let persistent = env.storage().persistent();
     persistent.remove(&DataKey::Portfolio(owner.clone()));
     persistent.remove(&DataKey::PortfolioMeta(owner.clone()));
+    persistent.remove(&DataKey::PortfolioDelegate(owner.clone()));
 }
 
 // ── Economics ─────────────────────────────────────────────────────────────────
