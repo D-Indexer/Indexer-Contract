@@ -122,8 +122,8 @@ Notes:
   claimed by anyone, admins included, until `unreserve_folder`. Reservations are keyed by the full
   `<label>.folder` name. Reserving a name that has an owner fails with `FolderNameTaken`; a lapsed
   lease is cleared first. Both calls are idempotent.
-- `release_folder` deletes the owner's name mapping (both directions), lease expiry and template
-  selection, so the owner can claim a new name right away. The released name can be claimed again
+- `release_folder` deletes the owner's name mapping (both directions), lease expiry, claim
+  metadata and template selection, so the owner can claim a new name right away. The released name can be claimed again
   by anyone, the former owner included, once `RELEASE_COOLDOWN_LEDGERS` (~7 days) have passed. An
   owner who holds a minted portfolio can't release; see [docs/SECURITY.md](docs/SECURITY.md).
 - `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
@@ -140,6 +140,7 @@ Notes:
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `is_reserved` | `folder_name: String` | `bool`: whether an admin reserved the name | — |
+| `get_folder_meta` | `folder_name: String` | `FolderMeta { claimed_at: u64, claimed_ledger: u32 }` | `FolderNotFound` (4), `FolderExpired` (25) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
@@ -147,6 +148,13 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+
+`get_folder_meta` returns the ledger close time (`claimed_at`, Unix seconds) and ledger sequence
+(`claimed_ledger`) of the current claim. Every claim writes it in the same invocation as
+`FolderOwner`, and release or lease takeover deletes it. Names claimed **before this upgrade**
+have no metadata entry, and `get_folder_meta` returns `FolderNotFound` (4) for them, the same as
+for unclaimed names. Call `get_folder` to tell the two apart: it still resolves pre-upgrade names.
+For those, fall back to the indexer's `folder_cl` record.
 
 ### Error codes
 

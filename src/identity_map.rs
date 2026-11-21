@@ -6,6 +6,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::pricing;
 use crate::storage;
+use crate::types::FolderMeta;
 use crate::validation;
 
 /// Lease state of a Folder name that has an owner.
@@ -88,6 +89,14 @@ fn claim(
     let fee_paid = pricing::quote_claim(env, folder_name)?;
     pricing::charge(env, payer, fee_paid);
     storage::set_folder_owner(env, folder_name, owner);
+    storage::set_folder_meta(
+        env,
+        folder_name,
+        &FolderMeta {
+            claimed_at: env.ledger().timestamp(),
+            claimed_ledger: env.ledger().sequence(),
+        },
+    );
     if let Some(lease) = storage::get_lease_config(env) {
         let expiry = env
             .ledger()
@@ -122,6 +131,7 @@ pub fn release_folder(env: &Env, owner: &Address) -> Result<(), ContractError> {
     storage::remove_folder_owner(env, &folder_name);
     storage::remove_owner_folder(env, owner);
     storage::remove_folder_expiry(env, &folder_name);
+    storage::remove_folder_meta(env, &folder_name);
     storage::remove_user_template(env, owner);
     storage::set_released_at(env, &folder_name, env.ledger().sequence());
     events::folder_released(env, owner, &folder_name);
@@ -201,6 +211,14 @@ pub fn get_folder(env: &Env, folder_name: &String) -> Result<Address, ContractEr
         LeaseState::Grace => Err(ContractError::FolderExpired),
         LeaseState::Released => Err(ContractError::FolderNotFound),
     }
+}
+
+/// Claim metadata of an active name. Names claimed before `FolderMeta`
+/// existed have no entry and fail with `FolderNotFound`, like unclaimed
+/// names; `get_folder` tells the two apart.
+pub fn get_folder_meta(env: &Env, folder_name: &String) -> Result<FolderMeta, ContractError> {
+    get_folder(env, folder_name)?;
+    storage::get_folder_meta(env, folder_name).ok_or(ContractError::FolderNotFound)
 }
 
 pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError> {

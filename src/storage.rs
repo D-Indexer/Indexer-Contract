@@ -6,7 +6,7 @@ use crate::constants::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AdminChange, ClaimFee, DataKey, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+    AdminChange, ClaimFee, DataKey, FolderMeta, LeaseConfig, PortfolioNFT, PriceTiers, Template,
 };
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -186,6 +186,27 @@ pub fn get_owner_folder(env: &Env, owner: &Address) -> Option<String> {
         );
     }
     result
+}
+
+pub fn get_folder_meta(env: &Env, folder_name: &String) -> Option<FolderMeta> {
+    let key = DataKey::FolderMeta(folder_name.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_folder_meta(env: &Env, folder_name: &String, meta: &FolderMeta) {
+    let key = DataKey::FolderMeta(folder_name.clone());
+    env.storage().persistent().set(&key, meta);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_folder_meta(env: &Env, folder_name: &String) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FolderMeta(folder_name.clone()));
 }
 
 /// Whether an admin has reserved `folder_name`. Extends the entry TTL when
@@ -428,12 +449,13 @@ pub fn set_folder_expiry(env: &Env, folder_name: &String, expiry: u64) {
 }
 
 /// Removes every key of a released Folder: both directions of the identity
-/// mapping (the reverse one only if it still points at this name) and the
-/// expiry entry.
+/// mapping (the reverse one only if it still points at this name), the
+/// expiry entry and the claim metadata.
 pub fn remove_folder(env: &Env, folder_name: &String, owner: &Address) {
     let persistent = env.storage().persistent();
     persistent.remove(&DataKey::FolderOwner(folder_name.clone()));
     persistent.remove(&DataKey::FolderExpiry(folder_name.clone()));
+    persistent.remove(&DataKey::FolderMeta(folder_name.clone()));
     let owner_key = DataKey::OwnerFolder(owner.clone());
     if persistent.get::<_, String>(&owner_key).as_ref() == Some(folder_name) {
         persistent.remove(&owner_key);

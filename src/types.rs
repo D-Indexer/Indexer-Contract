@@ -26,6 +26,17 @@ pub struct ClaimFee {
     pub treasury: Address,
 }
 
+/// Claim metadata stored next to `FolderOwner`, written atomically with
+/// every claim. Names claimed before this was introduced have none.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderMeta {
+    /// Ledger close time (Unix seconds) of the claim.
+    pub claimed_at: u64,
+    /// Ledger sequence of the claim.
+    pub claimed_ledger: u32,
+}
+
 /// Length-based premium pricing: `(max_label_len, amount)` pairs sorted by
 /// strictly ascending `max_label_len`. A label uses the first tier whose
 /// `max_label_len` is `>=` its length; longer labels pay the base claim fee.
@@ -98,4 +109,6 @@ pub enum DataKey {
     // identity_map: released Folder name -> ledger sequence of the release,
     // removed when the name is claimed again after the cooldown
     ReleasedAt(String),
+    // identity_map: folder_name -> FolderMeta for the current claim
+    FolderMeta(String),
 }

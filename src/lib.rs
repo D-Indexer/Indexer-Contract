@@ -19,7 +19,9 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::{AdminOp, ClaimFee, LeaseConfig, PortfolioNFT, PriceTiers, Template};
+use crate::types::{
+    AdminOp, ClaimFee, FolderMeta, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -252,6 +254,13 @@ impl FolderContract {
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
         identity_map::get_folder(&env, &folder_name)
+    }
+
+    /// When and at which ledger `folder_name` was claimed. Fails with
+    /// `FolderNotFound` for unclaimed names and for names claimed before this
+    /// metadata was introduced.
+    pub fn get_folder_meta(env: Env, folder_name: String) -> Result<FolderMeta, ContractError> {
+        identity_map::get_folder_meta(&env, &folder_name)
     }
 
     pub fn get_identity(env: Env, owner: Address) -> Result<String, ContractError> {

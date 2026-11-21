@@ -36,8 +36,8 @@ Tests assert the exact signer for every write and check that writes fail when no
   (~7 days, `src/constants.rs`), counted from the release ledger stored under
   `ReleasedAt(name)`. The cooldown applies to every address, the former owner included, because
   only the ledger sequence is stored. The first claim after the cooldown deletes the marker.
-- **No orphaned keys.** Release deletes `FolderOwner`, `OwnerFolder`, `FolderExpiry` and the
-  owner's `UserTemplate`. Only the `ReleasedAt` marker stays until the next claim.
+- **No orphaned keys.** Release deletes `FolderOwner`, `OwnerFolder`, `FolderExpiry`,
+  `FolderMeta` and the owner's `UserTemplate`. Only the `ReleasedAt` marker stays until the next claim.
 
 ## Known risks
 

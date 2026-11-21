@@ -2082,6 +2082,7 @@ mod reservation {
         assert!(!t.has_persistent(&DataKey::FolderOwner(n.clone())));
         assert!(!t.has_persistent(&DataKey::OwnerFolder(user.clone())));
         assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
     }
 
     #[test]
@@ -2258,6 +2259,7 @@ mod release {
         assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
         assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
         assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
         // Only the cooldown marker remains, and it carries the release ledger.
         let key = DataKey::ReleasedAt(n.clone());
         let at: u32 = t.env.as_contract(&t.contract_id, || {
@@ -2380,5 +2382,136 @@ mod release {
         t.client().release_folder(&owner);
         let res = t.client().try_claim_folder(&owner, &n);
         expect_contract_error(res, ContractError::FolderReleaseCooldown);
+    }
+}
+
+// ── Folder claim metadata ───────────────────────────────────────────────────
+
+mod folder_meta {
+    use super::*;
+    use crate::types::FolderMeta;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    fn set_ledger(t: &TestEnv, timestamp: u64, sequence: u32) {
+        t.env.ledger().with_mut(|l| {
+            l.timestamp = timestamp;
+            l.sequence_number = sequence;
+        });
+    }
+
+    #[test]
+    fn claim_records_exact_timestamp_and_ledger() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "member.folder");
+
+        set_ledger(&t, 1_794_262_900, 5_647_861);
+        t.client().claim_folder(&owner, &n);
+
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 1_794_262_900,
+                claimed_ledger: 5_647_861,
+            }
+        );
+        // Existing reads are unchanged.
+        assert_eq!(t.client().get_folder(&n), owner);
+    }
+
+    #[test]
+    fn sponsored_claim_records_metadata() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let sponsor = Address::generate(&t.env);
+        let n = name(&t, "sponsored.folder");
+
+        set_ledger(&t, 42, 7);
+        t.client().sponsored_claim(&sponsor, &owner, &n);
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 42,
+                claimed_ledger: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_name_returns_folder_not_found() {
+        let t = TestEnv::new();
+        let res = t.client().try_get_folder_meta(&name(&t, "nobody.folder"));
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn name_claimed_before_upgrade_returns_folder_not_found() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "legacy.folder");
+        // Simulate a pre-upgrade claim: only the original key layout exists.
+        t.set_persistent(&DataKey::FolderOwner(n.clone()), &owner);
+        t.set_persistent(&DataKey::OwnerFolder(owner.clone()), &n);
+
+        assert_eq!(t.client().get_folder(&n), owner);
+        let res = t.client().try_get_folder_meta(&n);
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn metadata_ttl_extended_on_write_and_read() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "ttl-meta.folder");
+        let key = DataKey::FolderMeta(n.clone());
+
+        t.client().claim_folder(&owner, &n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+
+        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
+        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
+        t.client().get_folder_meta(&n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn release_removes_metadata_and_reclaim_rewrites_it() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let other = Address::generate(&t.env);
+        let n = name(&t, "moved.folder");
+
+        set_ledger(&t, 100, 10);
+        t.client().claim_folder(&owner, &n);
+        t.client().release_folder(&owner);
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
+        expect_contract_error(
+            t.client().try_get_folder_meta(&n),
+            ContractError::FolderNotFound,
+        );
+
+        let later = 10 + crate::constants::RELEASE_COOLDOWN_LEDGERS;
+        set_ledger(&t, 9_999, later);
+        t.client().claim_folder(&other, &n);
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 9_999,
+                claimed_ledger: later,
+            }
+        );
+    }
+
+    #[test]
+    fn failed_claim_writes_no_metadata() {
+        let t = TestEnv::new();
+        let n = name(&t, "reserved-meta.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        let res = t.client().try_claim_folder(&Address::generate(&t.env), &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
     }
 }
