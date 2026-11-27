@@ -24,11 +24,28 @@ Compatibility rules:
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
 | `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
 | `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
-| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String` | `claim_folder` |
+| `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
+| `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+| `blk_add` | `AddressBlocked` | `admin: Address`, `address: Address`, `reason_code: u32` | `block_address` |
+| `blk_rm` | `AddressUnblocked` | `admin: Address`, `address: Address` | `unblock_address` |
+| `port_flag` | `PortfolioFlagSet` | `admin: Address`, `owner: Address`, `flag: u32`, `reason_code: u32` | `set_portfolio_flag` |
+| `tmpl_sub` | `TemplateSubmitted` | `submission_id: u32`, `designer: Address`, `metadata_uri: String` | `submit_template` |
+| `tmpl_appr` | `TemplateSubmissionApproved` | `admin: Address`, `submission_id: u32`, `template_id: u32` | `approve_submission` |
+| `tmpl_rej` | `TemplateSubmissionRejected` | `admin: Address`, `submission_id: u32`, `reason_code: u32` | `reject_submission` |
+
+### Changes in the economics / soroban-sdk 29 update
+
+- **New:** `fee_set`, `withdraw`.
+- **Appended:** `fee_paid` as the third field of `folder_cl` (0 when no fee is configured).
+  Decoders that read the first two fields keep working.
+- **soroban-sdk 25.3.1 → 29.0.1:** on-chain event XDR encoding is unchanged apart from the
+  appended field above. Test snapshots now record protocol 29 and spell the event type key
+  `type` instead of `type_` (snapshot JSON only). Run `make sdk-compat` for the full report.
 
 ### Changes in `feat/testnet-deploy`
 
@@ -47,11 +64,25 @@ Compatibility rules:
 |---|---|
 | `init` | Seed the admin set with `admin` |
 | `adm_add` / `adm_rm` | Add / remove the admin from the admin set |
-| `folder_cl` | Upsert identity `owner ↔ folder_name` |
+| `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
+| `claim_spon` | Record the sponsor of the claim |
+| `folder_rn` | Update the Folder's lease expiry |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
 | `port_upd` | Update the portfolio's `ipfs_cid` |
+
+### Portfolio moderation flags
+
+`PortfolioFlag(owner)` is the authoritative on-chain moderation signal:
+
+- `0` means no flag. The key is removed.
+- `1` means hidden. Frontends should hide the portfolio content and do not delete its record.
+- `2` means under review. Frontends should keep it visible only when their review policy allows
+  it, and backends should retain the portfolio row for audit and recovery.
+
+The backend should consume `port_flag` by setting `get_portfolio_flag(owner)` semantics:
+`(admin, owner, flag, reason_code)`. An owner `update_portfolio` must not clear an existing flag.
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also

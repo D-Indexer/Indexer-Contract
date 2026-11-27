@@ -2,10 +2,12 @@
 
 mod access_control;
 mod constants;
+mod economics;
 mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+mod pricing;
 mod storage;
 mod template_registry;
 mod types;
@@ -14,11 +16,12 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::PortfolioNFT;
+use crate::types::ClaimFee;
 use crate::types::Template;
+use crate::types::{AdminOp, PortfolioNFT};
 
 #[contract]
 pub struct FolderContract;
@@ -56,14 +59,181 @@ impl FolderContract {
         storage::get_admins(&env)
     }
 
-    pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), ContractError> {
+    pub fn add_admin(
+        env: Env,
+        admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::add_admin(&env, &admin, &new_admin)
     }
 
-    pub fn remove_admin(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
+    pub fn remove_admin(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::remove_admin(&env, &admin, &target)
+    }
+
+    /// Queues an admin addition; executable after `ADMIN_TIMELOCK_LEDGERS`.
+    pub fn queue_admin_change(
+        env: Env,
+        admin: Address,
+        op: AdminOp,
+        target: Address,
+    ) -> Result<u32, ContractError> {
+        require_initialized(&env)?;
+        access_control::queue_admin_change(&env, &admin, op, &target)
+    }
+
+    /// Executes a queued admin change once its ETA ledger has passed.
+    pub fn execute_admin_change(
+        env: Env,
+        admin: Address,
+        op_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::execute_admin_change(&env, &admin, op_id)
+    }
+
+    /// Cancels a queued admin change before it is executed.
+    pub fn cancel_admin_change(
+        env: Env,
+        admin: Address,
+        op_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::cancel_admin_change(&env, &admin, op_id)
+    }
+
+    pub fn block_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if storage::is_admin(&env, &addr) {
+            return Err(ContractError::CannotBlockAdmin);
+        }
+        storage::block_address(&env, &addr);
+        events::address_blocked(&env, &admin, &addr, reason_code);
+        Ok(())
+    }
+
+    pub fn unblock_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        storage::unblock_address(&env, &addr);
+        events::address_unblocked(&env, &admin, &addr);
+        Ok(())
+    }
+
+    pub fn is_blocked(env: Env, addr: Address) -> bool {
+        storage::is_blocked(&env, &addr)
+    }
+
+    pub fn set_portfolio_flag(
+        env: Env,
+        admin: Address,
+        owner: Address,
+        flag: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if flag > 2 {
+            return Err(ContractError::InvalidPortfolioFlag);
+        }
+        storage::set_portfolio_flag(&env, &owner, flag);
+        events::portfolio_flag_set(&env, &admin, &owner, flag, reason_code);
+        Ok(())
+    }
+
+    pub fn get_portfolio_flag(env: Env, owner: Address) -> u32 {
+        storage::get_portfolio_flag(&env, &owner)
+    }
+
+    // ── Economics ─────────────────────────────────────────────────────────────
+
+    /// Sets the Folder claim fee. An `amount` of 0 disables the fee.
+    pub fn set_claim_fee(
+        env: Env,
+        admin: Address,
+        token: Address,
+        amount: i128,
+        treasury: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        economics::set_claim_fee(&env, &admin, &token, amount, &treasury)
+    }
+
+    /// Returns the current claim fee configuration, if any.
+    pub fn get_claim_fee(env: Env) -> Option<ClaimFee> {
+        storage::get_claim_fee(&env)
+    }
+
+    /// Withdraws `amount` of `token` held by this contract to `to`, capped at
+    /// `MAX_WITHDRAW_PER_CALL` per call.
+    pub fn withdraw(
+        env: Env,
+        admin: Address,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        economics::withdraw(&env, &admin, &token, &to, amount)
+    }
+
+    /// Returns this contract's balance of `token`.
+    pub fn treasury_balance(env: Env, token: Address) -> i128 {
+        economics::treasury_balance(&env, &token)
+    }
+
+    /// Replaces the contract code with `new_wasm_hash`. Admin only. Storage is
+    /// untouched: instance and persistent entries survive an upgrade.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        events::contract_upgraded(&env, &admin, &new_wasm_hash);
+        Ok(())
+    }
+
+    /// Returns the contract version (`CONTRACT_VERSION`).
+    pub fn version(_env: Env) -> u32 {
+        constants::CONTRACT_VERSION
+    }
+
+    /// Admin-only, idempotent schema migration up to `CURRENT_STORAGE_VERSION`.
+    /// Emits `migrated` with `[from, to]` only when the version actually moves.
+    pub fn migrate(env: Env, admin: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let from = storage::get_storage_version(&env);
+        let to = storage::run_migration_step(&env, from)?;
+        if to != from {
+            events::migrated(&env, from, to);
+        }
+        Ok(())
+    }
+
+    /// Returns the current storage schema version.
+    pub fn get_storage_version(env: Env) -> u32 {
+        storage::get_storage_version(&env)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -75,6 +245,18 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::claim_folder(&env, &owner, &folder_name)
+    }
+
+    /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
+    /// Both must authorize.
+    pub fn sponsored_claim(
+        env: Env,
+        sponsor: Address,
+        owner: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
@@ -119,6 +301,43 @@ impl FolderContract {
         storage::get_user_template(&env, &owner)
     }
 
+    pub fn submit_template(
+        env: Env,
+        designer: Address,
+        metadata_uri: String,
+    ) -> Result<u32, ContractError> {
+        require_initialized(&env)?;
+        template_registry::submit_template(&env, &designer, &metadata_uri)
+    }
+
+    pub fn approve_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        template_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::approve_submission(&env, &admin, submission_id, template_id)
+    }
+
+    pub fn reject_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::reject_submission(&env, &admin, submission_id, reason_code)
+    }
+
+    pub fn get_template_designer(env: Env, template_id: u32) -> Option<Address> {
+        storage::get_template_designer(&env, template_id)
+    }
+
+    pub fn get_template_usage(env: Env, template_id: u32) -> u32 {
+        storage::get_template_usage(&env, template_id)
+    }
+
     // ── Portfolio NFT ─────────────────────────────────────────────────────────
 
     pub fn mint_portfolio(
@@ -146,5 +365,44 @@ impl FolderContract {
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    /// Returns the client-facing validation rules and limits. Pure read: no
+    /// state is written and no TTL is extended.
+    pub fn get_limits(env: Env) -> Limits {
+        Limits {
+            min_folder_label_len: constants::MIN_FOLDER_LABEL_LEN,
+            max_folder_name_len: constants::MAX_FOLDER_NAME_LEN,
+            folder_suffix: String::from_bytes(&env, constants::FOLDER_SUFFIX),
+            min_ipfs_cid_len: constants::MIN_IPFS_CID_LEN,
+            max_ipfs_cid_len: constants::MAX_IPFS_CID_LEN,
+            metadata_uri_scheme: String::from_bytes(&env, constants::METADATA_URI_SCHEME),
+            max_metadata_uri_len: constants::MAX_METADATA_URI_LEN,
+            max_templates: constants::MAX_TEMPLATES,
+            max_admins: constants::MAX_ADMINS,
+            day_in_ledgers: constants::DAY_IN_LEDGERS,
+            persistent_bump_amount: constants::PERSISTENT_BUMP_AMOUNT,
+            persistent_lifetime_threshold: constants::PERSISTENT_LIFETIME_THRESHOLD,
+            instance_bump_amount: constants::INSTANCE_BUMP_AMOUNT,
+            instance_lifetime_threshold: constants::INSTANCE_LIFETIME_THRESHOLD,
+        }
+    }
+
+    // ── TTL maintenance ───────────────────────────────────────────────────────
+
+    /// Extends the TTL of all persistent keys belonging to `owner`. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_owner_ttl(env: Env, owner: Address) -> u32 {
+        storage::extend_owner_ttl(&env, &owner)
+    }
+
+    /// Extends the TTL of the template entry and the template list. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_template_ttl(env: Env, template_id: u32) -> u32 {
+        storage::extend_template_ttl(&env, template_id)
     }
 }
