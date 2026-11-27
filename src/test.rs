@@ -237,6 +237,7 @@ fn authorize_owner(
         timestamp: t.env.ledger().timestamp(),
         protocol_version: t.env.ledger().protocol_version(),
         sequence_number: t.env.ledger().sequence(),
+        network_id: soroban_sdk::BytesN::from_array(&t.env, &[0u8; 32]).into(),
         base_reserve: 0,
         min_temp_entry_ttl: 1,
         min_persistent_entry_ttl: 1,
@@ -769,6 +770,7 @@ fn test_template_restore_keeps_registration() {
         &crate::types::Template {
             template_id: 1u32,
             metadata_uri: uri.clone(),
+            creator: t.admin.clone(),
         },
     );
 
@@ -833,6 +835,7 @@ fn test_portfolio_restore_prevents_remint() {
             owner: user.clone(),
             template_id: 1u32,
             ipfs_cid: cid.clone(),
+            minted_at: 0,
         },
     );
 
@@ -1663,114 +1666,6 @@ fn test_each_write_requires_the_right_signer() {
     assert_single_auth(&t, &other_admin, "remove_admin");
 }
 
-// ── Contract-account (smart wallet) owners ──────────────────────────────────
-
-/// Minimal test smart-wallet contract account: authorizes an invocation by
-/// verifying an ed25519 signature over the payload the host passes to
-/// `__check_auth`. Real auth is used (no `mock_all_auths`).
-mod smart_wallet {
-    use soroban_sdk::{
-        auth::{Context, CustomAccountInterface},
-        contract, contracterror, contractimpl,
-        crypto::Hash,
-        BytesN, Env, Vec,
-    };
-
-    #[contracterror]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum WalletError {
-        NotAuthorized = 1,
-    }
-
-    #[contract]
-    pub struct TestWallet;
-
-    #[contractimpl]
-    impl TestWallet {
-        pub fn __constructor(env: Env, public_key: BytesN<32>) {
-            env.storage().instance().set(&0u32, &public_key);
-        }
-
-        pub fn public_key(env: Env) -> BytesN<32> {
-            env.storage().instance().get(&0u32).unwrap()
-        }
-    }
-
-    #[contractimpl]
-    impl CustomAccountInterface for TestWallet {
-        type Signature = BytesN<64>;
-        type Error = WalletError;
-
-        fn __check_auth(
-            env: Env,
-            signature_payload: Hash<32>,
-            signature: BytesN<64>,
-            _auth_contexts: Vec<Context>,
-        ) -> Result<(), WalletError> {
-            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
-            env.crypto()
-                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
-            Ok(())
-        }
-    }
-}
-
-use smart_wallet::TestWallet;
-
-/// A contract-account owner plus the ed25519 key that controls it.
-struct WalletOwner {
-    address: Address,
-    signer: soroban_sdk::testutils::ed25519::SigningKey,
-}
-
-impl WalletOwner {
-    fn new(env: &Env) -> Self {
-        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
-        let public_key = signer.verifying_key();
-        let address = env.register(TestWallet, (public_key,));
-        WalletOwner { address, signer }
-    }
-
-    /// Authorizes the next invocation as this contract account, signing the
-    /// payload the host derives for it.
-    fn authorize(&self, env: &Env) {
-        let payload = env.auths().last().unwrap().1.signature_payload();
-        let signature = self.signer.sign(&payload);
-        env.set_auths(&[soroban_sdk::testutils::MockAuth {
-            address: &self.address,
-            invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                contract: &self.address,
-                fn_name: "__check_auth",
-                args: (),
-                sub_invokes: &[],
-            },
-        }]);
-        let _ = signature;
-    }
-}
-
-    let uri = String::from_str(
-        &t.env,
-        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
-    );
-    t.client().register_template(&other_admin, &1u32, &uri);
-    assert_single_auth(&t, &other_admin, "register_template");
-
-    let user = Address::generate(&t.env);
-    t.client()
-        .claim_folder(&user, &String::from_str(&t.env, "signer.folder"));
-    assert_single_auth(&t, &user, "claim_folder");
-    t.client().set_user_template(&user, &1u32);
-    assert_single_auth(&t, &user, "set_user_template");
-    t.client()
-        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
-    assert_single_auth(&t, &user, "mint_portfolio");
-    t.client()
-        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
-    assert_single_auth(&t, &user, "update_portfolio");
-}
-
 #[test]
 fn test_writes_fail_without_signature() {
     let (t, user) = minted_env();
@@ -2121,4 +2016,182 @@ fn budget_report() {
     t.client()
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
+}
+
+#[test]
+fn test_address_blocklist_write_paths_and_unblock() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    let user = Address::generate(&t.env);
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_claim_folder(&user, &String::from_str(&t.env, "blocked.folder")),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "blocked.folder"));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client().try_set_user_template(&user, &1u32),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client().set_user_template(&user, &1u32);
+
+    expect_contract_error(
+        t.client().try_block_address(&t.admin, &t.admin, &1u32),
+        ContractError::CannotBlockAdmin,
+    );
+}
+
+#[test]
+fn test_portfolio_flag_set_clear_and_persist_across_update() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let owner = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&owner, &String::from_str(&t.env, "flagged.folder"));
+    t.client()
+        .mint_portfolio(&owner, &1u32, &String::from_str(&t.env, VALID_CIDV0));
+
+    t.client().set_portfolio_flag(&t.admin, &owner, &1u32, &9u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
+    t.client()
+        .update_portfolio(&owner, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
+
+    t.client().set_portfolio_flag(&t.admin, &owner, &0u32, &10u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 0u32);
+    expect_contract_error(
+        t.client().try_set_portfolio_flag(
+            &Address::generate(&t.env),
+            &owner,
+            &2u32,
+            &1u32,
+        ),
+        ContractError::Unauthorized,
+    );
+}
+
+#[test]
+fn test_template_submission_lifecycle_cap_and_usage() {
+    let t = TestEnv::new();
+    let designer = Address::generate(&t.env);
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    let submission_id = t.client().submit_template(&designer, &uri);
+    t.client()
+        .approve_submission(&t.admin, &submission_id, &1u32);
+    assert_eq!(
+        t.client().get_template_designer(&1u32),
+        Some(designer.clone())
+    );
+    let duplicate_id = t.client().submit_template(
+        &designer,
+        &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/duplicate.json",
+        ),
+    );
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &duplicate_id, &1u32),
+        ContractError::TemplateAlreadyExists,
+    );
+
+    let rejected_id = t
+        .client()
+        .submit_template(&designer, &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/template.json",
+        ));
+    t.client().reject_submission(&t.admin, &rejected_id, &3u32);
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &rejected_id, &2u32),
+        ContractError::SubmissionNotFound,
+    );
+
+    for i in 0u32..49u32 {
+        let uri = String::from_str(
+            &t.env,
+            &std::format!(
+                "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/{}.json",
+                i
+            ),
+        );
+        t.client().submit_template(&designer, &uri);
+    }
+    expect_contract_error(
+        t.client().try_submit_template(
+            &designer,
+            &String::from_str(
+                &t.env,
+                "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/cap.json",
+            ),
+        ),
+        ContractError::SubmissionQueueFull,
+    );
+
+    let owner1 = Address::generate(&t.env);
+    let owner2 = Address::generate(&t.env);
+    let owner3 = Address::generate(&t.env);
+    for (owner, name) in [
+        (owner1.clone(), "usage1.folder"),
+        (owner2.clone(), "usage2.folder"),
+        (owner3.clone(), "usage3.folder"),
+    ] {
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, name));
+        t.client().set_user_template(&owner, &1u32);
+    }
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
+    t.client().set_user_template(&owner1, &1u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
+
+    let uri2 = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/second.json",
+    );
+    t.client().register_template(&t.admin, &2u32, &uri2);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
 }

@@ -71,3 +71,15 @@ pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
 /// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
 /// withdrawals must be split across calls, each emitting its own event.
 pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
+
+/// Maximum number of length-based Folder pricing tiers.
+pub const MAX_PRICE_TIERS: u32 = 32;
+
+/// Maximum number of pending template submissions.
+pub const MAX_PENDING_TEMPLATE_SUBMISSIONS: u32 = 50;
+
+/// Ledger delay before a queued admin change can execute.
+pub const ADMIN_TIMELOCK_LEDGERS: u32 = 172_800;
+
+/// Maximum number of pending admin changes.
+pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
