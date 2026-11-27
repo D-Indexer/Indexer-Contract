@@ -68,7 +68,21 @@ sdk-compat:
 snapshot-list:
 	@find test_snapshots -type f | sort
 
-check: fmt-check cargo-check clippy test build-wasm script-check
+# Regenerate the tracked auth snapshots from the current test suite.
+snapshots:
+	@rm -rf test_snapshots
+	cargo test --locked
+	@find test_snapshots -type f | sort
+
+# Fail when `cargo test` rewrote any tracked auth snapshot.
+snapshot-check:
+	@git diff --exit-code -- test_snapshots/ || { \
+		echo "Stale auth snapshots (run 'make snapshots' and commit):" >&2; \
+		git diff --name-only -- test_snapshots/ >&2; \
+		exit 1; \
+	}
+
+check: fmt-check cargo-check clippy test snapshot-check build-wasm script-check
 
 clean:
 	cargo clean

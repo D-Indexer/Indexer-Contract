@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/folder-validation", "crates/folder-validation-js"]
+resolver = "2"
+
 [package]
 name = "indexer-contract"
 version = "0.1.0"

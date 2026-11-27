@@ -237,7 +237,8 @@ that changes `src/events.rs` must update it.
 2. Branch from `main` and run `make check` before you push. CI runs the same gates.
 3. If you change a public function, event or error, update this README and
    [docs/EVENTS.md](docs/EVENTS.md) in the same PR. Never renumber errors or reorder event fields.
-4. Add a test for every behaviour change. Auth changes should update `test_snapshots/`.
+4. Add a test for every behaviour change. Auth changes should update `test_snapshots/`
+   with `make snapshots`; CI fails when the tracked snapshots are stale.
 
 ## License
 
