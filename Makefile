@@ -18,6 +18,7 @@ help:
 	@echo "  errors-json   Regenerate errors.json from src/errors.rs"
 	@echo "  sdk-compat    SDK upgrade compatibility report vs origin/main"
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
+	@echo "  mutants       Run cargo-mutants with mutants.toml"
 	@echo "  check         Run local pre-PR gates"
 	@echo "  clean         Remove Cargo build artifacts"
 

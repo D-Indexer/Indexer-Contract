@@ -185,6 +185,56 @@ fn test_folder_suffix_required() {
 }
 
 #[test]
+fn test_punycode_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "xn--abc.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_double_hyphen_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ab--c.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_single_hyphen_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "a-b-c.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
+}
+
+#[test]
+fn test_numeric_only_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "007.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_alphanumeric_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "agent007.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
+}
+
+#[test]
 fn test_get_missing_folder_rejected() {
     let t = TestEnv::new();
     let name = String::from_str(&t.env, "missing.folder");

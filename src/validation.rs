@@ -269,6 +269,22 @@ fn is_valid_cid(bytes: &Bytes) -> bool {
     check_cid(bytes).is_ok()
 }
 
+/// Returns true when the label has a hyphen as both its 3rd and 4th bytes,
+/// which covers the IDNA A-label prefix `xn--` and other ambiguous `ab--c`
+/// shapes.
+fn has_ambiguous_hyphen_pair(label: &Bytes) -> bool {
+    label.get(2) == Some(b'-') && label.get(3) == Some(b'-')
+}
+
+/// Returns true when every byte of the label is an ASCII digit.
+fn is_all_numeric(label: &Bytes) -> bool {
+    !label.is_empty() && all_bytes(label, is_digit_byte)
+}
+
+fn is_digit_byte(byte: u8) -> bool {
+    byte.is_ascii_digit()
+}
+
 /// Validates a Folder name: `<label>.folder`, where the label is at least
 /// `MIN_FOLDER_LABEL_LEN` bytes of `[a-z0-9-]` and does not start or end with
 /// a hyphen. The whole name is at most `max_len` bytes.
