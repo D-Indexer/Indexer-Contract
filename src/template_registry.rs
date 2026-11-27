@@ -4,6 +4,7 @@ use crate::access_control::{require_admin, require_owner};
 use crate::constants::MAX_TEMPLATES;
 use crate::errors::ContractError;
 use crate::events;
+use crate::identity_map;
 use crate::storage;
 use crate::types::Template;
 use crate::validation;
@@ -20,7 +21,8 @@ pub fn register_template(
     if storage::get_template(env, template_id).is_some() {
         return Err(ContractError::TemplateAlreadyExists);
     }
-    if storage::get_template_list(env).len() >= MAX_TEMPLATES {
+    let list = storage::get_template_list(env);
+    if list.len() >= MAX_TEMPLATES {
         return Err(ContractError::TemplateLimitReached);
     }
 
@@ -29,7 +31,7 @@ pub fn register_template(
         metadata_uri: metadata_uri.clone(),
         creator: admin.clone(),
     };
-    storage::save_template(env, &template);
+    storage::save_template_with_list(env, &template, list);
     events::template_registered(env, template_id, metadata_uri, admin);
     Ok(())
 }
@@ -49,12 +51,12 @@ pub fn set_user_template(
     template_id: u32,
 ) -> Result<(), ContractError> {
     require_owner(env, owner)?;
-    storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    identity_map::get_identity(env, owner)?;
     validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
     storage::set_user_template(env, owner, template_id);
     // A minted portfolio always renders with the owner's current template.
-    if let Ok(mut nft) = storage::get_portfolio(env, owner) {
+    if let Some(mut nft) = storage::load_portfolio(env, owner) {
         nft.template_id = template_id;
         storage::save_portfolio(env, &nft);
     }

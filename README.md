@@ -3,7 +3,7 @@
 [![Soroban Contract CI](https://github.com/D-Indexer/Indexer-Contract/actions/workflows/contract-ci.yml/badge.svg)](https://github.com/D-Indexer/Indexer-Contract/actions/workflows/contract-ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-The Soroban smart contract (Rust, `soroban-sdk` 25.3.1) behind **Folder**, a decentralized
+The Soroban smart contract (Rust, `soroban-sdk` 29.0.1) behind **Folder**, a decentralized
 portfolio tool on Stellar. A user claims a unique `name.folder` handle tied to their Stellar
 address, picks one of the admin-registered portfolio templates, and anchors their portfolio on-chain
 as a record that links owner, template and the IPFS CID of the portfolio content. Anyone can look up
@@ -102,7 +102,9 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `initialize` | `admin: Address` | `admin` | `init` | `AlreadyInitialized` (1) |
 | `add_admin` | `admin: Address, new_admin: Address` | `admin` (must be an admin) | `adm_add` | 2, `Unauthorized` (7), `AdminAlreadyExists` (10), `TooManyAdmins` (19) |
 | `remove_admin` | `admin: Address, target: Address` | `admin` (must be an admin) | `adm_rm` | 2, 7, `AdminNotFound` (11), `CannotRemoveLastAdmin` (12) |
-| `claim_folder` | `owner: Address, folder_name: String` | `owner` | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3) |
+| `claim_folder` | `owner: Address, folder_name: String` | `owner` (also covers the fee transfer) | `folder_cl` | 2, `InvalidFolderName` (9), `FolderAlreadyClaimed` (16), `FolderNameTaken` (3); fee token transfer failure aborts the call |
+| `set_claim_fee` | `admin: Address, token: Address, amount: i128, treasury: Address` | `admin` (must be an admin) | `fee_set` | 2, 7, `InvalidAmount` (20) |
+| `withdraw` | `admin: Address, token: Address, to: Address, amount: i128` | `admin` (must be an admin) | `withdraw` | 2, 7, 20, `InsufficientBalance` (21) |
 | `register_template` | `admin: Address, template_id: u32, metadata_uri: String` | `admin` (must be an admin) | `tmpl_reg` | 2, 7, `InvalidTemplateID` (17), `InvalidMetadataURI` (14), `TemplateAlreadyExists` (15), `TemplateLimitReached` (18) |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
@@ -113,6 +115,11 @@ Notes:
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - An admin may remove itself as long as another admin remains.
+- `set_claim_fee` makes `claim_folder` transfer `amount` of the SAC `token` from the owner to
+  `treasury`. `amount` must be within `0..=MAX_CLAIM_FEE`; 0 disables the fee. Set `treasury` to the
+  contract's own address to collect fees into the contract-held treasury.
+- `withdraw` moves contract-held tokens; each call is capped at `MAX_WITHDRAW_PER_CALL`
+  (`src/constants.rs`) and amounts must be positive and not above the balance.
 
 ### Reads
 
@@ -123,6 +130,8 @@ Notes:
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
+| `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
+| `treasury_balance` | `token: Address` | contract's `i128` balance of `token` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
@@ -142,7 +151,12 @@ Codes are stable. New errors are appended and never renumbered.
 | 7 | `Unauthorized` | 17 | `InvalidTemplateID` |
 | 8 | `InvalidCID` | 18 | `TemplateLimitReached` |
 | 9 | `InvalidFolderName` | 19 | `TooManyAdmins` |
-| 10 | `AdminAlreadyExists` | | |
+| 10 | `AdminAlreadyExists` | 20 | `InvalidAmount` |
+| | | 21 | `InsufficientBalance` |
+
+A machine-readable catalogue with user-facing messages is in [`errors.json`](errors.json),
+generated from the doc comments in `src/errors.rs` (`make errors-json`; CI fails on drift) and
+attached to each GitHub release.
 
 ## How the backend indexer consumes events
 
@@ -153,7 +167,7 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    page through with the returned cursor. Persist the cursor, because RPC only keeps events for a
    limited window of recent ledgers.
 2. **Route.** `topics[0]` is a `Symbol` naming the event: `init`, `adm_add`, `adm_rm`,
-   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`.
+   `folder_cl`, `tmpl_reg`, `tmpl_set`, `port_mint`, `port_upd`, `fee_set`, `withdraw`.
 3. **Decode.** The event `value` is an `ScVal::Vec` with the fields in a fixed order (for example,
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
@@ -179,7 +193,7 @@ that changes `src/events.rs` must update it.
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |
 | `src/events.rs`, `src/errors.rs`, `src/types.rs` | Events, error codes, stored types |
 | `src/test.rs`, `test_snapshots/` | Unit tests and tracked auth snapshots |
-| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `template_cids.py` |
+| `scripts/` | `deploy.sh`, `smoke-testnet.sh`, `multisig-admin-demo.sh`, `template_cids.py` |
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
 
@@ -192,6 +206,7 @@ that changes `src/events.rs` must update it.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): deploying and redeploying
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): pre-release gates
 - [docs/testnet-smoke-run.md](docs/testnet-smoke-run.md): recorded end-to-end testnet run
+- [docs/runs/181-multisig-admin.md](docs/runs/181-multisig-admin.md): recorded 2-of-3 multisig admin run
 
 ## Contributing
 

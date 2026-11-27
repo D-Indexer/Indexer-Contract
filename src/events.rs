@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
 use crate::types::Config;
 
@@ -6,6 +6,24 @@ use crate::types::Config;
 pub struct FolderClaimed {
     pub owner: Address,
     pub folder_name: String,
+    /// Appended field: the claim fee paid, 0 when the fee is disabled.
+    pub fee_paid: i128,
+}
+
+#[contractevent(topics = ["fee_set"], data_format = "vec")]
+pub struct ClaimFeeSet {
+    pub admin: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub treasury: Address,
+}
+
+#[contractevent(topics = ["withdraw"], data_format = "vec")]
+pub struct Withdrawn {
+    pub admin: Address,
+    pub token: Address,
+    pub to: Address,
+    pub amount: i128,
 }
 
 #[contractevent(topics = ["port_mint"], data_format = "vec")]
@@ -52,12 +70,60 @@ pub struct AdminRemoved {
     pub target: Address,
 }
 
-#[contractevent(topics = ["cfg_set"], data_format = "vec")]
-pub struct ConfigSet {
+#[contractevent(topics = ["adm_q"], data_format = "vec")]
+pub struct AdminChangeQueued {
     pub admin: Address,
-    pub max_folder_name_len: u32,
-    pub max_metadata_uri_len: u32,
-    pub max_templates: u32,
+    pub op_id: u32,
+    pub target: Address,
+    pub eta_ledger: u32,
+}
+
+#[contractevent(topics = ["adm_ex"], data_format = "vec")]
+pub struct AdminChangeExecuted {
+    pub admin: Address,
+    pub op_id: u32,
+    pub target: Address,
+}
+
+#[contractevent(topics = ["adm_cx"], data_format = "vec")]
+pub struct AdminChangeCancelled {
+    pub admin: Address,
+    pub op_id: u32,
+    pub target: Address,
+}
+
+pub fn admin_change_queued(
+    env: &Env,
+    admin: &Address,
+    op_id: u32,
+    target: &Address,
+    eta_ledger: u32,
+) {
+    AdminChangeQueued {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+        eta_ledger,
+    }
+    .publish(env);
+}
+
+pub fn admin_change_executed(env: &Env, admin: &Address, op_id: u32, target: &Address) {
+    AdminChangeExecuted {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+    }
+    .publish(env);
+}
+
+pub fn admin_change_cancelled(env: &Env, admin: &Address, op_id: u32, target: &Address) {
+    AdminChangeCancelled {
+        admin: admin.clone(),
+        op_id,
+        target: target.clone(),
+    }
+    .publish(env);
 }
 
 pub fn contract_initialized(env: &Env, admin: &Address) {
@@ -83,10 +149,31 @@ pub fn admin_removed(env: &Env, admin: &Address, target: &Address) {
     .publish(env);
 }
 
-pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String) {
+pub fn folder_claimed(env: &Env, owner: &Address, folder_name: &String, fee_paid: i128) {
     FolderClaimed {
         owner: owner.clone(),
         folder_name: folder_name.clone(),
+        fee_paid,
+    }
+    .publish(env);
+}
+
+pub fn claim_fee_set(env: &Env, admin: &Address, fee: &crate::types::ClaimFee) {
+    ClaimFeeSet {
+        admin: admin.clone(),
+        token: fee.token.clone(),
+        amount: fee.amount,
+        treasury: fee.treasury.clone(),
+    }
+    .publish(env);
+}
+
+pub fn withdrawn(env: &Env, admin: &Address, token: &Address, to: &Address, amount: i128) {
+    Withdrawn {
+        admin: admin.clone(),
+        token: token.clone(),
+        to: to.clone(),
+        amount,
     }
     .publish(env);
 }
@@ -125,12 +212,36 @@ pub fn template_assigned(env: &Env, owner: &Address, template_id: u32) {
     .publish(env);
 }
 
-pub fn config_set(env: &Env, admin: &Address, config: &Config) {
-    ConfigSet {
-        admin: admin.clone(),
-        max_folder_name_len: config.max_folder_name_len,
-        max_metadata_uri_len: config.max_metadata_uri_len,
-        max_templates: config.max_templates,
+/// Emitted by `sponsored_claim` in addition to the unchanged `folder_cl`
+/// event, so existing `folder_cl` consumers keep decoding the same payload.
+#[contractevent(topics = ["claim_spon"], data_format = "vec")]
+pub struct ClaimSponsored {
+    pub sponsor: Address,
+    pub owner: Address,
+    pub folder_name: String,
+}
+
+#[contractevent(topics = ["folder_rn"], data_format = "vec")]
+pub struct FolderRenewed {
+    pub owner: Address,
+    pub folder_name: String,
+    pub expiry: u64,
+}
+
+pub fn claim_sponsored(env: &Env, sponsor: &Address, owner: &Address, folder_name: &String) {
+    ClaimSponsored {
+        sponsor: sponsor.clone(),
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+    }
+    .publish(env);
+}
+
+pub fn folder_renewed(env: &Env, owner: &Address, folder_name: &String, expiry: u64) {
+    FolderRenewed {
+        owner: owner.clone(),
+        folder_name: folder_name.clone(),
+        expiry,
     }
     .publish(env);
 }

@@ -35,29 +35,27 @@ Constants are in [`src/constants.rs`](../src/constants.rs). One day is about 17,
   `stellar contract restore`; it is not lost.
 - Read-only calls that are only simulated, never submitted, don't persist extensions.
 
-## Public TTL extension
+## Upgrades
 
-Two unauthenticated entry points let a backend or cron job keep active records alive without
-touching their data:
+`upgrade(admin, new_wasm_hash)` is admin-only and calls
+`env.deployer().update_current_contract_wasm`. It replaces the contract **code** only:
 
-| Function | Keys extended | Returns |
-|---|---|---|
-| `extend_owner_ttl(owner)` | `OwnerFolder(owner)`, `FolderOwner(name)`, `UserTemplate(owner)`, `Portfolio(owner)` | number of keys extended |
-| `extend_template_ttl(template_id)` | `Template(template_id)`, `TemplateList` | number of keys extended |
+- Instance storage (`Initialized`, `AdminList`) and every persistent entry (`Template`,
+  `TemplateList`, `FolderOwner`, `OwnerFolder`, `UserTemplate`, `Portfolio`) are preserved
+  unchanged. No migration step is needed for a code-only upgrade.
+- The admin list is read from storage, so the same admins keep control after the upgrade.
+- `version()` returns `CONTRACT_VERSION` from [`src/constants.rs`](../src/constants.rs). Bump it
+  in the same PR as any upgrade so operators can confirm which code is live.
 
-- Neither function requires a signature and neither writes or changes any value.
-- Missing keys are skipped silently, so calling them for an owner or template that does not
-  exist is a no-op that returns `0`.
-- Each key is extended to 120 days, subject to the same threshold as every other read: a key
-  whose remaining TTL is still above 90 days is not re-extended, so repeated calls are cheap.
+Compatibility rules for upgrades:
 
-### Suggested schedule
+- **Never** rename or repurpose a `DataKey` variant, and never change the type of an existing
+  value. Add new variants instead; old entries stay readable.
+- New keys must tolerate being absent (`Option`/default) so a contract upgraded from an older
+  version keeps working without a migration.
+- Removing a key is only safe once no live deployment can still hold it.
+- If a layout change is unavoidable, ship a migration entry point in the new code and run it
+  right after `upgrade` in the same release.
 
-- Run the job **once a day** for every owner seen in the last 30 days (e.g. owners with recent
-  `claim_folder`, `set_user_template`, `mint_portfolio` or `update_portfolio` activity).
-- Run it **once a week** for every registered template ID (`list_templates`).
-- Because of the 90-day threshold, a daily run only pays rent for entries that actually need it;
-  a monthly run is the minimum that keeps active records from ever reaching the 120-day archive
-  point. Prefer daily so a missed run or two is harmless.
-- Batch calls (a few dozen per transaction) to stay well inside the per-transaction resource
-  limits; the functions are idempotent, so retries are safe.
+Use [`scripts/upgrade.sh`](../scripts/upgrade.sh) to upload and apply a new wasm hash.
+

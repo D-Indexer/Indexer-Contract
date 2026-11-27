@@ -1,0 +1,23 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  errors-json:
+    name: attach errors.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify errors.json is current
+        run: python3 scripts/errors_json.py --check
+
+      - name: Upload errors.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" errors.json --clobber
