@@ -18,6 +18,7 @@ jobs:
   gitleaks:
     name: secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -47,6 +48,7 @@ jobs:
   scout:
     name: Soroban static analysis (Scout)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
