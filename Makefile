@@ -65,6 +65,12 @@ errors-json:
 sdk-compat:
 	./scripts/sdk-compat.sh
 
+events-schema:
+	python3 scripts/events_schema.py
+
+events-schema-check:
+	python3 scripts/events_schema.py --check
+
 snapshot-list:
 	@find test_snapshots -type f | sort
 

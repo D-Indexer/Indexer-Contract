@@ -262,7 +262,11 @@ fn is_valid_cid(bytes: &Bytes) -> bool {
     if bytes.get(0) == Some(CIDV1_MULTIBASE_PREFIX) {
         return is_valid_cidv1(bytes);
     }
-    false
+    Err(ContractError::CidBadPrefix)
+}
+
+fn is_valid_cid(bytes: &Bytes) -> bool {
+    check_cid(bytes).is_ok()
 }
 
 /// Validates a Folder name: `<label>.folder`, where the label is at least
@@ -282,11 +286,11 @@ pub fn require_valid_folder_name(
         return Err(ContractError::InvalidFolderName);
     }
     let label = bytes.slice(0..len - suffix_len);
-    if !all_bytes(&label, is_label_byte)
-        || label.first() == Some(b'-')
-        || label.last() == Some(b'-')
-    {
-        return Err(ContractError::InvalidFolderName);
+    if !all_bytes(&label, is_label_byte) {
+        return Err(ContractError::FolderNameBadChars);
+    }
+    if label.first() == Some(b'-') || label.last() == Some(b'-') {
+        return Err(ContractError::FolderNameBadHyphen);
     }
 }
 

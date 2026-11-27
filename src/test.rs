@@ -8,6 +8,8 @@ use soroban_sdk::{
     },
     Address, Env, Event as _, IntoVal, String, Val, Vec,
 };
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::xdr::ToXdr;
 
 use crate::constants::{
     DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
@@ -143,10 +145,10 @@ fn test_owner_cannot_claim_second_folder() {
 fn test_short_folder_name_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "ab");
+    let name = String::from_str(&t.env, "ab.folder");
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooShort);
 }
 
 #[test]
@@ -159,7 +161,7 @@ fn test_long_folder_name_rejected() {
     );
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooLong);
 }
 
 #[test]
@@ -1306,6 +1308,172 @@ fn test_template_registry_is_bounded() {
     let res = client.try_register_template(&admin, &(MAX_TEMPLATES + 1), &uri);
     expect_contract_error(res, ContractError::TemplateLimitReached);
     assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
+}
+
+// ── Golden event fixtures ───────────────────────────────────────────────────
+
+/// Fixed addresses keep the golden XDR fixtures deterministic across runs.
+const GOLDEN_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const GOLDEN_OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+const GOLDEN_NEW_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACZ7M";
+
+fn golden_env() -> (Env, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FolderContract, ());
+    let admin = Address::from_str(&env, GOLDEN_ADMIN);
+    let owner = Address::from_str(&env, GOLDEN_OWNER);
+    let new_admin = Address::from_str(&env, GOLDEN_NEW_ADMIN);
+    (env, contract_id, admin, owner, new_admin)
+}
+
+fn golden_cid(env: &Env) -> String {
+    String::from_str(
+        env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    )
+}
+
+fn golden_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG/1.json",
+    )
+}
+
+/// Triggers every contract event and returns `(topic, topics_xdr_b64, data_xdr_b64)`.
+fn golden_events() -> std::vec::Vec<(std::string::String, std::string::String, std::string::String)> {
+    let (env, contract_id, admin, owner, new_admin) = golden_env();
+    let client = FolderContractClient::new(&env, &contract_id);
+    let cid = golden_cid(&env);
+    let uri = golden_uri(&env);
+
+    client.initialize(&admin);
+    client.add_admin(&admin, &new_admin);
+    client.remove_admin(&admin, &new_admin);
+    client.claim_folder(&owner, &String::from_str(&env, "golden.folder"));
+    client.register_template(&admin, &1, &uri);
+    client.set_user_template(&owner, &1);
+    client.mint_portfolio(&owner, &1, &cid);
+    client.update_portfolio(&owner, &cid);
+
+    let mut out = std::vec::Vec::new();
+    for (topics, data) in env.events().all().filter_by_contract(&contract_id) {
+        let topic = topics.get(0).unwrap();
+        let topic_str = match topic {
+            soroban_sdk::xdr::ScVal::Symbol(sym) => {
+                std::string::String::from_utf8(sym.0.to_vec()).unwrap()
+            }
+            _ => panic!("unexpected topic type"),
+        };
+        out.push((
+            topic_str,
+            base64_encode(&topics.to_xdr(&env)),
+            base64_encode(&data.to_xdr(&env)),
+        ));
+    }
+    out
+}
+
+fn base64_encode(bytes: &soroban_sdk::Bytes) -> std::string::String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = std::string::String::new();
+    let mut chunk = [0u8; 3];
+    let mut n = 0;
+    for byte in bytes.iter() {
+        chunk[n] = byte;
+        n += 1;
+        if n == 3 {
+            out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+            out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+            out.push(ALPHABET[(((chunk[1] & 0x0f) << 2) | (chunk[2] >> 6)) as usize] as char);
+            out.push(ALPHABET[(chunk[2] & 0x3f) as usize] as char);
+            n = 0;
+        }
+    }
+    if n == 1 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[((chunk[0] & 0x03) << 4) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if n == 2 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+        out.push(ALPHABET[((chunk[1] & 0x0f) << 2) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn fixture_path(topic: &str) -> std::string::String {
+    std::format!("{}/fixtures/events/{}.json", env!("CARGO_MANIFEST_DIR"), topic)
+}
+
+fn fixture_json(topics_b64: &str, data_b64: &str, decoded: &str) -> std::string::String {
+    std::format!(
+        "{{\n  \"topics_xdr_b64\": \"{}\",\n  \"data_xdr_b64\": \"{}\",\n  \"decoded\": {}\n}}\n",
+        topics_b64,
+        data_b64,
+        decoded
+    )
+}
+
+/// Regenerates `fixtures/events/<topic>.json`. Run with
+/// `UPDATE_EVENT_FIXTURES=1 cargo test golden_event_fixtures` to refresh them.
+#[test]
+fn golden_event_fixtures() {
+    let update = std::env::var("UPDATE_EVENT_FIXTURES").is_ok();
+    let events = golden_events();
+    assert_eq!(events.len(), 8, "every event topic must be covered");
+
+    for (topic, topics_b64, data_b64) in events {
+        let decoded = std::format!(
+            "{{\"topics_xdr_b64\": \"{}\", \"data_xdr_b64\": \"{}\"}}",
+            topics_b64, data_b64
+        );
+        let expected = fixture_json(&topics_b64, &data_b64, &decoded);
+        let path = fixture_path(&topic);
+        if update {
+            std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
+            std::fs::write(&path, expected.as_bytes()).unwrap();
+        } else {
+            let actual = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("missing fixture {path}; run UPDATE_EVENT_FIXTURES=1"));
+            assert_eq!(actual, expected, "fixture drift for {topic}");
+        }
+    }
+}
+
+/// Round-trips every committed fixture back through XDR decoding.
+#[test]
+fn golden_event_fixtures_round_trip() {
+    let env = Env::default();
+    let dir = std::format!("{}/fixtures/events", env!("CARGO_MANIFEST_DIR"));
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let topics_b64 = extract_json_field(&raw, "topics_xdr_b64");
+        let data_b64 = extract_json_field(&raw, "data_xdr_b64");
+        let topics = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &topics_b64).unwrap();
+        let data = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &data_b64).unwrap();
+        assert_eq!(topics.to_xdr_base64(&env), topics_b64);
+        assert_eq!(data.to_xdr_base64(&env), data_b64);
+        count += 1;
+    }
+    assert_eq!(count, 8, "expected one fixture per event topic");
+}
+
+fn extract_json_field(raw: &str, field: &str) -> std::string::String {
+    let key = std::format!("\"{field}\": \"");
+    let start = raw.find(&key).unwrap_or_else(|| panic!("missing {field}")) + key.len();
+    let rest = &raw[start..];
+    let end = rest.find('"').unwrap();
+    std::string::String::from(&rest[..end])
 }
 
 // ── Admin management ────────────────────────────────────────────────────────
