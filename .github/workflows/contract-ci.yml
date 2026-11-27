@@ -53,6 +53,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           make script-check
+          shellcheck scripts/deploy.sh
 
       - name: errors.json matches src/errors.rs
         run: |
@@ -62,7 +63,10 @@ jobs:
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
-      - name: TTL monitor unit tests
+      - name: Deployment records match deployments/schema.json
+        run: python3 scripts/validate_deployments.py
+
+      - name: Script unit tests (TTL monitor, deploy.sh with mocked stellar, schema, ledger backfill)
         run: python3 -m unittest discover -s scripts/tests
 
   supply-chain:
