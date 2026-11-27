@@ -1,0 +1,13 @@
+[package]
+name = "folder-validation-js"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "wasm-bindgen bindings for folder-validation"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+folder-validation = { path = "../folder-validation" }
+wasm-bindgen = "0.2"

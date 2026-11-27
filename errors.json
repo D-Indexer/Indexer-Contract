@@ -1,0 +1,128 @@
+[
+  {
+    "code": 1,
+    "name": "AlreadyInitialized",
+    "description": "The contract has already been initialized.",
+    "user_message": "This contract is already set up."
+  },
+  {
+    "code": 2,
+    "name": "NotInitialized",
+    "description": "The contract has not been initialized yet.",
+    "user_message": "This contract is not set up yet. Please try again later."
+  },
+  {
+    "code": 3,
+    "name": "FolderNameTaken",
+    "description": "The Folder name is already owned by another address.",
+    "user_message": "That Folder name is already taken."
+  },
+  {
+    "code": 4,
+    "name": "FolderNotFound",
+    "description": "No Folder exists for the given name or owner.",
+    "user_message": "We could not find that Folder."
+  },
+  {
+    "code": 5,
+    "name": "PortfolioNotFound",
+    "description": "The owner has no minted portfolio.",
+    "user_message": "No portfolio has been minted for this Folder yet."
+  },
+  {
+    "code": 6,
+    "name": "TemplateNotFound",
+    "description": "The template ID is not registered.",
+    "user_message": "That template does not exist."
+  },
+  {
+    "code": 7,
+    "name": "Unauthorized",
+    "description": "The caller is not allowed to perform this action.",
+    "user_message": "You are not allowed to do that."
+  },
+  {
+    "code": 8,
+    "name": "InvalidCID",
+    "description": "The IPFS CID is malformed.",
+    "user_message": "The portfolio content ID is not valid."
+  },
+  {
+    "code": 9,
+    "name": "InvalidFolderName",
+    "description": "The Folder name does not follow the naming rules.",
+    "user_message": "Folder names must look like name.folder and use only a-z, 0-9 and hyphens."
+  },
+  {
+    "code": 10,
+    "name": "AdminAlreadyExists",
+    "description": "The address is already an admin.",
+    "user_message": "That address is already an admin."
+  },
+  {
+    "code": 11,
+    "name": "AdminNotFound",
+    "description": "The address is not an admin.",
+    "user_message": "That address is not an admin."
+  },
+  {
+    "code": 12,
+    "name": "CannotRemoveLastAdmin",
+    "description": "Removing the admin would leave the contract without admins.",
+    "user_message": "The last admin cannot be removed."
+  },
+  {
+    "code": 13,
+    "name": "PortfolioAlreadyMinted",
+    "description": "The owner has already minted a portfolio.",
+    "user_message": "A portfolio has already been minted for this Folder."
+  },
+  {
+    "code": 14,
+    "name": "InvalidMetadataURI",
+    "description": "The template metadata URI is malformed.",
+    "user_message": "The template metadata link is not valid."
+  },
+  {
+    "code": 15,
+    "name": "TemplateAlreadyExists",
+    "description": "The template ID is already registered.",
+    "user_message": "A template with that ID already exists."
+  },
+  {
+    "code": 16,
+    "name": "FolderAlreadyClaimed",
+    "description": "The owner already holds a Folder.",
+    "user_message": "You already own a Folder."
+  },
+  {
+    "code": 17,
+    "name": "InvalidTemplateID",
+    "description": "The template ID is out of range.",
+    "user_message": "That template ID is not valid."
+  },
+  {
+    "code": 18,
+    "name": "TemplateLimitReached",
+    "description": "The maximum number of templates is registered.",
+    "user_message": "No more templates can be registered."
+  },
+  {
+    "code": 19,
+    "name": "TooManyAdmins",
+    "description": "The maximum number of admins is reached.",
+    "user_message": "No more admins can be added."
+  },
+  {
+    "code": 20,
+    "name": "InvalidAmount",
+    "description": "The token amount is negative, zero where not allowed, or above its cap.",
+    "user_message": "The amount is not valid."
+  },
+  {
+    "code": 21,
+    "name": "InsufficientBalance",
+    "description": "The contract treasury holds less than the requested amount.",
+    "user_message": "The treasury does not hold enough funds for this withdrawal."
+  }
+]
