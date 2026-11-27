@@ -241,6 +241,31 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "Admin"
+                          },
+                          {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                          }
+                        ]
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "AdminCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "AdminList"
                           }
                         ]

@@ -5,8 +5,8 @@
 | Function | Signer |
 |---|---|
 | `initialize` | `admin` (the first admin) |
-| `add_admin`, `remove_admin`, `register_template` | `admin` argument, which must be in the admin list |
-| `claim_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
+| `add_admin`, `remove_admin`, `register_template`, `reserve_folder`, `unreserve_folder` | `admin` argument, which must be in the admin list |
+| `claim_folder`, `release_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
 | All `get_*`, `list_templates`, `verify_portfolio` | none |
 
 Tests assert the exact signer for every write and check that writes fail when nobody has signed
@@ -17,10 +17,27 @@ Tests assert the exact signer for every write and check that writes fail when no
 - The contract can be initialized only once, and at least one admin must always remain.
 - The admin list holds at most 10 entries; the template registry holds at most 256.
 - One address holds at most one Folder name, and each name belongs to at most one address.
-  Names are permanent: there is no release or transfer.
+  An owner can give up their name with `release_folder`; there is no transfer.
 - An address mints at most one portfolio. A portfolio always shows the owner's currently selected
   template.
 - Template IDs are non-zero and registered once.
+- A reserved name can't be claimed by anyone, admins included, and a name that has an owner can't
+  be reserved.
+
+## Releasing a Folder name
+
+- **Portfolio policy: reject.** `release_folder` fails with `PortfolioExists` (30) while the owner
+  holds a minted portfolio. A portfolio is anchored to the owner's identity, and leaving it behind
+  would show it under no name, or under a name someone else claims later. The portfolio must be
+  burned first. The contract has no burn entry point yet, so for now owners with a portfolio
+  can't release. Cascading deletion was rejected because it would silently destroy the
+  portfolio record.
+- **Anti-sniping cooldown.** A released name is unclaimable for `RELEASE_COOLDOWN_LEDGERS`
+  (~7 days, `src/constants.rs`), counted from the release ledger stored under
+  `ReleasedAt(name)`. The cooldown applies to every address, the former owner included, because
+  only the ledger sequence is stored. The first claim after the cooldown deletes the marker.
+- **No orphaned keys.** Release deletes `FolderOwner`, `OwnerFolder`, `FolderExpiry`,
+  `FolderMeta` and the owner's `UserTemplate`. Only the `ReleasedAt` marker stays until the next claim.
 
 ## Known risks
 

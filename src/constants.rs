@@ -71,3 +71,24 @@ pub const MAX_CLAIM_FEE: i128 = 10_000 * 10_000_000;
 /// the token's smallest unit (100_000 XLM for a 7-decimal token). Larger
 /// withdrawals must be split across calls, each emitting its own event.
 pub const MAX_WITHDRAW_PER_CALL: i128 = 100_000 * 10_000_000;
+
+/// Delay applied to queued admin changes (~24h at ~5 seconds per ledger).
+pub const ADMIN_TIMELOCK_LEDGERS: u32 = DAY_IN_LEDGERS;
+
+/// Maximum number of admin changes that may be queued at once. Bounds the
+/// size of the pending queue stored in instance storage.
+pub const MAX_PENDING_ADMIN_CHANGES: u32 = 16;
+
+/// Ledgers a released Folder name stays unclaimable (~7 days), so a name
+/// can't be sniped the moment its owner lets go of it.
+pub const RELEASE_COOLDOWN_LEDGERS: u32 = 7 * DAY_IN_LEDGERS;
+
+/// Maximum number of entries accepted by the batch reads `get_folders` and
+/// `get_identities`. Keeps one call well inside the per-transaction CPU,
+/// memory and footprint limits.
+pub const MAX_BATCH_READ: u32 = 50;
+
+/// Maximum number of length-based price tiers.
+pub const MAX_PRICE_TIERS: u32 = 5;
+/// Seconds per day, used to express lease periods in days.
+pub const SECONDS_PER_DAY: u64 = 86_400;

@@ -16,13 +16,12 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::ClaimFee;
-use crate::types::PortfolioNFT;
-use crate::types::Template;
-use crate::types::{LeaseConfig, PortfolioNFT, PriceTiers};
+use crate::types::{
+    AdminOp, ClaimFee, FolderMeta, LeaseConfig, PortfolioNFT, PriceTiers, Template,
+};
 
 #[contract]
 pub struct FolderContract;
@@ -72,21 +71,13 @@ impl FolderContract {
     }
 
     /// Executes a queued admin change once its ETA ledger has passed.
-    pub fn execute_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn execute_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::execute_admin_change(&env, &admin, op_id)
     }
 
     /// Cancels a queued admin change before it is executed.
-    pub fn cancel_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
     }
@@ -138,7 +129,7 @@ impl FolderContract {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract(ContractExecutable::Wasm(new_wasm_hash.clone()));
         events::contract_upgraded(&env, &admin, &new_wasm_hash);
         Ok(())
     }
@@ -146,6 +137,63 @@ impl FolderContract {
     /// Returns the contract version (`CONTRACT_VERSION`).
     pub fn version(_env: Env) -> u32 {
         constants::CONTRACT_VERSION
+    }
+
+    // ── Pricing ───────────────────────────────────────────────────────────────
+
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    /// Labels longer than every tier pay the `set_claim_fee` amount.
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to claim `folder_name` (or to renew it for one period).
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
+    // ── Leases ────────────────────────────────────────────────────────────────
+
+    /// Enables leases of `period_days` with a `grace_days` grace period for
+    /// new claims. `period_days == 0` restores permanent mode (the default).
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        period_days: u32,
+        grace_days: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        let config = (period_days > 0).then(|| LeaseConfig {
+            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
+            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
+        });
+        storage::set_lease_config(&env, &config);
+        Ok(())
+    }
+
+    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
+        storage::get_lease_config(&env)
+    }
+
+    /// Extends the owner's lease by `periods`; returns the new expiry.
+    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        identity_map::renew_folder(&env, &owner, periods)
+    }
+
+    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
+    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
+        identity_map::get_folder_expiry(&env, &folder_name)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -171,8 +219,66 @@ impl FolderContract {
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
     }
 
+    /// Releases the owner's Folder name. The name
+    /// is claimable again after `RELEASE_COOLDOWN_LEDGERS`. Fails with
+    /// `PortfolioExists` while the owner holds a portfolio.
+    pub fn release_folder(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::release_folder(&env, &owner)
+    }
+
+    /// Reserves `folder_name` so ordinary users cannot claim it. Admin only.
+    pub fn reserve_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::reserve_folder(&env, &admin, &folder_name)
+    }
+
+    /// Lifts a reservation made with `reserve_folder`. Admin only.
+    pub fn unreserve_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::unreserve_folder(&env, &admin, &folder_name)
+    }
+
+    /// Whether `folder_name` is reserved by an admin.
+    pub fn is_reserved(env: Env, folder_name: String) -> bool {
+        storage::is_reserved(&env, &folder_name)
+    }
+
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
         identity_map::get_folder(&env, &folder_name)
+    }
+
+    /// Resolves up to `MAX_BATCH_READ` names in one call. The output matches
+    /// the input order; names `get_folder` would reject map to `None`.
+    pub fn get_folders(
+        env: Env,
+        names: Vec<String>,
+    ) -> Result<Vec<Option<Address>>, ContractError> {
+        identity_map::get_folders(&env, &names)
+    }
+
+    /// Resolves up to `MAX_BATCH_READ` owners in one call. The output matches
+    /// the input order; owners `get_identity` would reject map to `None`.
+    pub fn get_identities(
+        env: Env,
+        owners: Vec<Address>,
+    ) -> Result<Vec<Option<String>>, ContractError> {
+        identity_map::get_identities(&env, &owners)
+    }
+
+    /// When and at which ledger `folder_name` was claimed. Fails with
+    /// `FolderNotFound` for unclaimed names and for names claimed before this
+    /// metadata was introduced.
+    pub fn get_folder_meta(env: Env, folder_name: String) -> Result<FolderMeta, ContractError> {
+        identity_map::get_folder_meta(&env, &folder_name)
     }
 
     pub fn get_identity(env: Env, owner: Address) -> Result<String, ContractError> {

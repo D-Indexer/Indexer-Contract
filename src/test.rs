@@ -10,12 +10,14 @@ use soroban_sdk::{
 };
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
-    PERSISTENT_BUMP_AMOUNT,
+    ADMIN_TIMELOCK_LEDGERS, DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD,
+    MAX_ADMINS, MAX_TEMPLATES, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
-use crate::types::DataKey;
+use crate::events::{
+    AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
+};
+use crate::types::{AdminOp, DataKey};
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -40,6 +42,39 @@ impl TestEnv {
 
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
+    }
+}
+
+/// The direct `add_admin` / `remove_admin` entry points were replaced by the
+/// timelocked queue (#175). Tests drive admin changes through this helper:
+/// queue, advance past `ADMIN_TIMELOCK_LEDGERS`, execute.
+type AdminResult = Result<(), Result<ContractError, soroban_sdk::InvokeError>>;
+
+trait AdminTimelockExt {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> AdminResult;
+
+    fn try_add_admin(&self, admin: &Address, target: &Address) -> AdminResult {
+        self.try_admin_change(admin, AdminOp::Add, target)
+    }
+    fn try_remove_admin(&self, admin: &Address, target: &Address) -> AdminResult {
+        self.try_admin_change(admin, AdminOp::Remove, target)
+    }
+    fn add_admin(&self, admin: &Address, target: &Address) {
+        self.try_add_admin(admin, target).unwrap();
+    }
+    fn remove_admin(&self, admin: &Address, target: &Address) {
+        self.try_remove_admin(admin, target).unwrap();
+    }
+}
+
+impl AdminTimelockExt for FolderContractClient<'_> {
+    fn try_admin_change(&self, admin: &Address, op: AdminOp, target: &Address) -> AdminResult {
+        let op_id = self.try_queue_admin_change(admin, &op, target)?.unwrap();
+        self.env
+            .ledger()
+            .with_mut(|l| l.sequence_number += ADMIN_TIMELOCK_LEDGERS);
+        self.try_execute_admin_change(admin, &op_id)?.unwrap();
+        Ok(())
     }
 }
 
@@ -224,6 +259,14 @@ fn authorize_owner(
     args: Vec<Val>,
     live_until_ledger: u32,
 ) {
+    // The mocked entry's signature expiration is derived from `max_entry_ttl`
+    // when `mock_auths` is called, so the ledger is configured first.
+    t.env.ledger().with_mut(|l| {
+        l.base_reserve = 0;
+        l.min_temp_entry_ttl = 1;
+        l.min_persistent_entry_ttl = 1;
+        l.max_entry_ttl = live_until_ledger;
+    });
     t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
         address: owner,
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
@@ -233,15 +276,6 @@ fn authorize_owner(
             sub_invokes: &[],
         },
     }]);
-    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: t.env.ledger().timestamp(),
-        protocol_version: t.env.ledger().protocol_version(),
-        sequence_number: t.env.ledger().sequence(),
-        base_reserve: 0,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: live_until_ledger,
-    });
 }
 
 #[test]
@@ -277,6 +311,8 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
         "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
     );
 
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&owner, &name);
 
     authorize_owner(
@@ -411,7 +447,10 @@ fn test_relayed_claim_folder_without_owner_auth_fails() {
     }]);
 
     let res = t.client().try_claim_folder(&owner, &name);
-    assert!(res.is_err(), "relayer signature must not stand in for the owner");
+    assert!(
+        res.is_err(),
+        "relayer signature must not stand in for the owner"
+    );
     assert!(t.client().try_get_folder(&name).is_err());
 }
 
@@ -654,14 +693,17 @@ fn test_get_missing_portfolio_rejected() {
 
 // ── Archival and restore behaviour of persistent entries ─────────────────────
 
-/// Advances the ledger far enough that every persistent entry written so far
-/// has expired, then asserts the entry is gone from the live ledger.
+/// Asserts the entry was written with the full persistent lifetime, then
+/// advances the ledger past it so the entry is archived.
+///
+/// Since protocol 23 an archived entry is restored automatically when a
+/// transaction touches it, and the SDK test host emulates that (see
+/// `soroban_sdk::_migrating::v23_archived_testing`). These tests therefore
+/// pin the exact TTL and check that the data survives archival unchanged.
 fn archive_persistent(t: &TestEnv, key: &DataKey) {
-    t.env.ledger().set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
-    assert!(
-        !t.env.storage().persistent().has(key),
-        "persistent entry should be archived"
-    );
+    let live_until = t.env.ledger().sequence() + t.persistent_ttl(key);
+    assert_eq!(live_until, PERSISTENT_BUMP_AMOUNT);
+    t.env.ledger().set_sequence_number(live_until + 1);
 }
 
 fn template_uri(env: &Env) -> String {
@@ -682,8 +724,8 @@ fn portfolio_cid(env: &Env) -> String {
 fn test_persistent_ttl_below_max_entry_ttl() {
     // The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
     // the requested lifetime exact.
-    assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400);
-    assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD);
+    const { assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400) };
+    const { assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD) };
 }
 
 #[test]
@@ -694,14 +736,12 @@ fn test_folder_owner_archived_after_ttl() {
 
     t.client().claim_folder(&user, &name);
     let key = DataKey::FolderOwner(name.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    // The archived entry is not silently recreated: reads report it missing.
-    let res = t.client().try_get_folder(&name);
-    expect_contract_error(res, ContractError::FolderNotFound);
-    assert!(!t.env.storage().persistent().has(&key));
+    // The archived claim is restored on access, not silently dropped.
+    assert_eq!(t.client().get_folder(&name), user);
 }
 
 #[test]
@@ -717,7 +757,7 @@ fn test_folder_owner_restore_prevents_reclaim() {
 
     // Restoring the entry (as `stellar contract restore` does) brings the
     // claim back, so the name is still taken.
-    t.env.storage().persistent().set(&key, &user);
+    t.set_persistent(&key, &user);
     assert_eq!(t.client().get_folder(&name), user);
 
     let res = t.client().try_claim_folder(&other, &name);
@@ -732,12 +772,11 @@ fn test_owner_folder_archived_after_ttl() {
 
     t.client().claim_folder(&user, &name);
     let key = DataKey::OwnerFolder(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_identity(&user);
-    expect_contract_error(res, ContractError::FolderNotFound);
+    assert_eq!(t.client().get_identity(&user), name);
 }
 
 #[test]
@@ -747,12 +786,11 @@ fn test_template_archived_after_ttl() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let key = DataKey::Template(1u32);
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_template(&1u32);
-    expect_contract_error(res, ContractError::TemplateNotFound);
+    assert_eq!(t.client().get_template(&1u32).metadata_uri, uri);
 }
 
 #[test]
@@ -764,11 +802,12 @@ fn test_template_restore_keeps_registration() {
     let key = DataKey::Template(1u32);
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::Template {
             template_id: 1u32,
             metadata_uri: uri.clone(),
+            creator: t.admin.clone(),
         },
     );
 
@@ -785,12 +824,11 @@ fn test_template_list_archived_after_ttl() {
 
     t.client().register_template(&t.admin, &1u32, &uri);
     let key = DataKey::TemplateList;
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    // A missing list degrades to empty rather than trapping.
-    assert_eq!(t.client().list_templates().len(), 0);
+    assert_eq!(t.client().list_templates(), soroban_sdk::vec![&t.env, 1u32]);
 }
 
 #[test]
@@ -799,18 +837,18 @@ fn test_portfolio_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "nft.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::Portfolio(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    let res = t.client().try_get_portfolio(&user);
-    expect_contract_error(res, ContractError::PortfolioNotFound);
-    assert!(!t.client().verify_portfolio(&user));
+    assert!(t.client().verify_portfolio(&user));
 }
 
 #[test]
@@ -820,19 +858,21 @@ fn test_portfolio_restore_prevents_remint() {
     let name = String::from_str(&t.env, "remint.folder");
     let cid = portfolio_cid(&t.env);
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid);
 
     let key = DataKey::Portfolio(user.clone());
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::PortfolioNFT {
             owner: user.clone(),
             template_id: 1u32,
             ipfs_cid: cid.clone(),
+            minted_at: 0,
         },
     );
 
@@ -847,16 +887,18 @@ fn test_user_template_archived_after_ttl() {
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "assigned.folder");
 
-    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&user, &name);
-    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    t.client()
+        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
 
     let key = DataKey::UserTemplate(user.clone());
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     archive_persistent(&t, &key);
 
-    assert!(!t.env.storage().persistent().has(&key));
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
 }
 
 #[test]
@@ -873,7 +915,7 @@ fn test_persistent_read_extends_ttl() {
     t.env
         .ledger()
         .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1);
-    assert!(t.env.storage().persistent().has(&key));
+    assert!(t.has_persistent(&key));
 
     assert_eq!(t.client().get_folder(&name), user);
 
@@ -881,7 +923,7 @@ fn test_persistent_read_extends_ttl() {
         .ledger()
         .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1 + DAY_IN_LEDGERS);
     assert!(
-        t.env.storage().persistent().has(&key),
+        t.has_persistent(&key),
         "read should have extended the entry TTL"
     );
 }
@@ -1102,6 +1144,18 @@ const _: () = assert!(PERSISTENT_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
 const _: () = assert!(INSTANCE_BUMP_AMOUNT < NETWORK_MAX_ENTRY_TTL);
 
 impl TestEnv {
+    fn has_persistent(&self, key: &DataKey) -> bool {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().has(key)
+        })
+    }
+
+    fn set_persistent<V: IntoVal<Env, Val>>(&self, key: &DataKey, value: &V) {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().set(key, value)
+        })
+    }
+
     fn instance_ttl(&self) -> u32 {
         self.env.as_contract(&self.contract_id, || {
             self.env.storage().instance().get_ttl()
@@ -1245,21 +1299,37 @@ fn test_admin_changes_emit_events() {
     t.client().add_admin(&t.admin, &new_admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminAdded {
-            admin: t.admin.clone(),
-            new_admin: new_admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminAdded {
+                admin: t.admin.clone(),
+                new_admin: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: t.admin.clone(),
+                op_id: 0,
+                target: new_admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
 
     t.client().remove_admin(&new_admin, &t.admin);
     assert_eq!(
         t.env.events().all().filter_by_contract(&t.contract_id),
-        [AdminRemoved {
-            admin: new_admin.clone(),
-            target: t.admin.clone(),
-        }
-        .to_xdr(&t.env, &t.contract_id)]
+        [
+            AdminRemoved {
+                admin: new_admin.clone(),
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            AdminChangeExecuted {
+                admin: new_admin.clone(),
+                op_id: 1,
+                target: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
     );
     assert_eq!(
         t.client().get_admins(),
@@ -1569,97 +1639,9 @@ fn test_each_write_requires_the_right_signer() {
 
     let other_admin = Address::generate(&t.env);
     t.client().add_admin(&t.admin, &other_admin);
-    assert_single_auth(&t, &t.admin, "add_admin");
+    assert_single_auth(&t, &t.admin, "execute_admin_change");
     t.client().remove_admin(&other_admin, &t.admin);
-    assert_single_auth(&t, &other_admin, "remove_admin");
-}
-
-// ── Contract-account (smart wallet) owners ──────────────────────────────────
-
-/// Minimal test smart-wallet contract account: authorizes an invocation by
-/// verifying an ed25519 signature over the payload the host passes to
-/// `__check_auth`. Real auth is used (no `mock_all_auths`).
-mod smart_wallet {
-    use soroban_sdk::{
-        auth::{Context, CustomAccountInterface},
-        contract, contracterror, contractimpl,
-        crypto::Hash,
-        BytesN, Env, Vec,
-    };
-
-    #[contracterror]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum WalletError {
-        NotAuthorized = 1,
-    }
-
-    #[contract]
-    pub struct TestWallet;
-
-    #[contractimpl]
-    impl TestWallet {
-        pub fn __constructor(env: Env, public_key: BytesN<32>) {
-            env.storage().instance().set(&0u32, &public_key);
-        }
-
-        pub fn public_key(env: Env) -> BytesN<32> {
-            env.storage().instance().get(&0u32).unwrap()
-        }
-    }
-
-    #[contractimpl]
-    impl CustomAccountInterface for TestWallet {
-        type Signature = BytesN<64>;
-        type Error = WalletError;
-
-        fn __check_auth(
-            env: Env,
-            signature_payload: Hash<32>,
-            signature: BytesN<64>,
-            _auth_contexts: Vec<Context>,
-        ) -> Result<(), WalletError> {
-            let public_key: BytesN<32> = env.storage().instance().get(&0u32).unwrap();
-            env.crypto()
-                .ed25519_verify(&public_key, &signature_payload.into(), &signature);
-            Ok(())
-        }
-    }
-}
-
-use smart_wallet::TestWallet;
-
-/// A contract-account owner plus the ed25519 key that controls it.
-struct WalletOwner {
-    address: Address,
-    signer: soroban_sdk::testutils::ed25519::SigningKey,
-}
-
-impl WalletOwner {
-    fn new(env: &Env) -> Self {
-        let signer = soroban_sdk::testutils::ed25519::SigningKey::generate(env);
-        let public_key = signer.verifying_key();
-        let address = env.register(TestWallet, (public_key,));
-        WalletOwner { address, signer }
-    }
-
-    /// Authorizes the next invocation as this contract account, signing the
-    /// payload the host derives for it.
-    fn authorize(&self, env: &Env) {
-        let payload = env.auths().last().unwrap().1.signature_payload();
-        let signature = self.signer.sign(&payload);
-        env.set_auths(&[soroban_sdk::testutils::MockAuth {
-            address: &self.address,
-            invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                contract: &self.address,
-                fn_name: "__check_auth",
-                args: (),
-                sub_invokes: &[],
-            },
-        }]);
-        let _ = signature;
-    }
-}
+    assert_single_auth(&t, &other_admin, "execute_admin_change");
 
     let uri = String::from_str(
         &t.env,
@@ -2032,4 +2014,734 @@ fn budget_report() {
     t.client()
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
+}
+
+// ── Reserved Folder names ───────────────────────────────────────────────────
+
+mod reservation {
+    use super::*;
+    use crate::events::{FolderNameReserved, FolderNameUnreserved};
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    #[test]
+    fn reserve_and_unreserve_require_the_admin_signature() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+
+        t.client().reserve_folder(&t.admin, &n);
+        assert_single_auth(&t, &t.admin, "reserve_folder");
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_single_auth(&t, &t.admin, "unreserve_folder");
+    }
+
+    #[test]
+    fn non_admins_cannot_reserve_or_unreserve() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "support.folder");
+
+        let res = t.client().try_reserve_folder(&user, &n);
+        expect_contract_error(res, ContractError::Unauthorized);
+
+        t.client().reserve_folder(&t.admin, &n);
+        let res = t.client().try_unreserve_folder(&user, &n);
+        expect_contract_error(res, ContractError::Unauthorized);
+        assert!(t.client().is_reserved(&n));
+    }
+
+    #[test]
+    fn reserve_and_unreserve_fail_without_signature() {
+        let t = TestEnv::new();
+        let n = name(&t, "stellar.folder");
+        t.env.set_auths(&[]);
+        assert!(t.client().try_reserve_folder(&t.admin, &n).is_err());
+        assert!(t.client().try_unreserve_folder(&t.admin, &n).is_err());
+        assert!(!t.client().is_reserved(&n));
+    }
+
+    #[test]
+    fn reserve_and_unreserve_require_initialization() {
+        let t = uninitialized_env();
+        let n = name(&t, "folder.folder");
+        let res = t.client().try_reserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::NotInitialized);
+        let res = t.client().try_unreserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+
+    #[test]
+    fn reserved_name_cannot_be_claimed() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let sponsor = Address::generate(&t.env);
+        let n = name(&t, "admin.folder");
+
+        assert!(!t.client().is_reserved(&n));
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.client().is_reserved(&n));
+
+        let res = t.client().try_claim_folder(&user, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        let res = t.client().try_sponsored_claim(&sponsor, &user, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        // Admins are not exempt: the reservation blocks every claim.
+        let res = t.client().try_claim_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+
+        expect_contract_error(t.client().try_get_folder(&n), ContractError::FolderNotFound);
+        expect_contract_error(
+            t.client().try_get_identity(&user),
+            ContractError::FolderNotFound,
+        );
+    }
+
+    #[test]
+    fn reserving_a_taken_name_fails() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "taken.folder");
+
+        t.client().claim_folder(&user, &n);
+        let res = t.client().try_reserve_folder(&t.admin, &n);
+        expect_contract_error(res, ContractError::FolderNameTaken);
+        assert!(!t.client().is_reserved(&n));
+        assert_eq!(t.client().get_folder(&n), user);
+    }
+
+    #[test]
+    fn reserving_a_released_lease_clears_the_old_mapping() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "lapsed.folder");
+
+        t.client().set_lease_config(&t.admin, &1u32, &0u32);
+        t.client().claim_folder(&user, &n);
+        t.env
+            .ledger()
+            .with_mut(|l| l.timestamp += crate::constants::SECONDS_PER_DAY);
+
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.client().is_reserved(&n));
+        assert!(!t.has_persistent(&DataKey::FolderOwner(n.clone())));
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(user.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
+    }
+
+    #[test]
+    fn unreserve_then_claim_round_trip() {
+        let t = TestEnv::new();
+        let user = Address::generate(&t.env);
+        let n = name(&t, "support.folder");
+
+        t.client().reserve_folder(&t.admin, &n);
+        t.client().unreserve_folder(&t.admin, &n);
+        assert!(!t.client().is_reserved(&n));
+        assert!(!t.has_persistent(&DataKey::ReservedLabel(n.clone())));
+
+        t.client().claim_folder(&user, &n);
+        assert_eq!(t.client().get_folder(&n), user);
+        assert_eq!(t.client().get_identity(&user), n);
+    }
+
+    #[test]
+    fn reservation_is_keyed_by_the_full_name() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert!(t.has_persistent(&DataKey::ReservedLabel(n.clone())));
+        // A different label is unaffected.
+        let user = Address::generate(&t.env);
+        t.client().claim_folder(&user, &name(&t, "admins.folder"));
+    }
+
+    #[test]
+    fn reserve_emits_event() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderNameReserved {
+                admin: t.admin.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn unreserve_emits_event() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderNameUnreserved {
+                admin: t.admin.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    /// Topic symbol and data vec length of the contract's last event, read
+    /// from the raw XDR so the wire layout is pinned independently of the
+    /// event structs.
+    fn last_event_layout(t: &TestEnv) -> (std::string::String, usize) {
+        use soroban_sdk::xdr::{ContractEventBody, ScVal};
+        let events = t.env.events().all().filter_by_contract(&t.contract_id);
+        let ContractEventBody::V0(body) = &events.events().last().unwrap().body;
+        let topic = match &body.topics[..] {
+            [ScVal::Symbol(sym)] => sym.to_utf8_string().unwrap(),
+            other => panic!("unexpected topics {other:?}"),
+        };
+        let len = match &body.data {
+            ScVal::Vec(Some(v)) => v.len(),
+            other => panic!("unexpected data {other:?}"),
+        };
+        (topic, len)
+    }
+
+    #[test]
+    fn event_topics_and_data_layout() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(last_event_layout(&t), ("name_rsv".into(), 2));
+        t.client().unreserve_folder(&t.admin, &n);
+        assert_eq!(last_event_layout(&t), ("name_unrsv".into(), 2));
+    }
+
+    #[test]
+    fn malformed_names_are_rejected() {
+        let t = TestEnv::new();
+        for bad in [
+            "ab.folder",
+            "Admin.folder",
+            "admin",
+            "-admin.folder",
+            "admin-.folder",
+        ] {
+            let n = name(&t, bad);
+            let res = t.client().try_reserve_folder(&t.admin, &n);
+            expect_contract_error(res, ContractError::InvalidFolderName);
+            let res = t.client().try_unreserve_folder(&t.admin, &n);
+            expect_contract_error(res, ContractError::InvalidFolderName);
+        }
+    }
+
+    #[test]
+    fn reserved_key_gets_persistent_ttl() {
+        let t = TestEnv::new();
+        let n = name(&t, "admin.folder");
+        let key = DataKey::ReservedLabel(n.clone());
+        t.client().reserve_folder(&t.admin, &n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+
+        // A read below the threshold extends it back to the full lifetime.
+        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
+        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
+        assert!(t.client().is_reserved(&n));
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+}
+
+// ── Releasing a Folder name ─────────────────────────────────────────────────
+
+mod release {
+    use super::*;
+    use crate::constants::RELEASE_COOLDOWN_LEDGERS;
+    use crate::events::FolderReleased;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    fn claimed(t: &TestEnv, s: &str) -> (Address, String) {
+        let owner = Address::generate(&t.env);
+        let n = name(t, s);
+        t.client().claim_folder(&owner, &n);
+        (owner, n)
+    }
+
+    #[test]
+    fn release_frees_name_and_owner() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "rebrand.folder");
+
+        t.client().release_folder(&owner);
+
+        expect_contract_error(t.client().try_get_folder(&n), ContractError::FolderNotFound);
+        expect_contract_error(
+            t.client().try_get_identity(&owner),
+            ContractError::FolderNotFound,
+        );
+        // The owner can claim a new name straight away.
+        let fresh = name(&t, "newbrand.folder");
+        t.client().claim_folder(&owner, &fresh);
+        assert_eq!(t.client().get_identity(&owner), fresh);
+    }
+
+    #[test]
+    fn release_removes_every_key() {
+        let t = TestEnv::new();
+        let uri = template_uri(&t.env);
+        t.client().register_template(&t.admin, &1u32, &uri);
+        t.client().set_lease_config(&t.admin, &30u32, &7u32);
+        let (owner, n) = claimed(&t, "leased.folder");
+        t.client().set_user_template(&owner, &1u32);
+        assert!(t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+
+        t.client().release_folder(&owner);
+
+        assert!(!t.has_persistent(&DataKey::FolderOwner(n.clone())));
+        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderExpiry(n.clone())));
+        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
+        // Only the cooldown marker remains, and it carries the release ledger.
+        let key = DataKey::ReleasedAt(n.clone());
+        let at: u32 = t.env.as_contract(&t.contract_id, || {
+            t.env.storage().persistent().get(&key).unwrap()
+        });
+        assert_eq!(at, t.env.ledger().sequence());
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn release_requires_the_owner_signature() {
+        let t = TestEnv::new();
+        let (owner, _) = claimed(&t, "signed.folder");
+        t.client().release_folder(&owner);
+        assert_single_auth(&t, &owner, "release_folder");
+    }
+
+    #[test]
+    fn release_fails_without_signature() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "nosig-rel.folder");
+        t.env.set_auths(&[]);
+        assert!(t.client().try_release_folder(&owner).is_err());
+        assert_eq!(t.client().get_folder(&n), owner);
+    }
+
+    #[test]
+    fn release_requires_initialization() {
+        let t = uninitialized_env();
+        let res = t.client().try_release_folder(&Address::generate(&t.env));
+        expect_contract_error(res, ContractError::NotInitialized);
+    }
+
+    #[test]
+    fn release_without_folder_fails() {
+        let t = TestEnv::new();
+        let res = t.client().try_release_folder(&Address::generate(&t.env));
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn release_twice_fails() {
+        let t = TestEnv::new();
+        let (owner, _) = claimed(&t, "twice.folder");
+        t.client().release_folder(&owner);
+        let res = t.client().try_release_folder(&owner);
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn release_with_portfolio_is_rejected() {
+        let t = TestEnv::new();
+        t.client()
+            .register_template(&t.admin, &1u32, &template_uri(&t.env));
+        let (owner, n) = claimed(&t, "minted.folder");
+        t.client()
+            .mint_portfolio(&owner, &1u32, &portfolio_cid(&t.env));
+
+        let res = t.client().try_release_folder(&owner);
+        expect_contract_error(res, ContractError::PortfolioExists);
+
+        // Nothing was removed.
+        assert_eq!(t.client().get_folder(&n), owner);
+        assert_eq!(t.client().get_identity(&owner), n);
+        assert!(t.client().verify_portfolio(&owner));
+        assert!(!t.has_persistent(&DataKey::ReleasedAt(n.clone())));
+    }
+
+    #[test]
+    fn release_emits_event() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "event-rel.folder");
+        t.client().release_folder(&owner);
+        assert_eq!(
+            t.env.events().all().filter_by_contract(&t.contract_id),
+            [FolderReleased {
+                owner: owner.clone(),
+                folder_name: n.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id)]
+        );
+    }
+
+    #[test]
+    fn cooldown_boundaries() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "sniped.folder");
+        let other = Address::generate(&t.env);
+        let released_at = t.env.ledger().sequence();
+        t.client().release_folder(&owner);
+
+        // Same ledger, and the last ledger of the cooldown: still blocked.
+        let res = t.client().try_claim_folder(&other, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+        t.env
+            .ledger()
+            .set_sequence_number(released_at + RELEASE_COOLDOWN_LEDGERS - 1);
+        let res = t.client().try_claim_folder(&other, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+        // The former owner is held to the same cooldown.
+        let res = t.client().try_claim_folder(&owner, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+
+        // First ledger after the cooldown: claimable, and the marker is gone.
+        t.env
+            .ledger()
+            .set_sequence_number(released_at + RELEASE_COOLDOWN_LEDGERS);
+        t.client().claim_folder(&other, &n);
+        assert_eq!(t.client().get_folder(&n), other);
+        assert!(!t.has_persistent(&DataKey::ReleasedAt(n.clone())));
+    }
+
+    #[test]
+    fn released_name_can_be_released_again() {
+        let t = TestEnv::new();
+        let (owner, n) = claimed(&t, "cycle.folder");
+        t.client().release_folder(&owner);
+        t.advance_ledgers(RELEASE_COOLDOWN_LEDGERS);
+        t.client().claim_folder(&owner, &n);
+        t.client().release_folder(&owner);
+        let res = t.client().try_claim_folder(&owner, &n);
+        expect_contract_error(res, ContractError::FolderReleaseCooldown);
+    }
+}
+
+// ── Folder claim metadata ───────────────────────────────────────────────────
+
+mod folder_meta {
+    use super::*;
+    use crate::types::FolderMeta;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    fn set_ledger(t: &TestEnv, timestamp: u64, sequence: u32) {
+        t.env.ledger().with_mut(|l| {
+            l.timestamp = timestamp;
+            l.sequence_number = sequence;
+        });
+    }
+
+    #[test]
+    fn claim_records_exact_timestamp_and_ledger() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "member.folder");
+
+        set_ledger(&t, 1_794_262_900, 5_647_861);
+        t.client().claim_folder(&owner, &n);
+
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 1_794_262_900,
+                claimed_ledger: 5_647_861,
+            }
+        );
+        // Existing reads are unchanged.
+        assert_eq!(t.client().get_folder(&n), owner);
+    }
+
+    #[test]
+    fn sponsored_claim_records_metadata() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let sponsor = Address::generate(&t.env);
+        let n = name(&t, "sponsored.folder");
+
+        set_ledger(&t, 42, 7);
+        t.client().sponsored_claim(&sponsor, &owner, &n);
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 42,
+                claimed_ledger: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_name_returns_folder_not_found() {
+        let t = TestEnv::new();
+        let res = t.client().try_get_folder_meta(&name(&t, "nobody.folder"));
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn name_claimed_before_upgrade_returns_folder_not_found() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "legacy.folder");
+        // Simulate a pre-upgrade claim: only the original key layout exists.
+        t.set_persistent(&DataKey::FolderOwner(n.clone()), &owner);
+        t.set_persistent(&DataKey::OwnerFolder(owner.clone()), &n);
+
+        assert_eq!(t.client().get_folder(&n), owner);
+        let res = t.client().try_get_folder_meta(&n);
+        expect_contract_error(res, ContractError::FolderNotFound);
+    }
+
+    #[test]
+    fn metadata_ttl_extended_on_write_and_read() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let n = name(&t, "ttl-meta.folder");
+        let key = DataKey::FolderMeta(n.clone());
+
+        t.client().claim_folder(&owner, &n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+
+        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
+        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
+        t.client().get_folder_meta(&n);
+        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn release_removes_metadata_and_reclaim_rewrites_it() {
+        let t = TestEnv::new();
+        let owner = Address::generate(&t.env);
+        let other = Address::generate(&t.env);
+        let n = name(&t, "moved.folder");
+
+        set_ledger(&t, 100, 10);
+        t.client().claim_folder(&owner, &n);
+        t.client().release_folder(&owner);
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
+        expect_contract_error(
+            t.client().try_get_folder_meta(&n),
+            ContractError::FolderNotFound,
+        );
+
+        let later = 10 + crate::constants::RELEASE_COOLDOWN_LEDGERS;
+        set_ledger(&t, 9_999, later);
+        t.client().claim_folder(&other, &n);
+        assert_eq!(
+            t.client().get_folder_meta(&n),
+            FolderMeta {
+                claimed_at: 9_999,
+                claimed_ledger: later,
+            }
+        );
+    }
+
+    #[test]
+    fn failed_claim_writes_no_metadata() {
+        let t = TestEnv::new();
+        let n = name(&t, "reserved-meta.folder");
+        t.client().reserve_folder(&t.admin, &n);
+        let res = t.client().try_claim_folder(&Address::generate(&t.env), &n);
+        expect_contract_error(res, ContractError::FolderReserved);
+        assert!(!t.has_persistent(&DataKey::FolderMeta(n.clone())));
+    }
+}
+
+// ── Batch reads ─────────────────────────────────────────────────────────────
+
+mod batch_reads {
+    use super::*;
+    use crate::constants::MAX_BATCH_READ;
+
+    /// Documented ceiling for a full `MAX_BATCH_READ` batch where every entry
+    /// resolves (the most expensive case). Measured values are in the PR.
+    pub const BATCH_CPU_BUDGET: u64 = 10_000_000;
+    pub const BATCH_MEM_BUDGET: u64 = 3_000_000;
+
+    fn name(t: &TestEnv, s: &str) -> String {
+        String::from_str(&t.env, s)
+    }
+
+    /// Claims `count` distinct names and returns (owners, names).
+    fn claim_many(t: &TestEnv, count: u32) -> (Vec<Address>, Vec<String>) {
+        let mut owners = Vec::new(&t.env);
+        let mut names = Vec::new(&t.env);
+        for i in 0..count {
+            let owner = Address::generate(&t.env);
+            let n = String::from_str(&t.env, &std::format!("batch-{i:03}.folder"));
+            t.client().claim_folder(&owner, &n);
+            owners.push_back(owner);
+            names.push_back(n);
+        }
+        (owners, names)
+    }
+
+    /// Each batch element must equal the corresponding single-item read.
+    fn assert_matches_single_reads(t: &TestEnv, names: &Vec<String>, owners: &Vec<Address>) {
+        let folders = t.client().get_folders(names);
+        assert_eq!(folders.len(), names.len());
+        for (i, n) in names.iter().enumerate() {
+            let single = t.client().try_get_folder(&n).ok().map(|r| r.unwrap());
+            assert_eq!(folders.get(i as u32).unwrap(), single);
+        }
+        let identities = t.client().get_identities(owners);
+        assert_eq!(identities.len(), owners.len());
+        for (i, o) in owners.iter().enumerate() {
+            let single = t.client().try_get_identity(&o).ok().map(|r| r.unwrap());
+            assert_eq!(identities.get(i as u32).unwrap(), single);
+        }
+    }
+
+    #[test]
+    fn mixed_existing_missing_and_invalid_entries() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, 3);
+        let stranger = Address::generate(&t.env);
+
+        let query = soroban_sdk::vec![
+            &t.env,
+            names.get(2).unwrap(),
+            name(&t, "missing.folder"),
+            names.get(0).unwrap(),
+            name(&t, "NOT A NAME"),
+            name(&t, ""),
+            names.get(1).unwrap(),
+        ];
+        assert_eq!(
+            t.client().get_folders(&query),
+            soroban_sdk::vec![
+                &t.env,
+                Some(owners.get(2).unwrap()),
+                None,
+                Some(owners.get(0).unwrap()),
+                None,
+                None,
+                Some(owners.get(1).unwrap()),
+            ]
+        );
+
+        let query = soroban_sdk::vec![
+            &t.env,
+            stranger.clone(),
+            owners.get(1).unwrap(),
+            owners.get(0).unwrap(),
+        ];
+        assert_eq!(
+            t.client().get_identities(&query),
+            soroban_sdk::vec![
+                &t.env,
+                None,
+                Some(names.get(1).unwrap()),
+                Some(names.get(0).unwrap()),
+            ]
+        );
+        let mut all_names = names.clone();
+        all_names.push_back(name(&t, "missing.folder"));
+        let mut all_owners = owners.clone();
+        all_owners.push_back(stranger);
+        assert_matches_single_reads(&t, &all_names, &all_owners);
+    }
+
+    #[test]
+    fn expired_and_released_entries_match_single_reads() {
+        let t = TestEnv::new();
+        t.client().set_lease_config(&t.admin, &1u32, &1u32);
+        let (owners, names) = claim_many(&t, 2);
+        // First owner releases; the second lease lapses into its grace period.
+        t.client().release_folder(&owners.get(0).unwrap());
+        t.env
+            .ledger()
+            .with_mut(|l| l.timestamp += crate::constants::SECONDS_PER_DAY);
+        expect_contract_error(
+            t.client().try_get_folder(&names.get(1).unwrap()),
+            ContractError::FolderExpired,
+        );
+        assert_eq!(
+            t.client().get_folders(&names),
+            soroban_sdk::vec![&t.env, None, None]
+        );
+        assert_matches_single_reads(&t, &names, &owners);
+    }
+
+    #[test]
+    fn duplicates_are_answered_in_place() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, 1);
+        let n = names.get(0).unwrap();
+        let o = owners.get(0).unwrap();
+        assert_eq!(
+            t.client()
+                .get_folders(&soroban_sdk::vec![&t.env, n.clone(), n.clone()]),
+            soroban_sdk::vec![&t.env, Some(o.clone()), Some(o.clone())]
+        );
+    }
+
+    #[test]
+    fn empty_input_returns_empty_output() {
+        let t = TestEnv::new();
+        assert_eq!(t.client().get_folders(&Vec::new(&t.env)).len(), 0);
+        assert_eq!(t.client().get_identities(&Vec::new(&t.env)).len(), 0);
+    }
+
+    #[test]
+    fn input_exactly_at_the_cap_is_accepted() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, MAX_BATCH_READ);
+        assert_eq!(names.len(), MAX_BATCH_READ);
+        assert_matches_single_reads(&t, &names, &owners);
+    }
+
+    #[test]
+    fn cap_plus_one_is_rejected() {
+        let t = TestEnv::new();
+        let mut names = Vec::new(&t.env);
+        let mut owners = Vec::new(&t.env);
+        for _ in 0..=MAX_BATCH_READ {
+            names.push_back(name(&t, "same.folder"));
+            owners.push_back(Address::generate(&t.env));
+        }
+        expect_contract_error(
+            t.client().try_get_folders(&names),
+            ContractError::BatchTooLarge,
+        );
+        expect_contract_error(
+            t.client().try_get_identities(&owners),
+            ContractError::BatchTooLarge,
+        );
+    }
+
+    #[test]
+    fn full_batch_stays_within_documented_budget() {
+        let t = TestEnv::new();
+        let (owners, names) = claim_many(&t, MAX_BATCH_READ);
+
+        t.client().get_folders(&names);
+        let b = t.env.cost_estimate().budget();
+        let (cpu, mem) = (b.cpu_instruction_cost(), b.memory_bytes_cost());
+        std::println!("BUDGET get_folders[{MAX_BATCH_READ}] cpu={cpu} mem={mem}");
+        assert!(cpu <= BATCH_CPU_BUDGET, "get_folders cpu {cpu}");
+        assert!(mem <= BATCH_MEM_BUDGET, "get_folders mem {mem}");
+
+        t.client().get_identities(&owners);
+        let b = t.env.cost_estimate().budget();
+        let (cpu, mem) = (b.cpu_instruction_cost(), b.memory_bytes_cost());
+        std::println!("BUDGET get_identities[{MAX_BATCH_READ}] cpu={cpu} mem={mem}");
+        assert!(cpu <= BATCH_CPU_BUDGET, "get_identities cpu {cpu}");
+        assert!(mem <= BATCH_MEM_BUDGET, "get_identities mem {mem}");
+    }
 }

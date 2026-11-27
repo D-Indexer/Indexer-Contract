@@ -68,4 +68,37 @@ pub enum ContractError {
     /// The contract treasury holds less than the requested amount.
     /// User message: The treasury does not hold enough funds for this withdrawal.
     InsufficientBalance = 21,
+    /// No queued admin change has the given op ID.
+    /// User message: That admin change does not exist.
+    AdminChangeNotFound = 22,
+    /// The queued admin change's timelock has not elapsed yet.
+    /// User message: That admin change cannot be executed yet.
+    AdminChangeNotReady = 23,
+    /// The maximum number of admin changes is already queued.
+    /// User message: Too many admin changes are pending.
+    AdminChangeQueueFull = 24,
+    /// The Folder lease has expired and is in its grace period.
+    /// User message: This Folder has expired. The owner can still renew it.
+    FolderExpired = 25,
+    /// The price tier table is malformed.
+    /// User message: The price tiers are not valid.
+    InvalidPriceTiers = 26,
+    /// Folder leases are not enabled.
+    /// User message: Folder leases are not enabled.
+    LeasesDisabled = 27,
+    /// The renewal request is invalid.
+    /// User message: This Folder cannot be renewed.
+    InvalidRenewal = 28,
+    /// The Folder name is reserved by an admin and cannot be claimed.
+    /// User message: That Folder name is reserved.
+    FolderReserved = 29,
+    /// The owner still holds a minted portfolio, which must be burned first.
+    /// User message: Remove your portfolio before releasing this Folder.
+    PortfolioExists = 30,
+    /// The Folder name was released recently and is still cooling down.
+    /// User message: That Folder name was just released. Try again later.
+    FolderReleaseCooldown = 31,
+    /// The batch read has more entries than `MAX_BATCH_READ`.
+    /// User message: Too many items requested at once.
+    BatchTooLarge = 32,
 }
