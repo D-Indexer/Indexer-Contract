@@ -265,12 +265,15 @@ fn is_valid_cid(bytes: &Bytes) -> bool {
 
 /// Validates a Folder name: `<label>.folder`, where the label is at least
 /// `MIN_FOLDER_LABEL_LEN` bytes of `[a-z0-9-]` and does not start or end with
-/// a hyphen. The whole name is at most `MAX_FOLDER_NAME_LEN` bytes.
-pub fn require_valid_folder_name(folder_name: &String) -> Result<(), ContractError> {
+/// a hyphen. The whole name is at most `max_len` bytes.
+pub fn require_valid_folder_name(
+    folder_name: &String,
+    max_len: u32,
+) -> Result<(), ContractError> {
     let bytes = folder_name.to_bytes();
     let len = bytes.len();
     let suffix_len = FOLDER_SUFFIX.len() as u32;
-    if len > MAX_FOLDER_NAME_LEN
+    if len > max_len
         || len < MIN_FOLDER_LABEL_LEN + suffix_len
         || !ends_with(&bytes, FOLDER_SUFFIX)
     {

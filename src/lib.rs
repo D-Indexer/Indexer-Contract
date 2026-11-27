@@ -259,4 +259,43 @@ impl FolderContract {
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
         nft_mint::verify_portfolio(&env, &owner)
     }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    /// Returns the client-facing validation rules and limits. Pure read: no
+    /// state is written and no TTL is extended.
+    pub fn get_limits(env: Env) -> Limits {
+        Limits {
+            min_folder_label_len: constants::MIN_FOLDER_LABEL_LEN,
+            max_folder_name_len: constants::MAX_FOLDER_NAME_LEN,
+            folder_suffix: String::from_bytes(&env, constants::FOLDER_SUFFIX),
+            min_ipfs_cid_len: constants::MIN_IPFS_CID_LEN,
+            max_ipfs_cid_len: constants::MAX_IPFS_CID_LEN,
+            metadata_uri_scheme: String::from_bytes(&env, constants::METADATA_URI_SCHEME),
+            max_metadata_uri_len: constants::MAX_METADATA_URI_LEN,
+            max_templates: constants::MAX_TEMPLATES,
+            max_admins: constants::MAX_ADMINS,
+            day_in_ledgers: constants::DAY_IN_LEDGERS,
+            persistent_bump_amount: constants::PERSISTENT_BUMP_AMOUNT,
+            persistent_lifetime_threshold: constants::PERSISTENT_LIFETIME_THRESHOLD,
+            instance_bump_amount: constants::INSTANCE_BUMP_AMOUNT,
+            instance_lifetime_threshold: constants::INSTANCE_LIFETIME_THRESHOLD,
+        }
+    }
+
+    // ── TTL maintenance ───────────────────────────────────────────────────────
+
+    /// Extends the TTL of all persistent keys belonging to `owner`. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_owner_ttl(env: Env, owner: Address) -> u32 {
+        storage::extend_owner_ttl(&env, &owner)
+    }
+
+    /// Extends the TTL of the template entry and the template list. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_template_ttl(env: Env, template_id: u32) -> u32 {
+        storage::extend_template_ttl(&env, template_id)
+    }
 }

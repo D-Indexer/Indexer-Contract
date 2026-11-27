@@ -1,5 +1,7 @@
 use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
+use crate::types::Config;
+
 #[contractevent(topics = ["folder_cl"], data_format = "vec")]
 pub struct FolderClaimed {
     pub owner: Address,

@@ -34,7 +34,11 @@ pub enum DataKey {
     // admin membership: number of admins, kept in sync with `Admin(Address)`
     AdminCount,
     Initialized,
-    // identity_map: folder_name -> owner
+    // config: admin-tunable protocol limits
+    Config,
+    // identity_map: sha256(folder_name) -> owner (current layout)
+    FolderOwnerHash(BytesN<32>),
+    // identity_map: folder_name -> owner (legacy layout, read-only migration path)
     FolderOwner(String),
     // identity_map: owner -> folder_name
     OwnerFolder(Address),
