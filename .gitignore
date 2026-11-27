@@ -2,4 +2,5 @@
 .env
 *.wasm
 !*.optimized.wasm
-/lcov.info
+__pycache__/
+/deploy-out
