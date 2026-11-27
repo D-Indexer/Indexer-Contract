@@ -26,6 +26,7 @@ RPC_URL="$(jq -r .rpc_url "$DEPLOYMENT")"
 PASSPHRASE="$(jq -r .network_passphrase "$DEPLOYMENT")"
 CONTRACT_ID="$(jq -r .contract_id "$DEPLOYMENT")"
 TEMPLATE_ID="$(jq -r '.templates[0].template_id' "$DEPLOYMENT")"
+DEPLOY_LEDGER="$(jq -r '.deploy_ledger // "unknown"' "$DEPLOYMENT")"
 [[ "$NETWORK" == "testnet" ]] || { echo "refusing to smoke-test network '$NETWORK'" >&2; exit 1; }
 [[ "$TEMPLATE_ID" =~ ^[0-9]+$ ]] || { echo "no registered template in $DEPLOYMENT" >&2; exit 1; }
 
@@ -89,6 +90,7 @@ CID_V2="$(portfolio_cid 2)"
 if [[ "$MD" == "1" ]]; then
   say "- Network: \`$NETWORK\` (\`$RPC_URL\`)"
   say "- Contract: [\`$CONTRACT_ID\`]($EXPLORER/contract/$CONTRACT_ID)"
+  say "- Deploy ledger: [\`$DEPLOY_LEDGER\`]($EXPLORER/ledger/$DEPLOY_LEDGER)"
   say "- Test account: [\`$USER_ADDR\`]($EXPLORER/account/$USER_ADDR) (fresh, Friendbot-funded)"
   say "- Folder: \`$FOLDER\`, template: \`$TEMPLATE_ID\`"
   say "- Portfolio CIDs: v1 \`$CID_V1\`, v2 \`$CID_V2\`"
@@ -98,6 +100,7 @@ if [[ "$MD" == "1" ]]; then
 else
   say "network:  $NETWORK ($RPC_URL)"
   say "contract: $CONTRACT_ID"
+  say "deploy ledger: $DEPLOY_LEDGER"
   say "user:     $USER_ADDR"
   say "folder:   $FOLDER"
 fi

@@ -11,10 +11,10 @@ use soroban_sdk::{
 
 use crate::constants::{
     DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
-    PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
-};
-use crate::errors::ContractError;
+    PERSISTENT_BUMP_AMOUNT,
+};use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::storage;
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -1150,7 +1150,7 @@ fn test_persistent_ttl_fits_network_max_entry_ttl() {
     t.client().claim_folder(&user, &name);
 
     // The requested extension is applied exactly, not clamped by the host.
-    let ttl = t.persistent_ttl(&DataKey::FolderOwner(name));
+    let ttl = t.persistent_ttl(&storage::folder_owner_key(&t.env, &name));
     assert_eq!(ttl, PERSISTENT_BUMP_AMOUNT);
 }
 
@@ -1165,9 +1165,98 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
     t.client().get_folder(&name);
     // Still above the threshold, so no rent is spent re-extending it.
     assert_eq!(
-        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        t.persistent_ttl(&storage::folder_owner_key(&t.env, &name)),
         PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
     );
+}
+
+#[test]
+fn test_extend_owner_ttl_extends_all_owner_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-owner.folder");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    );
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+    t.client().set_user_template(&user, &1u32);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let keys = [
+        DataKey::OwnerFolder(user.clone()),
+        DataKey::FolderOwner(name.clone()),
+        DataKey::UserTemplate(user.clone()),
+        DataKey::Portfolio(user.clone()),
+    ];
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    for key in keys.iter() {
+        assert!(t.persistent_ttl(key) < PERSISTENT_BUMP_AMOUNT);
+    }
+
+    let extended = t.client().extend_owner_ttl(&user);
+    assert_eq!(extended, 4);
+    for key in keys.iter() {
+        assert_eq!(t.persistent_ttl(key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    // Data is untouched.
+    assert_eq!(t.client().get_identity(&user), name);
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+}
+
+#[test]
+fn test_extend_owner_ttl_skips_missing_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    assert_eq!(t.client().extend_owner_ttl(&user), 0);
+
+    let name = String::from_str(&t.env, "ttl-partial.folder");
+    t.client().claim_folder(&user, &name);
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert_eq!(t.client().extend_owner_ttl(&user), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::OwnerFolder(user.clone())),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+}
+
+#[test]
+fn test_extend_template_ttl_extends_template_keys() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert!(t.persistent_ttl(&DataKey::Template(1)) < PERSISTENT_BUMP_AMOUNT);
+
+    assert_eq!(t.client().extend_template_ttl(&1u32), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::Template(1)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::TemplateList),
+        PERSISTENT_BUMP_AMOUNT
+    );
+
+    // Missing template is skipped without an error.
+    assert_eq!(t.client().extend_template_ttl(&404u32), 1);
 }
 
 // ── Template storage ────────────────────────────────────────────────────────
@@ -1376,6 +1465,14 @@ fn test_set_user_template_updates_minted_portfolio() {
 const VALID_CIDV1_RAW: &str = "bafkreicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV1_DAG_PB: &str = "bafybeicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV0: &str = "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce";
+/// Real CIDv0 vectors (sha2-256 multihash, base58btc).
+const VALID_CIDV0_VECTORS: [&str; 5] = [
+    "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH",
+    "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o",
+    "QmZULkCELmmk5XNfCgTnCyFgAVxBRBXyDHGGMVoLFLiXEN",
+];
 
 #[test]
 fn test_folder_label_rules() {
@@ -1466,6 +1563,44 @@ fn test_cid_format_rules() {
         let cid = String::from_str(&t.env, good);
         t.client().update_portfolio(&user, &cid);
         assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+}
+
+#[test]
+fn test_cidv0_multihash_vectors() {
+    let (t, user) = minted_env();
+    for good in VALID_CIDV0_VECTORS {
+        let cid = String::from_str(&t.env, good);
+        t.client().update_portfolio(&user, &cid);
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+    // Corrupted vectors: changed digest byte, wrong multihash prefix, and
+    // characters outside the base58btc alphabet.
+    let mut corrupted: std::vec::Vec<std::string::String> = std::vec::Vec::new();
+    for good in VALID_CIDV0_VECTORS {
+        let mut chars: std::vec::Vec<char> = good.chars().collect();
+        let last = chars.len() - 1;
+        chars[last] = if chars[last] == 'a' { 'b' } else { 'a' };
+        corrupted.push(chars.into_iter().collect());
+    }
+    // Decodes to a multihash whose function code is not sha2-256.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5p",
+    ));
+    // Decodes to a multihash whose digest length byte is not 0x20.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5n",
+    ));
+    // Invalid base58btc characters (`0`, `O`, `I`, `l`).
+    corrupted.push(std::string::String::from("Qm") + &"0".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"O".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"I".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"l".repeat(44));
+    for bad in corrupted {
+        let res = t
+            .client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, &bad));
+        expect_contract_error(res, ContractError::InvalidCID);
     }
 }
 
