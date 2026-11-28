@@ -1,5 +1,6 @@
 [workspace]
-members = [".", "tools/ledger-keys"]
+members = ["crates/folder-validation", "crates/folder-validation-js"]
+resolver = "2"
 
 [package]
 name = "indexer-contract"
@@ -10,15 +11,18 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-# Exposes the storage `DataKey` type to off-chain tooling (tools/ledger-keys).
-lib = []
-
 [dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
+soroban-sdk = { version = "=29.0.1", features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
+
+[workspace]
+# Spike (#249): the monolith split into three cross-calling contracts.
+members = [".", "spike/folder-registry", "spike/folder-templates", "spike/folder-portfolio"]
+
+[workspace.dependencies]
+soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
 [profile.release]
 opt-level = "z"
