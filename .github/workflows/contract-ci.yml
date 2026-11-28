@@ -15,24 +15,35 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  # Keep version and sha256 in lockstep (x86_64-unknown-linux-gnu tarball,
+  # 26427814 bytes). Pinned here, never fetched from the release.
   STELLAR_CLI_VERSION: 28.1.0
+  STELLAR_CLI_SHA256: c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462
 
 jobs:
   checks:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: host-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          cache-targets: true
+          cache-all-crates: true
 
       - name: Check formatting
         run: cargo fmt --check
@@ -43,36 +54,97 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
-      - name: Shell script syntax
-        run: make script-check
+      - name: Shell script syntax and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          make script-check
+          shellcheck scripts/deploy.sh
+
+      - name: errors.json matches src/errors.rs
+        run: |
+          python3 scripts/test_errors_json.py
+          python3 scripts/errors_json.py --check
 
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
-      - name: Mainnet preflight check tests (mocked)
-        run: make preflight-test
+      - name: Deployment records match deployments/schema.json
+        run: python3 scripts/validate_deployments.py
+
+      - name: Script unit tests (TTL monitor, deploy.sh with mocked stellar, schema, ledger backfill)
+        run: python3 -m unittest discover -s scripts/tests
+
+  supply-chain:
+    name: cargo-deny / renovate config / workflow audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
+        with:
+          command: check advisories bans licenses sources
+
+      - name: Validate Renovate config
+        run: npx --yes -p renovate@44.256.1 renovate-config-validator --strict
+
+      - name: Actions pinned by SHA and permissions declared
+        run: ./scripts/check-workflows.sh
+
+      - name: zizmor (fail on high findings)
+        run: pipx run zizmor==1.32.0 --min-severity high .github/workflows
 
   wasm:
     name: optimized wasm build
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
     needs: checks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: wasm32v1-none-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          cache-targets: true
+          cache-all-crates: true
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
+          ./scripts/install-stellar-cli.sh "$RUNNER_TEMP"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/stellar" --version
 
       - name: Build optimized wasm
-        run: make build-optimized
+        run: |
+          START="$(date +%s)"
+          make build-optimized
+          ELAPSED="$(( $(date +%s) - START ))"
+          echo "WASM_BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          echo "- optimized wasm build: ${ELAPSED}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert and report build metadata
+        run: |
+          META="$(stellar contract info meta --wasm target/stellar/indexer_contract.wasm)"
+          echo "$META"
+          echo "$META" | grep -Fq "source_repo"
+          echo "$META" | grep -Fq "github:D-Indexer/Indexer-Contract"
+          {
+            echo "### Contract build metadata"
+            echo '```text'
+            echo "$META"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report wasm hash
         run: |
@@ -90,90 +162,53 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: indexer_contract-wasm
           path: target/stellar/indexer_contract.wasm
           if-no-files-found: error
 
-  # Deploys to a local quickstart network, then drives the deployment through
-  # the generated TypeScript bindings. One job, because the network only lives
-  # as long as the runner; the deployment record is uploaded as an artifact.
-  local-e2e:
-    name: local network deploy + TypeScript e2e
+  docker-build:
+    name: reproducible docker build matches native
     runs-on: ubuntu-latest
-    needs: checks
-    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs: wasm
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Start local network (stellar/quickstart)
-        run: docker run -d --name stellar -p 8000:8000 stellar/quickstart:latest --local --enable core,rpc,horizon,friendbot
-
-      - name: Install pinned Rust toolchain (rust-toolchain.toml)
-        run: rustup toolchain install && rustup show active-toolchain
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
-        run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: clients/ts-e2e/package-lock.json
+          persist-credentials: false
 
-      - name: Wait for RPC and Friendbot
-        run: |
-          for _ in $(seq 120); do
-            # Friendbot answers 400 (missing addr) once it is up.
-            [[ "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/friendbot)" == 400 ]] \
-              && curl -sf -X POST localhost:8000/rpc -H 'Content-Type: application/json' \
-                -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | grep -q healthy \
-              && exit 0
-            sleep 2
-          done
-          docker logs stellar | tail -50
-          exit 1
-
-      - name: Deploy to local network
-        run: STELLAR_IDENTITY=local-deployer ./scripts/deploy.sh local
-
-      - name: Upload local deployment record
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: local-deployment
-          path: deployments/local.json
+          name: indexer_contract-wasm
+          path: native
 
-      - name: Generate TypeScript bindings
-        working-directory: clients/ts-e2e
-        run: npm run bindings
-
-      - name: TypeScript e2e suite
-        working-directory: clients/ts-e2e
+      - name: make docker-build and compare hashes
         run: |
-          npm ci --no-audit --no-fund
-          npm run typecheck
-          npm test
+          make docker-build
+          NATIVE="$(sha256sum native/indexer_contract.wasm | cut -d' ' -f1)"
+          DOCKER="$(sha256sum target/docker/indexer_contract.wasm | cut -d' ' -f1)"
+          echo "native: $NATIVE"; echo "docker: $DOCKER"
+          [[ "$NATIVE" == "$DOCKER" ]]
 
   smoke-testnet:
     name: testnet smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     needs: wasm
     if: github.event_name == 'workflow_dispatch' && inputs.run_smoke
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
-          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP" stellar
+          ./scripts/install-stellar-cli.sh "$RUNNER_TEMP"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/stellar" --version
 
       # Uses a fresh Friendbot-funded identity, so no secrets are required.
       - name: Run smoke test

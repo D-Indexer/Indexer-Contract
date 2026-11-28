@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "enabledManagers": ["cargo", "github-actions", "custom.regex"],
+  "rangeStrategy": "pin",
+  "packageRules": [
+    {
+      "description": "soroban-sdk changes the wasm hash and auth snapshots; needs manual review",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["soroban-sdk"],
+      "groupName": "soroban-sdk",
+      "labels": ["soroban-sdk", "needs-wasm-review"],
+      "automerge": false
+    },
+    {
+      "description": "Keep Stellar CLI version bumps in the workflow and Makefile in a single PR",
+      "matchPackageNames": ["stellar/stellar-cli"],
+      "groupName": "stellar-cli"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Stellar CLI version in CI workflow and Makefile",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^Makefile$/"],
+      "matchStrings": ["STELLAR_CLI_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)", "STELLAR_CLI_VERSION \\?= (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "stellar/stellar-cli",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Rust toolchain channel in rust-toolchain.toml",
+      "managerFilePatterns": ["/^rust-toolchain\\.toml$/"],
+      "matchStrings": ["channel = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "rust-lang/rust",
+      "packageNameTemplate": "rust-lang/rust"
+    }
+  ]
+}

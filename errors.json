@@ -1,0 +1,224 @@
+[
+  {
+    "code": 1,
+    "name": "AlreadyInitialized",
+    "description": "The contract has already been initialized.",
+    "user_message": "This contract is already set up."
+  },
+  {
+    "code": 2,
+    "name": "NotInitialized",
+    "description": "The contract has not been initialized yet.",
+    "user_message": "This contract is not set up yet. Please try again later."
+  },
+  {
+    "code": 3,
+    "name": "FolderNameTaken",
+    "description": "The Folder name is already owned by another address.",
+    "user_message": "That Folder name is already taken."
+  },
+  {
+    "code": 4,
+    "name": "FolderNotFound",
+    "description": "No Folder exists for the given name or owner.",
+    "user_message": "We could not find that Folder."
+  },
+  {
+    "code": 5,
+    "name": "PortfolioNotFound",
+    "description": "The owner has no minted portfolio.",
+    "user_message": "No portfolio has been minted for this Folder yet."
+  },
+  {
+    "code": 6,
+    "name": "TemplateNotFound",
+    "description": "The template ID is not registered.",
+    "user_message": "That template does not exist."
+  },
+  {
+    "code": 7,
+    "name": "Unauthorized",
+    "description": "The caller is not allowed to perform this action.",
+    "user_message": "You are not allowed to do that."
+  },
+  {
+    "code": 8,
+    "name": "InvalidCID",
+    "description": "The IPFS CID is malformed.",
+    "user_message": "The portfolio content ID is not valid."
+  },
+  {
+    "code": 9,
+    "name": "InvalidFolderName",
+    "description": "The Folder name does not follow the naming rules.",
+    "user_message": "Folder names must look like name.folder and use only a-z, 0-9 and hyphens."
+  },
+  {
+    "code": 10,
+    "name": "AdminAlreadyExists",
+    "description": "The address is already an admin.",
+    "user_message": "That address is already an admin."
+  },
+  {
+    "code": 11,
+    "name": "AdminNotFound",
+    "description": "The address is not an admin.",
+    "user_message": "That address is not an admin."
+  },
+  {
+    "code": 12,
+    "name": "CannotRemoveLastAdmin",
+    "description": "Removing the admin would leave the contract without admins.",
+    "user_message": "The last admin cannot be removed."
+  },
+  {
+    "code": 13,
+    "name": "PortfolioAlreadyMinted",
+    "description": "The owner has already minted a portfolio.",
+    "user_message": "A portfolio has already been minted for this Folder."
+  },
+  {
+    "code": 14,
+    "name": "InvalidMetadataURI",
+    "description": "The template metadata URI is malformed.",
+    "user_message": "The template metadata link is not valid."
+  },
+  {
+    "code": 15,
+    "name": "TemplateAlreadyExists",
+    "description": "The template ID is already registered.",
+    "user_message": "A template with that ID already exists."
+  },
+  {
+    "code": 16,
+    "name": "FolderAlreadyClaimed",
+    "description": "The owner already holds a Folder.",
+    "user_message": "You already own a Folder."
+  },
+  {
+    "code": 17,
+    "name": "InvalidTemplateID",
+    "description": "The template ID is out of range.",
+    "user_message": "That template ID is not valid."
+  },
+  {
+    "code": 18,
+    "name": "TemplateLimitReached",
+    "description": "The maximum number of templates is registered.",
+    "user_message": "No more templates can be registered."
+  },
+  {
+    "code": 19,
+    "name": "TooManyAdmins",
+    "description": "The maximum number of admins is reached.",
+    "user_message": "No more admins can be added."
+  },
+  {
+    "code": 20,
+    "name": "InvalidAmount",
+    "description": "The token amount is negative, zero where not allowed, or above its cap.",
+    "user_message": "The amount is not valid."
+  },
+  {
+    "code": 21,
+    "name": "InsufficientBalance",
+    "description": "The contract treasury holds less than the requested amount.",
+    "user_message": "The treasury does not hold enough funds for this withdrawal."
+  },
+  {
+    "code": 22,
+    "name": "AdminChangeNotFound",
+    "description": "No queued admin change has the given op ID.",
+    "user_message": "That admin change does not exist."
+  },
+  {
+    "code": 23,
+    "name": "AdminChangeNotReady",
+    "description": "The queued admin change is still inside its timelock.",
+    "user_message": "That admin change cannot be executed yet."
+  },
+  {
+    "code": 24,
+    "name": "AdminChangeQueueFull",
+    "description": "The admin change queue is full.",
+    "user_message": "Too many admin changes are pending. Execute or cancel one first."
+  },
+  {
+    "code": 25,
+    "name": "FolderExpired",
+    "description": "The Folder lease has expired and is in its grace period.",
+    "user_message": "This Folder has expired. Its owner can still renew it."
+  },
+  {
+    "code": 26,
+    "name": "InvalidPriceTiers",
+    "description": "The price tier table is malformed.",
+    "user_message": "The price tiers are not valid."
+  },
+  {
+    "code": 27,
+    "name": "InvalidRenewal",
+    "description": "A lease renewal request is invalid or overflows.",
+    "user_message": "This Folder cannot be renewed that way."
+  },
+  {
+    "code": 28,
+    "name": "LeasesDisabled",
+    "description": "Leases are not enabled.",
+    "user_message": "Folder leases are not enabled."
+  },
+  {
+    "code": 29,
+    "name": "CommitmentNotFound",
+    "description": "No live claim commitment exists for the owner (never made, already revealed, or older than the reveal window).",
+    "user_message": "We could not find your reservation. Please reserve the name again."
+  },
+  {
+    "code": 30,
+    "name": "CommitmentMismatch",
+    "description": "The revealed name, salt and owner do not hash to the stored commitment.",
+    "user_message": "The name or secret does not match your reservation."
+  },
+  {
+    "code": 31,
+    "name": "RevealTooEarly",
+    "description": "The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.",
+    "user_message": "Your reservation is not ready yet. Please wait a few seconds and try again."
+  },
+  {
+    "code": 32,
+    "name": "InvalidGuardians",
+    "description": "The guardian list or threshold is invalid (more than `MAX_GUARDIANS`, duplicates, the owner itself, or a threshold outside `1..=len`).",
+    "user_message": "The guardian settings are not valid."
+  },
+  {
+    "code": 33,
+    "name": "NotGuardian",
+    "description": "The caller is not a guardian of this owner.",
+    "user_message": "You are not a guardian of this Folder."
+  },
+  {
+    "code": 34,
+    "name": "RecoveryInProgress",
+    "description": "A recovery is already pending for this owner.",
+    "user_message": "A recovery is already in progress for this Folder."
+  },
+  {
+    "code": 35,
+    "name": "RecoveryNotFound",
+    "description": "No recovery is pending for this owner.",
+    "user_message": "There is no recovery in progress for this Folder."
+  },
+  {
+    "code": 36,
+    "name": "RecoveryNotReady",
+    "description": "The recovery lacks approvals or its delay has not passed.",
+    "user_message": "This recovery cannot be completed yet."
+  },
+  {
+    "code": 37,
+    "name": "AlreadyApproved",
+    "description": "The guardian already approved this recovery.",
+    "user_message": "You have already approved this recovery."
+  }
+]

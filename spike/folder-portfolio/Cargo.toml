@@ -1,0 +1,18 @@
+[package]
+name = "folder-portfolio"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { version = "=29.0.1", features = ["alloc"] }
+
+[dev-dependencies]
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
+folder-registry = { path = "../folder-registry" }
+folder-templates = { path = "../folder-templates" }
+indexer-contract = { path = "../.." }
