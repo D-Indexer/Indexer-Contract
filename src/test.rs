@@ -43,6 +43,72 @@ impl TestEnv {
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
     }
+
+    /// Queues an admin change, waits out the timelock and executes it.
+    #[allow(clippy::type_complexity)]
+    fn try_admin_change(
+        &self,
+        caller: &Address,
+        op: AdminOp,
+        target: &Address,
+    ) -> Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<ContractError, soroban_sdk::InvokeError>,
+    > {
+        let op_id = self
+            .client()
+            .try_queue_admin_change(caller, &op, target)?
+            .unwrap();
+        let seq = self.env.ledger().sequence();
+        self.env
+            .ledger()
+            .set_sequence_number(seq + ADMIN_TIMELOCK_LEDGERS);
+        self.client().try_execute_admin_change(caller, &op_id)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn try_add_admin(
+        &self,
+        caller: &Address,
+        target: &Address,
+    ) -> Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<ContractError, soroban_sdk::InvokeError>,
+    > {
+        self.try_admin_change(caller, AdminOp::Add, target)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn try_remove_admin(
+        &self,
+        caller: &Address,
+        target: &Address,
+    ) -> Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<ContractError, soroban_sdk::InvokeError>,
+    > {
+        self.try_admin_change(caller, AdminOp::Remove, target)
+    }
+
+    fn has_persistent(&self, key: &DataKey) -> bool {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().has(key)
+        })
+    }
+
+    fn set_persistent<V: IntoVal<Env, Val>>(&self, key: &DataKey, value: &V) {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().set(key, value)
+        });
+    }
+
+    fn add_admin(&self, caller: &Address, target: &Address) {
+        self.try_add_admin(caller, target).unwrap().unwrap();
+    }
+
+    fn remove_admin(&self, caller: &Address, target: &Address) {
+        self.try_remove_admin(caller, target).unwrap().unwrap();
+    }
 }
 
 fn uninitialized_env() -> TestEnv {
@@ -410,6 +476,8 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
         "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
     );
 
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&owner, &name);
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
@@ -884,7 +952,7 @@ fn test_template_survives_archival() {
     let key = DataKey::Template(1u32);
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::Template {
             template_id: 1u32,
@@ -923,7 +991,7 @@ fn test_portfolio_survives_archival() {
     let key = DataKey::Portfolio(user.clone());
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::PortfolioNFT {
             owner: user.clone(),

@@ -5,7 +5,7 @@ use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
 use crate::storage;
-use crate::types::PortfolioNFT;
+use crate::types::{PortfolioDelegate, PortfolioMeta, PortfolioNFT};
 use crate::validation;
 
 /// Validated, side-effect-free description of a portfolio mint.

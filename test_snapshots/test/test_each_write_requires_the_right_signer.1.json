@@ -843,6 +843,9 @@
                 },
                 {
                   "string": "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce"
+                },
+                {
+                  "u32": 1
                 }
               ]
             }

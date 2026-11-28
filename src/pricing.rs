@@ -52,10 +52,11 @@ pub fn quote_claim(env: &Env, folder_name: &String) -> Result<i128, ContractErro
     ))
 }
 
-/// Transfers `amount` of the configured fee token from `payer` to the treasury.
-pub fn charge(env: &Env, payer: &Address, amount: i128) {
+/// Transfers `amount` of the configured fee token from `payer` to the
+/// treasury. Returns the amount actually charged.
+pub fn charge(env: &Env, payer: &Address, amount: i128) -> i128 {
     if amount <= 0 {
-        return;
+        return 0;
     }
     if let Some(config) = storage::get_claim_fee(env) {
         token::Client::new(env, &config.token).transfer(payer, &config.treasury, &amount);

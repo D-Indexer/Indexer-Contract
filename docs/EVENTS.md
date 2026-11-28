@@ -37,7 +37,10 @@ Compatibility rules:
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
-| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
+| `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String`, `revision: u32` | `update_portfolio`, `update_portfolio_if`, `delegate_update_portfolio` |
+| `port_burn` | `PortfolioBurned` | `owner: Address`, `last_ipfs_cid: String` | `burn_portfolio` |
+| `dlg_set` | `DelegateSet` | `owner: Address`, `delegate: Address`, `expires_ledger: u32` (0 = no expiry) | `set_portfolio_delegate` |
+| `dlg_clr` | `DelegateCleared` | `owner: Address`, `delegate: Address` | `clear_portfolio_delegate` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
 | `blk_add` | `AddressBlocked` | `admin: Address`, `address: Address`, `reason_code: u32` | `block_address` |
@@ -46,6 +49,35 @@ Compatibility rules:
 | `tmpl_sub` | `TemplateSubmitted` | `submission_id: u32`, `designer: Address`, `metadata_uri: String` | `submit_template` |
 | `tmpl_appr` | `TemplateSubmissionApproved` | `admin: Address`, `submission_id: u32`, `template_id: u32` | `approve_submission` |
 | `tmpl_rej` | `TemplateSubmissionRejected` | `admin: Address`, `submission_id: u32`, `reason_code: u32` | `reject_submission` |
+
+### Changes in the portfolio delegate update
+
+- **New:** `dlg_set` and `dlg_clr`.
+- **Semantics:** `port_upd` is unchanged but can now come from a delegate
+  (`delegate_update_portfolio`). Its `owner` field is still the portfolio owner, never the
+  delegate. If you need to know who signed, read the transaction's auth entries from the
+  `getEvents` envelope / `getTransaction`.
+- `burn_portfolio` also removes the delegate without emitting `dlg_clr`; treat `port_burn` as
+  clearing it. `clear_portfolio_delegate` emits nothing when no delegate was set.
+
+### Changes in the compare-and-swap update
+
+- **Semantics:** `update_portfolio_if` emits the standard `port_upd`, identical to
+  `update_portfolio`. A rejected (`StaleUpdate`) call emits nothing.
+
+### Changes in the portfolio revision update
+
+- **Appended:** `revision` as the third field of `port_upd`: the portfolio's revision after the
+  update. Decoders that read the first two fields keep working.
+- **Semantics:** every portfolio has a revision counter (`get_portfolio_meta`). It is 0 right
+  after `port_mint` and goes up by exactly 1 per state-changing call: `update_portfolio` (which
+  emits `port_upd` with the new value) and `set_user_template` on a minted portfolio (which emits
+  `tmpl_set` only, without the revision). A burn deletes the counter; a re-mint starts again at 0.
+
+### Changes in the portfolio burn update
+
+- **New:** `port_burn`, emitted by `burn_portfolio`. `last_ipfs_cid` is the CID the portfolio
+  pointed at when it was burned, so the indexer can unpin or archive that content.
 
 ### Changes in the economics / soroban-sdk 29 update
 

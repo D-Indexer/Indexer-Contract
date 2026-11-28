@@ -145,6 +145,11 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `update_portfolio_if` | `owner: Address, ipfs_cid: String, expected_cid: String` | `owner` | `port_upd` | 2, 8 (either CID), 5, `StaleUpdate` (29) |
+| `set_portfolio_delegate` | `owner: Address, delegate: Address, expires_ledger: u32` | `owner` | `dlg_set` | 2, 5, `InvalidDelegate` (30) |
+| `clear_portfolio_delegate` | `owner: Address` | `owner` | `dlg_clr` (only if a delegate was set) | 2 |
+| `delegate_update_portfolio` | `delegate: Address, owner: Address, ipfs_cid: String` | `delegate` (not the owner) | `port_upd` | 2, 8, `Unauthorized` (7), `DelegateExpired` (31), 5 |
+| `burn_portfolio` | `owner: Address` | `owner` | `port_burn` | 2, 5 |
 
 Notes:
 
@@ -219,6 +224,8 @@ Notes:
 | `get_recovery` | `owner: Address` | `Option<Recovery { new_owner, approvals, initiated_ledger }>` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_meta` | `owner: Address` | `PortfolioMeta { revision, updated_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_delegate` | `owner: Address` | `Option<PortfolioDelegate { delegate, expires_ledger }>` | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 | `get_portfolio_by_folder` | `folder_name: String` | `PortfolioNFT` for the Folder's owner | `InvalidFolderName` (9), `FolderNotFound` (4), `PortfolioNotFound` (5) |
 | `verify_folder` | `folder_name: String` | `bool`: whether the Folder resolves to a portfolio | `InvalidFolderName` (9), `FolderNotFound` (4) |
@@ -269,7 +276,7 @@ The contract keeps no history or enumerable lists of users. The backend builds i
    `port_mint` is `[owner, template_id, ipfs_cid]`). Decode by position and ignore any trailing
    fields you don't know about: fields are only ever appended.
 4. **Apply.** Upsert by owner address: `folder_cl` → identity, `port_mint`/`port_upd` → portfolio
-   CID, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
+   CID, `port_burn` → delete the portfolio, `tmpl_set` → selected template *and* the portfolio's `template_id`, `tmpl_reg` → template
    cache plus an IPFS fetch of `metadata_uri`. Timestamps and tx hashes come from the `getEvents`
    envelope (`ledger`, `ledgerClosedAt`, `txHash`).
 5. **Reconcile.** Use the read functions (`get_portfolio`, `get_identity`, `get_template`) to

@@ -83,7 +83,6 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
         if let Some(admin) = env.storage().instance().get(&DataKey::AdminIndex(i)) {
             admins.push_back(admin);
         }
-        i += 1;
     }
     admins
 }
@@ -91,6 +90,10 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
 /// Number of admins, migrating the legacy `AdminList` first if needed.
 pub fn admin_count(env: &Env) -> u32 {
     migrate_admin_list(env);
+    raw_admin_count(env)
+}
+
+fn raw_admin_count(env: &Env) -> u32 {
     env.storage()
         .instance()
         .get(&DataKey::AdminCount)
@@ -121,6 +124,14 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
         .instance()
         .set(&DataKey::AdminCount, &(count + 1));
     true
+}
+
+fn insert_admin(env: &Env, address: &Address) {
+    let store = env.storage().instance();
+    let slot = raw_admin_count(env);
+    store.set(&DataKey::Admin(address.clone()), &slot);
+    store.set(&DataKey::AdminAt(slot), address);
+    store.set(&DataKey::AdminCount, &(slot + 1));
 }
 
 /// Removes `address` from the admins. Returns `false` if it was not one.
@@ -418,6 +429,53 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+/// Returns the stored change-tracking entry, if any. Portfolios minted before
+/// `PortfolioMeta` existed have none; see `nft_mint::portfolio_meta`.
+pub fn get_portfolio_meta(env: &Env, owner: &Address) -> Option<PortfolioMeta> {
+    let key = DataKey::PortfolioMeta(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn save_portfolio_meta(env: &Env, owner: &Address, meta: &PortfolioMeta) {
+    let key = DataKey::PortfolioMeta(owner.clone());
+    env.storage().persistent().set(&key, meta);
+    extend_persistent(env, &key);
+}
+
+pub fn get_portfolio_delegate(env: &Env, owner: &Address) -> Option<PortfolioDelegate> {
+    let key = DataKey::PortfolioDelegate(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn set_portfolio_delegate(env: &Env, owner: &Address, delegate: &PortfolioDelegate) {
+    let key = DataKey::PortfolioDelegate(owner.clone());
+    env.storage().persistent().set(&key, delegate);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_portfolio_delegate(env: &Env, owner: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PortfolioDelegate(owner.clone()));
+}
+
+/// Removes every portfolio-scoped key of `owner`. The identity mapping and
+/// `UserTemplate` are owner-scoped and deliberately left in place.
+pub fn remove_portfolio(env: &Env, owner: &Address) {
+    let persistent = env.storage().persistent();
+    persistent.remove(&DataKey::Portfolio(owner.clone()));
+    persistent.remove(&DataKey::PortfolioMeta(owner.clone()));
+    persistent.remove(&DataKey::PortfolioDelegate(owner.clone()));
 }
 
 // ── Economics ─────────────────────────────────────────────────────────────────
