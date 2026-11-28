@@ -156,3 +156,31 @@ pub fn verify_portfolio(env: &Env, owner: &Address) -> Result<bool, ContractErro
         Err(err) => Err(err),
     }
 }
+
+/// Whether `ipfs_cid` is exactly (byte for byte) the owner's current on-chain
+/// portfolio CID. A malformed CID is an error so clients can tell bad input
+/// from a mismatch; a missing portfolio is simply `false`.
+pub fn verify_portfolio_cid(
+    env: &Env,
+    owner: &Address,
+    ipfs_cid: &String,
+) -> Result<bool, ContractError> {
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
+    Ok(storage::load_portfolio(env, owner).is_some_and(|nft| &nft.ipfs_cid == ipfs_cid))
+}
+
+/// `verify_portfolio_cid` for the current owner of `folder_name`. An unclaimed,
+/// expired or released name is `false`.
+pub fn verify_folder_portfolio(
+    env: &Env,
+    folder_name: &String,
+    ipfs_cid: &String,
+) -> Result<bool, ContractError> {
+    validation::require_valid_ipfs_cid(ipfs_cid)?;
+    validation::require_valid_folder_name(folder_name)?;
+    match identity_map::get_folder(env, folder_name) {
+        Ok(owner) => verify_portfolio_cid(env, &owner, ipfs_cid),
+        Err(ContractError::FolderNotFound | ContractError::FolderExpired) => Ok(false),
+        Err(err) => Err(err),
+    }
+}

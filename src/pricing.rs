@@ -4,7 +4,7 @@ use crate::access_control::require_admin;
 use crate::constants::{FOLDER_SUFFIX, MAX_PRICE_TIERS, MIN_FOLDER_LABEL_LEN};
 use crate::errors::ContractError;
 use crate::storage;
-use crate::types::{FeeConfig, PriceTiers};
+use crate::types::PriceTiers;
 use crate::validation;
 
 /// Validates a tier table: at most `MAX_PRICE_TIERS` entries, strictly
@@ -35,18 +35,19 @@ pub fn fee_for_label_len(tiers: &PriceTiers, base_fee: i128, label_len: u32) -> 
     base_fee
 }
 
-/// Fee for one claim (or one lease period) of a valid Folder name. Zero when
-/// no fee is configured.
+/// Fee for one claim (or one lease period) of a valid Folder name: the
+/// matching price tier, otherwise the configured `ClaimFee.amount`. Zero when
+/// no fee is configured or the fee is disabled (`amount == 0`).
 pub fn quote_claim(env: &Env, folder_name: &String) -> Result<i128, ContractError> {
     validation::require_valid_folder_name(folder_name)?;
-    let Some(config) = storage::get_fee_config(env) else {
+    let Some(config) = storage::get_claim_fee(env) else {
         return Ok(0);
     };
     // The name was validated above, so it is longer than the suffix.
     let label_len = folder_name.len().saturating_sub(FOLDER_SUFFIX.len() as u32);
     Ok(fee_for_label_len(
         &storage::get_price_tiers(env),
-        config.base_fee,
+        config.amount,
         label_len,
     ))
 }
@@ -56,31 +57,9 @@ pub fn charge(env: &Env, payer: &Address, amount: i128) {
     if amount <= 0 {
         return;
     }
-    if let Some(config) = storage::get_fee_config(env) {
+    if let Some(config) = storage::get_claim_fee(env) {
         token::Client::new(env, &config.token).transfer(payer, &config.treasury, &amount);
     }
-}
-
-pub fn set_claim_fee(
-    env: &Env,
-    admin: &Address,
-    token: &Address,
-    treasury: &Address,
-    base_fee: i128,
-) -> Result<(), ContractError> {
-    require_admin(env, admin)?;
-    if base_fee < 0 {
-        return Err(ContractError::InvalidFee);
-    }
-    storage::set_fee_config(
-        env,
-        &FeeConfig {
-            token: token.clone(),
-            treasury: treasury.clone(),
-            base_fee,
-        },
-    );
-    Ok(())
 }
 
 pub fn set_price_tiers(

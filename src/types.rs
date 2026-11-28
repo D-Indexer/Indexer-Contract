@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,7 +72,7 @@ pub struct AdminChange {
 #[contracttype]
 pub enum DataKey {
     AdminList,
-    // admin membership: per-admin marker, `()` when the address is an admin
+    // admin membership: admin -> its slot index in `AdminAt`
     Admin(Address),
     AdminIndex(u32),
     // admin membership: number of admins, kept in sync with `Admin(Address)`

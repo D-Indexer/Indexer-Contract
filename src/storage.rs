@@ -1,7 +1,7 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::constants::{
-    INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
+    CLAIM_COMMIT_TTL, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
     PERSISTENT_LIFETIME_THRESHOLD,
 };
 use crate::errors::ContractError;
@@ -123,17 +123,23 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
 }
 
 /// Removes `address` from the admins. Returns `false` if it was not one.
+/// The last slot is moved into the freed one so `AdminAt` stays dense.
 pub fn remove_admin_entry(env: &Env, address: &Address) -> bool {
     if !is_admin(env, address) {
         return false;
     }
-    env.storage()
-        .instance()
-        .remove(&DataKey::Admin(address.clone()));
     let count = admin_count(env);
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminCount, &(count - 1));
+    let instance = env.storage().instance();
+    let slot: u32 = instance.get(&DataKey::Admin(address.clone())).unwrap_or(0);
+    let last = count - 1;
+    if slot != last {
+        let moved: Address = instance.get(&DataKey::AdminAt(last)).unwrap();
+        instance.set(&DataKey::AdminAt(slot), &moved);
+        instance.set(&DataKey::Admin(moved), &slot);
+    }
+    instance.remove(&DataKey::AdminAt(last));
+    instance.remove(&DataKey::Admin(address.clone()));
+    instance.set(&DataKey::AdminCount, &last);
     true
 }
 
@@ -148,7 +154,6 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
         env.storage().instance().remove(&DataKey::AdminIndex(i));
         i += 1;
     }
-    env.storage().instance().set(&DataKey::AdminCount, &0u32);
     for admin in admins.iter() {
         add_admin_entry(env, &admin);
     }
@@ -272,10 +277,6 @@ pub fn get_template(env: &Env, template_id: u32) -> Option<Template> {
     env.storage().persistent().get(&DataKey::Template(template_id))
 }
 
-pub fn save_template(env: &Env, template: &Template) {
-    save_template_with_list(env, template, get_template_list(env));
-}
-
 /// Saves a template reusing an already-loaded registry list, avoiding a second
 /// read of `TemplateList` in write paths that had to load it for validation.
 pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32>) {
@@ -375,13 +376,7 @@ pub fn extend_template_ttl(env: &Env, template_id: u32) -> u32 {
 
 // ── Portfolio NFT ─────────────────────────────────────────────────────────────
 
-pub fn portfolio_exists(env: &Env, owner: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .has(&DataKey::Portfolio(owner.clone()))
-}
-
-/// Single-read variant of `portfolio_exists` + `get_portfolio`: returns the
+/// Single-read existence check + `get_portfolio`: returns the
 /// stored portfolio (if any) and extends its TTL, so write paths do not pay
 /// for a `has` followed by a `get`.
 pub fn load_portfolio(env: &Env, owner: &Address) -> Option<PortfolioNFT> {

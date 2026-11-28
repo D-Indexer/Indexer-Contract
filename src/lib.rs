@@ -19,6 +19,7 @@ mod events;
 mod identity_map;
 mod nft_mint;
 mod pricing;
+mod recovery;
 mod storage;
 mod template_registry;
 mod types;
@@ -27,7 +28,7 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
 use crate::types::ClaimFee;
@@ -100,21 +101,13 @@ impl FolderContract {
     }
 
     /// Executes a queued admin change once its ETA ledger has passed.
-    pub fn execute_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn execute_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::execute_admin_change(&env, &admin, op_id)
     }
 
     /// Cancels a queued admin change before it is executed.
-    pub fn cancel_admin_change(
-        env: Env,
-        admin: Address,
-        op_id: u32,
-    ) -> Result<(), ContractError> {
+    pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
     }
@@ -204,6 +197,26 @@ impl FolderContract {
         economics::withdraw(&env, &admin, &token, &to, amount)
     }
 
+    /// Replaces the length-based premium tiers (at most 5, sorted, validated).
+    /// Labels longer than every tier pay the `ClaimFee` amount.
+    pub fn set_price_tiers(
+        env: Env,
+        admin: Address,
+        tiers: PriceTiers,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        pricing::set_price_tiers(&env, &admin, &tiers)
+    }
+
+    pub fn get_price_tiers(env: Env) -> PriceTiers {
+        storage::get_price_tiers(&env)
+    }
+
+    /// Fee charged to claim `folder_name` (or to renew it for one period).
+    pub fn quote_claim(env: Env, folder_name: String) -> Result<i128, ContractError> {
+        pricing::quote_claim(&env, &folder_name)
+    }
+
     /// Returns this contract's balance of `token`.
     pub fn treasury_balance(env: Env, token: Address) -> i128 {
         economics::treasury_balance(&env, &token)
@@ -219,7 +232,7 @@ impl FolderContract {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract(ContractExecutable::Wasm(new_wasm_hash.clone()));
         events::contract_upgraded(&env, &admin, &new_wasm_hash);
         Ok(())
     }
@@ -258,6 +271,40 @@ impl FolderContract {
         identity_map::claim_folder(&env, &owner, &folder_name)
     }
 
+    /// Phase 1 of a front-running-resistant claim. `commitment` is
+    /// `sha256(folder_name_bytes || salt || owner_xdr)`; see `claim_commitment`.
+    pub fn commit_claim(
+        env: Env,
+        owner: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::commit_claim(&env, &owner, &commitment)
+    }
+
+    /// Phase 2: reveals the committed name at least `MIN_REVEAL_DELAY` and at
+    /// most `REVEAL_WINDOW` ledgers after `commit_claim`, then claims it.
+    pub fn reveal_claim(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::reveal_claim(&env, &owner, &folder_name, &salt)
+    }
+
+    /// Computes the commitment `commit_claim` expects. Clients should compute
+    /// it locally: simulating this call shows the name to the RPC node.
+    pub fn claim_commitment(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        salt: BytesN<32>,
+    ) -> BytesN<32> {
+        identity_map::claim_commitment(&env, &owner, &folder_name, &salt)
+    }
+
     /// Claims `folder_name` for `owner` with the fee paid by `sponsor`.
     /// Both must authorize.
     pub fn sponsored_claim(
@@ -268,6 +315,24 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         identity_map::sponsored_claim(&env, &sponsor, &owner, &folder_name)
+    }
+
+    /// Admin-only removal of an abusive or impersonating name. The name is
+    /// reserved, not reassigned. `reason_code`: 1 impersonation, 2 abuse,
+    /// 3 legal.
+    pub fn revoke_folder(
+        env: Env,
+        admin: Address,
+        folder_name: String,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        identity_map::revoke_folder(&env, &admin, &folder_name, reason_code)
+    }
+
+    /// The revocation record of `folder_name`, if an admin revoked it.
+    pub fn get_revocation(env: Env, folder_name: String) -> Option<Revocation> {
+        storage::get_revocation(&env, &folder_name)
     }
 
     pub fn get_folder(env: Env, folder_name: String) -> Result<Address, ContractError> {
