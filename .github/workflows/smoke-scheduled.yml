@@ -1,0 +1,84 @@
+name: Scheduled testnet smoke
+
+on:
+  schedule:
+    - cron: "30 5 * * *" # daily 05:30 UTC
+  workflow_dispatch:
+    inputs:
+      contract_id:
+        description: Override the contract ID (e.g. a bad one to force a failure)
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  STELLAR_CLI_VERSION: 28.1.0
+  LABEL: smoke-failure
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    outputs:
+      outcome: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
+        run: |
+          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP" stellar
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Override contract ID
+        if: inputs.contract_id != ''
+        run: jq --arg id "${{ inputs.contract_id }}" '.contract_id = $id' deployments/testnet.json > d.json && mv d.json deployments/testnet.json
+
+      - name: Run smoke test
+        id: run
+        continue-on-error: true
+        shell: bash
+        run: ./scripts/smoke-testnet.sh 2>&1 | tee smoke.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-log
+          path: smoke.log
+
+  report:
+    needs: smoke
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: smoke-log
+
+      - name: Open or update tracking issue
+        if: needs.smoke.outputs.outcome == 'failure'
+        run: |
+          STEP="$(grep -m1 'FAILED at line' smoke.log || echo 'unknown (see log)')"
+          BODY="$(printf 'Smoke run failed: %s\n\n**Failing step:** `%s`\n\n<details><summary>Log excerpt</summary>\n\n```\n%s\n```\n</details>\n' \
+            "$RUN_URL" "$STEP" "$(tail -n 40 smoke.log)")"
+          gh label create "$LABEL" --color B60205 --description "Scheduled testnet smoke test failing" 2>/dev/null || true
+          NUM="$(gh issue list --label "$LABEL" --state open --json number -q '.[0].number')"
+          if [[ -n "$NUM" ]]; then
+            gh issue comment "$NUM" --body "$BODY"
+          else
+            gh issue create --title "Scheduled testnet smoke test failing" --label "$LABEL" --body "$BODY"
+          fi
+          exit 1
+
+      - name: Close tracking issue on green run
+        if: needs.smoke.outputs.outcome == 'success'
+        run: |
+          for n in $(gh issue list --label "$LABEL" --state open --json number -q '.[].number'); do
+            gh issue close "$n" --comment "Smoke test green again: $RUN_URL"
+          done

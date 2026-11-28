@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,14 +27,62 @@ pub struct ClaimFee {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeeConfig {
+    pub token: Address,
+    pub treasury: Address,
+    pub base_fee: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceTiers {
+    pub by_len: Vec<(u32, i128)>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaseConfig {
+    pub period_secs: u64,
+    pub grace_secs: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateSubmission {
+    pub designer: Address,
+    pub metadata_uri: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminOp {
+    Add,
+    Remove,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminChange {
+    pub op: AdminOp,
+    pub target: Address,
+    pub eta_ledger: u32,
+}
+
+#[contracttype]
 pub enum DataKey {
     AdminList,
-    // admin membership: admin address -> its slot in `AdminSlot`
+    // admin membership: admin -> its slot index in `AdminAt`
     Admin(Address),
+    AdminIndex(u32),
     // admin membership: number of admins, kept in sync with `Admin(Address)`
     AdminCount,
     Initialized,
-    // identity_map: folder_name -> owner
+    // config: admin-tunable protocol limits
+    Config,
+    // identity_map: sha256(folder_name) -> owner (current layout)
+    FolderOwnerHash(BytesN<32>),
+    // identity_map: folder_name -> owner (legacy layout, read-only migration path)
     FolderOwner(String),
     // identity_map: owner -> folder_name
     OwnerFolder(Address),
@@ -47,63 +95,22 @@ pub enum DataKey {
     Portfolio(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
-    // admin membership: slot index -> admin address, slots `0..AdminCount`
-    AdminSlot(u32),
-    // admin timelock: pending queue of admin changes
-    PendingAdminChanges,
-    // admin timelock: next op ID to hand out
-    NextAdminChangeId,
-    // pricing: claim fee settings and length tiers (instance)
     FeeConfig,
     PriceTiers,
-    // leases: lease settings (instance) and folder_name -> expiry timestamp
     LeaseConfig,
     FolderExpiry(String),
-}
-
-/// Kind of change queued through the admin timelock.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AdminOp {
-    Add,
-    Remove,
-}
-
-/// A queued admin change, executable once `eta_ledger` is reached.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AdminChange {
-    pub op: AdminOp,
-    pub target: Address,
-    pub eta_ledger: u32,
-}
-
-/// Tiered claim fee settings. The fee is paid in `token` to `treasury`.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FeeConfig {
-    pub token: Address,
-    pub treasury: Address,
-    /// Fee for labels longer than every configured tier.
-    pub base_fee: i128,
-}
-
-/// Length-based premium pricing: `(max_label_len, amount)` pairs sorted by
-/// strictly ascending `max_label_len`. A label uses the first tier whose
-/// `max_label_len` is `>=` its length; longer labels pay `base_fee`.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PriceTiers {
-    pub by_len: Vec<(u32, i128)>,
-}
-
-/// Lease settings. Absent (the default) means names are permanent.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LeaseConfig {
-    /// Length of one lease period in seconds.
-    pub period_secs: u64,
-    /// Grace period after expiry, in seconds, during which only the
-    /// previous owner can renew.
-    pub grace_secs: u64,
+    // admin timelock
+    PendingAdminChanges,
+    NextAdminChangeId,
+    // address blocklist
+    BlockedAddress(Address),
+    // portfolio moderation
+    PortfolioFlag(Address),
+    // template submission queue
+    TemplateSubmission(u32),
+    PendingTemplateSubmissions,
+    NextTemplateSubmissionId,
+    TemplateDesigner(u32),
+    // template usage
+    TemplateUsage(u32),
 }
