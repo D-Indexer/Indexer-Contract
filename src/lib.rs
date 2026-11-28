@@ -24,6 +24,7 @@ mod storage;
 mod template_registry;
 mod types;
 mod validation;
+mod validation_core;
 
 #[cfg(test)]
 mod test;
@@ -62,6 +63,12 @@ impl FolderContract {
         storage::save_admins(&env, &admins);
         storage::set_initialized(&env);
         storage::extend_instance(&env);
+        storage::append_admin_log(
+            &env,
+            &admin,
+            symbol_short!("init"),
+            AdminSubject::Address(admin.clone()),
+        );
         events::contract_initialized(&env, &admin);
         Ok(())
     }

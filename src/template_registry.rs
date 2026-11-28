@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{symbol_short, Address, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
 use crate::constants::{MAX_PENDING_TEMPLATE_SUBMISSIONS, MAX_TEMPLATES};

@@ -24,6 +24,9 @@ members = [".", "spike/folder-registry", "spike/folder-templates", "spike/folder
 [workspace.dependencies]
 soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

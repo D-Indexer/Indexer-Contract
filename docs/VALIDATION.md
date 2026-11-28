@@ -30,6 +30,26 @@ Examples:
 - Validation applies to new claims only. Names already claimed on-chain stay valid and resolvable;
   the contract does not re-validate or migrate existing entries.
 
+## Formal verification (Kani)
+
+The validators are implemented as pure `&[u8]` functions in
+[`src/validation_core.rs`](../src/validation_core.rs); `src/validation.rs` only copies the contract
+`String` into a bounded stack buffer and calls them. Run the proofs with:
+
+```bash
+cargo install --locked kani-verifier && cargo kani setup   # once
+cargo kani
+```
+
+| Harness | Property | Input bound |
+|---|---|---|
+| `folder_name_never_panics_and_matches_grammar` | Never panics. Every accepted name is `<label>.folder`, 10–64 bytes, the label is all `[a-z0-9-]`, and its first and last bytes are never `-`. | all inputs of 0–16 bytes |
+| `cid_never_panics_and_has_valid_shape` | Never panics. Every accepted CID starts with `Qm` and is exactly 46 base58btc bytes, or starts with `ba` and is 46–128 lowercase base32 bytes. | all inputs of 0–48 bytes |
+| `metadata_uri_never_panics` | Never panics, and every accepted URI starts with `ipfs://`. | all inputs of 0–24 bytes |
+
+The bounds keep the proofs tractable. The 48-byte CID bound covers every CIDv0 and the shortest
+CIDv1 strings. A scheduled CI workflow (`.github/workflows/kani.yml`) runs the proofs weekly.
+
 ## Non-goals
 
 - The contract checks the textual shape of a CID, not its multihash or codec bytes.

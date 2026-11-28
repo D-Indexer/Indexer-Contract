@@ -1,4 +1,4 @@
-use soroban_sdk::{Bytes, String};
+use soroban_sdk::String;
 
 use crate::constants::{
     CIDV0_DIGEST_LEN, CIDV0_LEN, CIDV0_MULTIHASH_CODE, CIDV0_MULTIHASH_LEN, CIDV1_ALLOWED_CODECS,
@@ -8,6 +8,7 @@ use crate::constants::{
     MIN_IPFS_CID_LEN,
 };
 use crate::errors::ContractError;
+use crate::validation_core;
 
 /// Copies a Soroban `Bytes` value into a fixed-size stack buffer so the shared
 /// validator can run on `&[u8]` without allocating. Inputs longer than the

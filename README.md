@@ -63,7 +63,7 @@ make build-optimized      # stellar contract build --optimize -> target/stellar/
 make wasm-hash            # sha256 = the on-chain wasm hash
 
 # Test
-make test                 # cargo test (61 unit tests, Soroban testutils)
+make test                 # cargo test (unit tests + previous-release upgrade harness)
 make check                # fmt-check, cargo check, clippy -D warnings, tests, wasm build, script syntax
 
 # Deploy to testnet (creates and Friendbot-funds the `folder-deployer` identity if needed,
@@ -203,6 +203,7 @@ Notes:
 | Function | Arguments | Returns | Errors |
 |---|---|---|---|
 | `get_admins` | — | `Vec<Address>` (empty before `initialize`) | — |
+| `get_admin_log` | `start: u32, limit: u32` | `Vec<AdminLogEntry { seq, actor, action, subject, ledger }>`: the last `ADMIN_LOG_SIZE` (50) admin actions (`init`, `add_admin`, `rm_admin`, `reg_tmpl`) in chronological order; `start` is the offset from the oldest retained entry | — |
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |

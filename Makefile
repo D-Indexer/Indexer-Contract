@@ -23,6 +23,9 @@ help:
 	@echo "  check         Run local pre-PR gates"
 	@echo "  docker-build  Build optimized WASM in the pinned container -> $(DOCKER_WASM)"
 	@echo "  clean         Remove Cargo build artifacts"
+	@echo "  dev           Start a local network, deploy and seed DEV_USERS (default 25) users"
+	@echo "  dev-verify    Verify the seeded local state through reads"
+	@echo "  dev-down      Stop the local network and remove deployments/local.json"
 
 fmt:
 	cargo fmt
@@ -101,3 +104,12 @@ docker-build:
 
 clean:
 	cargo clean
+
+dev:
+	./scripts/dev.sh up
+
+dev-verify:
+	./scripts/dev.sh verify
+
+dev-down:
+	./scripts/dev.sh down
