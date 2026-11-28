@@ -1,0 +1,43 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+# Any exception must carry a justification comment and a review date.
+
+[graph]
+targets = ["wasm32v1-none", "x86_64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses compatible with the MIT project license.
+# Copyleft licenses are denied unless explicitly reviewed and added here.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "Unlicense",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

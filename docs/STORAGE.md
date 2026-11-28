@@ -56,3 +56,28 @@ Constants are in [`src/constants.rs`](../src/constants.rs). One day is about 17,
 - An entry that nobody touches for about 120 days is archived. It can be restored with
   `stellar contract restore`; it is not lost.
 - Read-only calls that are only simulated, never submitted, don't persist extensions.
+
+## Upgrades
+
+`upgrade(admin, new_wasm_hash)` is admin-only and calls
+`env.deployer().update_current_contract_wasm`. It replaces the contract **code** only:
+
+- Instance storage (`Initialized`, `AdminList`) and every persistent entry (`Template`,
+  `TemplateList`, `FolderOwner`, `OwnerFolder`, `UserTemplate`, `Portfolio`) are preserved
+  unchanged. No migration step is needed for a code-only upgrade.
+- The admin list is read from storage, so the same admins keep control after the upgrade.
+- `version()` returns `CONTRACT_VERSION` from [`src/constants.rs`](../src/constants.rs). Bump it
+  in the same PR as any upgrade so operators can confirm which code is live.
+
+Compatibility rules for upgrades:
+
+- **Never** rename or repurpose a `DataKey` variant, and never change the type of an existing
+  value. Add new variants instead; old entries stay readable.
+- New keys must tolerate being absent (`Option`/default) so a contract upgraded from an older
+  version keeps working without a migration.
+- Removing a key is only safe once no live deployment can still hold it.
+- If a layout change is unavoidable, ship a migration entry point in the new code and run it
+  right after `upgrade` in the same release.
+
+Use [`scripts/upgrade.sh`](../scripts/upgrade.sh) to upload and apply a new wasm hash.
+

@@ -1,0 +1,18 @@
+title = "Indexer-Contract gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "stellar-secret-seed"
+description = "Stellar secret seed (S... StrKey)"
+regex = '''\bS[A-Z2-7]{55}\b'''
+keywords = ["S"]
+tags = ["stellar", "secret"]
+
+# Test fixtures are allowlisted explicitly; add paths here, never broad globs.
+[allowlist]
+description = "Explicit test fixtures"
+paths = [
+  '''^test_snapshots/''',
+]

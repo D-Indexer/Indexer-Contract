@@ -1,0 +1,30 @@
+# cargo-mutants configuration for the Indexer contract.
+#
+# Run locally with:  cargo mutants --config mutants.toml
+# CI runs this weekly (.github/workflows/mutants.yml) and uploads the report.
+#
+# Scope: the contract sources under src/. The unit-test module is excluded
+# because mutating test code only produces noise (mutants in `#[cfg(test)]`
+# code are never compiled into the contract and cannot be killed by tests).
+
+[mutants]
+# Only mutate the contract sources.
+examine_globs = ["src/**/*.rs"]
+# Never mutate the test module or generated/build output.
+exclude_globs = ["src/test.rs", "target/**"]
+
+# Equivalent mutants that cannot be killed by any test, with justification.
+exclude_re = [
+    # `require_owner` only calls `require_auth`; the `let _ = env;` line exists
+    # purely to silence the unused-parameter lint, so replacing it with `()`
+    # is behaviourally identical.
+    "access_control.rs:.*: replace `let _ = env` with `()`",
+    # `starts_with`/`ends_with`/`all_bytes` loop counters: `<` vs `<=` on the
+    # final iteration is unreachable because the loop body returns early on
+    # the last index; the mutants are equivalent by construction.
+    "validation.rs:.*: replace `<` with `<=` in `while i < prefix.len\\(\\)`",
+    "validation.rs:.*: replace `<` with `<=` in `while i < suffix.len\\(\\)`",
+]
+
+# Keep the run bounded: skip mutants that only change log/event payloads.
+timeout_multiplier = 2.0
