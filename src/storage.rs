@@ -91,6 +91,10 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
 /// Number of admins, migrating the legacy `AdminList` first if needed.
 pub fn admin_count(env: &Env) -> u32 {
     migrate_admin_list(env);
+    raw_admin_count(env)
+}
+
+fn raw_admin_count(env: &Env) -> u32 {
     env.storage()
         .instance()
         .get(&DataKey::AdminCount)
@@ -123,11 +127,27 @@ pub fn add_admin_entry(env: &Env, address: &Address) -> bool {
     true
 }
 
+fn insert_admin(env: &Env, address: &Address) {
+    let instance = env.storage().instance();
+    let slot = raw_admin_count(env);
+    instance.set(&DataKey::Admin(address.clone()), &slot);
+    instance.set(&DataKey::AdminAt(slot), address);
+    instance.set(&DataKey::AdminCount, &(slot + 1));
+}
+
 /// Removes `address` from the admins. Returns `false` if it was not one.
 /// The last slot is moved into the freed one so `AdminAt` stays dense.
 pub fn remove_admin_entry(env: &Env, address: &Address) -> bool {
-    if !is_admin(env, address) {
+    migrate_admin_list(env);
+    let instance = env.storage().instance();
+    let Some(slot) = instance.get::<_, u32>(&DataKey::Admin(address.clone())) else {
         return false;
+    };
+    let last = raw_admin_count(env) - 1;
+    if slot != last {
+        let moved: Address = instance.get(&DataKey::AdminAt(last)).unwrap();
+        instance.set(&DataKey::AdminAt(slot), &moved);
+        instance.set(&DataKey::Admin(moved), &slot);
     }
     let count = admin_count(env);
     let instance = env.storage().instance();
@@ -168,7 +188,9 @@ fn migrate_admin_list(env: &Env) {
         // Remove first: `add_admin_entry` re-enters this function.
         env.storage().instance().remove(&DataKey::AdminList);
         for admin in admins.iter() {
-            add_admin_entry(env, &admin);
+            if !env.storage().instance().has(&DataKey::Admin(admin.clone())) {
+                insert_admin(env, &admin);
+            }
         }
     }
 }
@@ -418,6 +440,75 @@ pub fn save_portfolio(env: &Env, portfolio: &PortfolioNFT) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+/// Portfolio CID history, oldest first. Empty for owners who never minted.
+pub fn get_portfolio_history(env: &Env, owner: &Address) -> Vec<CidEntry> {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    match env.storage().persistent().get(&key) {
+        Some(history) => {
+            extend_persistent(env, &key);
+            history
+        }
+        None => Vec::new(env),
+    }
+}
+
+/// Appends `cid` at the current ledger timestamp. When the history already
+/// holds `MAX_CID_HISTORY` entries the oldest ones are dropped, so its
+/// length never exceeds the cap.
+pub fn append_portfolio_history(env: &Env, owner: &Address, cid: &String) {
+    let key = DataKey::PortfolioHistory(owner.clone());
+    let mut history: Vec<CidEntry> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
+    while history.len() >= MAX_CID_HISTORY {
+        history.pop_front();
+    }
+    history.push_back(CidEntry {
+        cid: cid.clone(),
+        at: env.ledger().timestamp(),
+    });
+    env.storage().persistent().set(&key, &history);
+    extend_persistent(env, &key);
+}
+
+// ── Token IDs ─────────────────────────────────────────────────────────────────
+
+/// Assigns the next sequential token ID to `owner` and writes both mappings.
+/// IDs start at 1 and the counter only grows, so an ID is never reused.
+pub fn assign_token_id(env: &Env, owner: &Address) -> u64 {
+    let instance = env.storage().instance();
+    let token_id: u64 = instance.get(&DataKey::NextTokenId).unwrap_or(1);
+    instance.set(&DataKey::NextTokenId, &(token_id + 1));
+
+    let token_key = DataKey::TokenOwner(token_id);
+    let owner_key = DataKey::OwnerToken(owner.clone());
+    env.storage().persistent().set(&token_key, owner);
+    env.storage().persistent().set(&owner_key, &token_id);
+    extend_persistent(env, &token_key);
+    extend_persistent(env, &owner_key);
+    token_id
+}
+
+pub fn get_owner_token(env: &Env, owner: &Address) -> Option<u64> {
+    let key = DataKey::OwnerToken(owner.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
+}
+
+pub fn get_token_owner(env: &Env, token_id: u64) -> Option<Address> {
+    let key = DataKey::TokenOwner(token_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        extend_persistent(env, &key);
+    }
+    result
 }
 
 // ── Economics ─────────────────────────────────────────────────────────────────

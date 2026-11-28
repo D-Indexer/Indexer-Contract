@@ -43,6 +43,21 @@ impl TestEnv {
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
     }
+
+    /// Whether `key` is live in this contract's persistent storage.
+    fn has_persistent(&self, key: &DataKey) -> bool {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().has(key)
+        })
+    }
+
+    /// Writes `key` directly into this contract's persistent storage, as a
+    /// restore of an archived entry would.
+    fn set_persistent<V: IntoVal<Env, Val>>(&self, key: &DataKey, value: &V) {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().set(key, value)
+        })
+    }
 }
 
 fn uninitialized_env() -> TestEnv {
@@ -410,6 +425,8 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
         "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
     );
 
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&owner, &name);
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
@@ -884,7 +901,7 @@ fn test_template_survives_archival() {
     let key = DataKey::Template(1u32);
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::Template {
             template_id: 1u32,
@@ -923,7 +940,7 @@ fn test_portfolio_survives_archival() {
     let key = DataKey::Portfolio(user.clone());
     archive_persistent(&t, &key);
 
-    t.env.storage().persistent().set(
+    t.set_persistent(
         &key,
         &crate::types::PortfolioNFT {
             owner: user.clone(),

@@ -36,7 +36,7 @@ Compatibility rules:
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
-| `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
+| `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio`, `claim_and_mint` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
@@ -46,6 +46,12 @@ Compatibility rules:
 | `tmpl_sub` | `TemplateSubmitted` | `submission_id: u32`, `designer: Address`, `metadata_uri: String` | `submit_template` |
 | `tmpl_appr` | `TemplateSubmissionApproved` | `admin: Address`, `submission_id: u32`, `template_id: u32` | `approve_submission` |
 | `tmpl_rej` | `TemplateSubmissionRejected` | `admin: Address`, `submission_id: u32`, `reason_code: u32` | `reject_submission` |
+
+### `claim_and_mint` (#157)
+
+- `claim_and_mint` emits the same two events as `claim_folder` followed by `mint_portfolio`, in
+  that order and in the same transaction: `folder_cl`, then `port_mint`. Indexers need no new
+  handling; apply them in event order.
 
 ### Changes in the economics / soroban-sdk 29 update
 

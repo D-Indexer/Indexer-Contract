@@ -144,11 +144,14 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `cancel_recovery` | `owner: Address` | `owner` | `rec_cancel` | 2, 35 |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
+| `claim_and_mint` | `owner: Address, folder_name: String, template_id: u32, ipfs_cid: String` | `owner` (one signature, also covers the fee transfer) | `folder_cl`, then `port_mint` | 2, 9, 16, 3, 13, 17, 8, 6; storage is untouched on any error |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
 
 Notes:
 
 - `mint_portfolio` requires a claimed Folder name and also sets the owner's selected template.
+- `claim_and_mint` is the one-transaction onboarding path: it runs every check of `claim_folder`
+  and `mint_portfolio` before writing anything, so a failure leaves no partial state.
 - `set_user_template` also updates `template_id` on an existing portfolio.
 - **Front-running and commit-reveal.** `claim_folder` puts the name in the pending transaction,
   so an observer can submit the same claim with a higher fee and take it. For names worth
@@ -219,6 +222,7 @@ Notes:
 | `get_recovery` | `owner: Address` | `Option<Recovery { new_owner, approvals, initiated_ledger }>` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
+| `get_portfolio_history` | `owner: Address` | `Vec<CidEntry { cid, at }>`: the last 10 CIDs with ledger timestamps, oldest first (empty if never minted) | — |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 | `get_portfolio_by_folder` | `folder_name: String` | `PortfolioNFT` for the Folder's owner | `InvalidFolderName` (9), `FolderNotFound` (4), `PortfolioNotFound` (5) |
 | `verify_folder` | `folder_name: String` | `bool`: whether the Folder resolves to a portfolio | `InvalidFolderName` (9), `FolderNotFound` (4) |

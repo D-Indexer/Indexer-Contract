@@ -9,6 +9,15 @@ pub struct PortfolioNFT {
     pub minted_at: u64,
 }
 
+/// One entry of an owner's portfolio CID history: the CID and the ledger
+/// timestamp at which it became the portfolio's content.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CidEntry {
+    pub cid: String,
+    pub at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
@@ -93,6 +102,14 @@ pub enum DataKey {
     UserTemplate(Address),
     // nft_mint: owner -> PortfolioNFT
     Portfolio(Address),
+    // nft_mint: owner -> last MAX_CID_HISTORY CidEntry values, oldest first
+    PortfolioHistory(Address),
+    // token IDs: next ID to assign, starts at 1 (instance)
+    NextTokenId,
+    // token IDs: token_id -> owner
+    TokenOwner(u64),
+    // token IDs: owner -> token_id
+    OwnerToken(Address),
     // economics: Folder claim fee configuration (instance storage)
     ClaimFee,
     FeeConfig,

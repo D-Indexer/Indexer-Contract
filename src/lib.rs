@@ -439,6 +439,19 @@ impl FolderContract {
         nft_mint::mint_portfolio(&env, &owner, template_id, &ipfs_cid)
     }
 
+    /// Claims `folder_name` and mints the owner's portfolio atomically: one
+    /// signature, and a failure leaves no partial state.
+    pub fn claim_and_mint(
+        env: Env,
+        owner: Address,
+        folder_name: String,
+        template_id: u32,
+        ipfs_cid: String,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::claim_and_mint(&env, &owner, &folder_name, template_id, &ipfs_cid)
+    }
+
     pub fn update_portfolio(
         env: Env,
         owner: Address,
@@ -450,6 +463,35 @@ impl FolderContract {
 
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {
         nft_mint::get_portfolio(&env, &owner)
+    }
+
+    /// Sequential token ID of the owner's portfolio (`TokenNotFound` if the
+    /// owner has no portfolio or it predates token IDs and was not backfilled).
+    pub fn token_of(env: Env, owner: Address) -> Result<u64, ContractError> {
+        nft_mint::token_of(&env, &owner)
+    }
+
+    /// Owner of portfolio token `token_id` (`TokenNotFound` if unassigned).
+    /// Also the SEP-0050 `owner_of`.
+    pub fn owner_of(env: Env, token_id: u64) -> Result<Address, ContractError> {
+        nft_mint::owner_of(&env, token_id)
+    }
+
+    /// Admin only, idempotent: assigns a token ID to a portfolio minted
+    /// before token IDs existed and returns it.
+    pub fn backfill_token_id(
+        env: Env,
+        admin: Address,
+        owner: Address,
+    ) -> Result<u64, ContractError> {
+        require_initialized(&env)?;
+        nft_mint::backfill_token_id(&env, &admin, &owner)
+    }
+
+    /// The owner's last `MAX_CID_HISTORY` (10) portfolio CIDs with the ledger
+    /// timestamp each was set at, oldest first. Empty if never minted.
+    pub fn get_portfolio_history(env: Env, owner: Address) -> Vec<CidEntry> {
+        nft_mint::get_portfolio_history(&env, &owner)
     }
 
     pub fn verify_portfolio(env: Env, owner: Address) -> Result<bool, ContractError> {
