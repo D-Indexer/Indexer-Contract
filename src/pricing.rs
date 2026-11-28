@@ -43,10 +43,8 @@ pub fn quote_claim(env: &Env, folder_name: &String) -> Result<i128, ContractErro
     let Some(config) = storage::get_claim_fee(env) else {
         return Ok(0);
     };
-    if config.amount == 0 {
-        return Ok(0);
-    }
-    let label_len = folder_name.len() - FOLDER_SUFFIX.len() as u32;
+    // The name was validated above, so it is longer than the suffix.
+    let label_len = folder_name.len().saturating_sub(FOLDER_SUFFIX.len() as u32);
     Ok(fee_for_label_len(
         &storage::get_price_tiers(env),
         config.amount,

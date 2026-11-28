@@ -1,0 +1,42 @@
+name: Template IPFS retrieval
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      pin:
+        description: Pin templates first (requires the PIN_TOKEN secret)
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - scripts/pin-templates.sh
+      - scripts/tests/test-pin-templates.sh
+
+permissions:
+  contents: read
+
+jobs:
+  script-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/tests/test-pin-templates.sh
+
+  retrieval:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin templates
+        if: github.event_name == 'workflow_dispatch' && inputs.pin
+        env:
+          PIN_TOKEN: ${{ secrets.PIN_TOKEN }}
+          PIN_PROVIDER: ${{ vars.PIN_PROVIDER || 'pinata' }}
+        run: ./scripts/pin-templates.sh
+
+      - name: Verify retrieval from public gateways
+        run: ./scripts/pin-templates.sh --verify-only

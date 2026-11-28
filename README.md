@@ -89,6 +89,29 @@ stellar contract invoke --id $ID --network testnet --source-account me --send=no
   get_portfolio --owner me
 ```
 
+## Contract build verification
+
+Release WASMs embed SEP-0055 contract build metadata. This repository targets
+SEP-0055 revision `0.4.1` (updated 2025-03-12), and records the source repository as:
+
+```text
+source_repo=github:D-Indexer/Indexer-Contract
+```
+
+Build and inspect it with a pinned Stellar CLI:
+
+```bash
+make build-optimized
+stellar contract info meta --wasm target/stellar/indexer_contract.wasm
+```
+
+To verify a deployment, obtain the deployed WASM hash, download the exact WASM
+from the network, and compare SHA-256 hashes. Then inspect its `source_repo`
+entry and verify that the hash has a GitHub attestation from
+`https://github.com/D-Indexer/Indexer-Contract` for the commit identified in the
+attestation. This metadata contains no timestamp or local path, so rebuilding
+the same source and pinned toolchain should reproduce the WASM.
+
 ## Public functions
 
 "Signer" is the argument that must authorize the call (`require_auth`). Every write except
@@ -197,13 +220,8 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
-| `verify_portfolio_cid` | `owner: Address, ipfs_cid: String` | `bool`: `ipfs_cid` is byte-for-byte the owner's current portfolio CID; `false` with no portfolio | `InvalidCID` (8) |
-| `verify_folder_portfolio` | `folder_name: String, ipfs_cid: String` | `bool`: as above for the name's current owner; `false` for an unclaimed, expired or released name | `InvalidCID` (8), `InvalidFolderName` (9) |
-
-`verify_portfolio_cid` and `verify_folder_portfolio` let a recruiter who holds a portfolio document
-check that its CID is the owner's *current* on-chain portfolio. A CID replaced by
-`update_portfolio` returns `false`. The CID format is checked first, so `InvalidCID` means bad
-input and `false` means a mismatch or no portfolio.
+| `get_portfolio_by_folder` | `folder_name: String` | `PortfolioNFT` for the Folder's owner | `InvalidFolderName` (9), `FolderNotFound` (4), `PortfolioNotFound` (5) |
+| `verify_folder` | `folder_name: String` | `bool`: whether the Folder resolves to a portfolio | `InvalidFolderName` (9), `FolderNotFound` (4) |
 
 ### Error codes
 
@@ -276,6 +294,36 @@ that changes `src/events.rs` must update it.
 | `templates/` | Template metadata JSON and its CID manifest |
 | `deployments/` | Deployment records per network |
 
+## TypeScript bindings
+
+CI (`.github/workflows/bindings.yml`) generates bindings with `stellar contract bindings typescript`
+from the optimized wasm on every PR, builds them, smoke-tests them, and uploads the `npm pack`
+tarball as the `indexer-contract-bindings-ts` artifact. Published releases attach the tarball as a
+release asset. The default contract ID and network come from `deployments/testnet.json`.
+
+Consume it from the frontend or backend:
+
+```sh
+npm install https://github.com/D-Indexer/Indexer-Contract/releases/download/<tag>/<tarball>.tgz
+```
+
+```ts
+import { Client, networks } from "indexer-contract"; // package name as generated
+const client = new Client({ ...networks.testnet, rpcUrl: "https://soroban-testnet.stellar.org" });
+```
+
+Locally: `make build-optimized bindings && cd bindings/ts && npm install && npm run build`.
+
+## Automation
+
+| Workflow | Schedule | What it does | Secrets |
+|---|---|---|---|
+| `template-pinning.yml` | weekly | `scripts/pin-templates.sh --verify-only`: fetches each template CID from two gateways and compares sha256; manual runs can pin first | `PIN_TOKEN` (pinning only), optional `PIN_PROVIDER` variable |
+| `testnet-reset.yml` | every 6h | `scripts/testnet-reset-check.sh`; if the contract is gone, redeploys, opens a PR updating `deployments/testnet.json` and an issue | `TESTNET_DEPLOYER_SECRET`, `BOT_TOKEN` |
+| `smoke-scheduled.yml` | daily | Runs `scripts/smoke-testnet.sh`; on failure opens or comments on one `smoke-failure` issue, closes it on the next green run | none |
+
+Script tests (mocked HTTP gateway and mocked `stellar` CLI): `make script-test`.
+
 ## Documentation
 
 - [docs/EVENTS.md](docs/EVENTS.md): event schema (the backend depends on it)
@@ -293,7 +341,8 @@ that changes `src/events.rs` must update it.
 2. Branch from `main` and run `make check` before you push. CI runs the same gates.
 3. If you change a public function, event or error, update this README and
    [docs/EVENTS.md](docs/EVENTS.md) in the same PR. Never renumber errors or reorder event fields.
-4. Add a test for every behaviour change. Auth changes should update `test_snapshots/`.
+4. Add a test for every behaviour change. Auth changes should update `test_snapshots/`
+   with `make snapshots`; CI fails when the tracked snapshots are stale.
 
 ## License
 

@@ -1,4 +1,15 @@
 #![no_std]
+// Contract code must fail with typed `ContractError`s, never panic (#238).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects
+    )
+)]
 
 mod access_control;
 mod constants;
@@ -20,10 +31,9 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
-use crate::types::{
-    AdminOp, ClaimFee, GuardianConfig, LeaseConfig, PortfolioNFT, PriceTiers, Recovery, Revocation,
-    Template,
-};
+use crate::types::ClaimFee;
+use crate::types::Template;
+use crate::types::{AdminOp, PortfolioNFT};
 
 #[contract]
 pub struct FolderContract;
@@ -61,6 +71,24 @@ impl FolderContract {
         storage::get_admins(&env)
     }
 
+    pub fn add_admin(
+        env: Env,
+        admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::add_admin(&env, &admin, &new_admin)
+    }
+
+    pub fn remove_admin(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::remove_admin(&env, &admin, &target)
+    }
+
     /// Queues an admin addition; executable after `ADMIN_TIMELOCK_LEDGERS`.
     pub fn queue_admin_change(
         env: Env,
@@ -82,6 +110,59 @@ impl FolderContract {
     pub fn cancel_admin_change(env: Env, admin: Address, op_id: u32) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::cancel_admin_change(&env, &admin, op_id)
+    }
+
+    pub fn block_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if storage::is_admin(&env, &addr) {
+            return Err(ContractError::CannotBlockAdmin);
+        }
+        storage::block_address(&env, &addr);
+        events::address_blocked(&env, &admin, &addr, reason_code);
+        Ok(())
+    }
+
+    pub fn unblock_address(
+        env: Env,
+        admin: Address,
+        addr: Address,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        storage::unblock_address(&env, &addr);
+        events::address_unblocked(&env, &admin, &addr);
+        Ok(())
+    }
+
+    pub fn is_blocked(env: Env, addr: Address) -> bool {
+        storage::is_blocked(&env, &addr)
+    }
+
+    pub fn set_portfolio_flag(
+        env: Env,
+        admin: Address,
+        owner: Address,
+        flag: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        access_control::require_admin(&env, &admin)?;
+        if flag > 2 {
+            return Err(ContractError::InvalidPortfolioFlag);
+        }
+        storage::set_portfolio_flag(&env, &owner, flag);
+        events::portfolio_flag_set(&env, &admin, &owner, flag, reason_code);
+        Ok(())
+    }
+
+    pub fn get_portfolio_flag(env: Env, owner: Address) -> u32 {
+        storage::get_portfolio_flag(&env, &owner)
     }
 
     // ── Economics ─────────────────────────────────────────────────────────────
@@ -161,39 +242,22 @@ impl FolderContract {
         constants::CONTRACT_VERSION
     }
 
-    // ── Leases ────────────────────────────────────────────────────────────────
-
-    /// Enables leases of `period_days` with a `grace_days` grace period for
-    /// new claims. `period_days == 0` restores permanent mode (the default).
-    pub fn set_lease_config(
-        env: Env,
-        admin: Address,
-        period_days: u32,
-        grace_days: u32,
-    ) -> Result<(), ContractError> {
+    /// Admin-only, idempotent schema migration up to `CURRENT_STORAGE_VERSION`.
+    /// Emits `migrated` with `[from, to]` only when the version actually moves.
+    pub fn migrate(env: Env, admin: Address) -> Result<(), ContractError> {
         require_initialized(&env)?;
         access_control::require_admin(&env, &admin)?;
-        let config = (period_days > 0).then(|| LeaseConfig {
-            period_secs: period_days as u64 * constants::SECONDS_PER_DAY,
-            grace_secs: grace_days as u64 * constants::SECONDS_PER_DAY,
-        });
-        storage::set_lease_config(&env, &config);
+        let from = storage::get_storage_version(&env);
+        let to = storage::run_migration_step(&env, from)?;
+        if to != from {
+            events::migrated(&env, from, to);
+        }
         Ok(())
     }
 
-    pub fn get_lease_config(env: Env) -> Option<LeaseConfig> {
-        storage::get_lease_config(&env)
-    }
-
-    /// Extends the owner's lease by `periods`; returns the new expiry.
-    pub fn renew_folder(env: Env, owner: Address, periods: u32) -> Result<u64, ContractError> {
-        require_initialized(&env)?;
-        identity_map::renew_folder(&env, &owner, periods)
-    }
-
-    /// Lease expiry timestamp, or `None` for a permanent / unknown name.
-    pub fn get_folder_expiry(env: Env, folder_name: String) -> Option<u64> {
-        identity_map::get_folder_expiry(&env, &folder_name)
+    /// Returns the current storage schema version.
+    pub fn get_storage_version(env: Env) -> u32 {
+        storage::get_storage_version(&env)
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -279,60 +343,17 @@ impl FolderContract {
         identity_map::get_identity(&env, &owner)
     }
 
-    // ── Recovery ──────────────────────────────────────────────────────────────
+    // ── Cross-contract resolver interface ─────────────────────────────────────
 
-    /// Nominates up to `MAX_GUARDIANS` guardians, `threshold` of whom must
-    /// approve a recovery. Replaces any previous set.
-    pub fn set_guardians(
-        env: Env,
-        owner: Address,
-        guardians: Vec<Address>,
-        threshold: u32,
-    ) -> Result<(), ContractError> {
-        require_initialized(&env)?;
-        recovery::set_guardians(&env, &owner, &guardians, threshold)
+    /// Resolves a Folder name to its owner. Returns `None` for unknown names so
+    /// that consumer contracts can branch without decoding an error.
+    pub fn resolve(env: Env, folder_name: String) -> Option<Address> {
+        storage::get_folder_owner(&env, &folder_name)
     }
 
-    pub fn get_guardians(env: Env, owner: Address) -> Option<GuardianConfig> {
-        storage::get_guardians(&env, &owner)
-    }
-
-    /// A guardian proposes moving `owner`'s identity to `new_owner`; counts as
-    /// that guardian's approval.
-    pub fn initiate_recovery(
-        env: Env,
-        guardian: Address,
-        owner: Address,
-        new_owner: Address,
-    ) -> Result<(), ContractError> {
-        require_initialized(&env)?;
-        recovery::initiate_recovery(&env, &guardian, &owner, &new_owner)
-    }
-
-    pub fn approve_recovery(
-        env: Env,
-        guardian: Address,
-        owner: Address,
-    ) -> Result<(), ContractError> {
-        require_initialized(&env)?;
-        recovery::approve_recovery(&env, &guardian, &owner)
-    }
-
-    /// Completes a recovery with `threshold` approvals once `RECOVERY_DELAY`
-    /// ledgers have passed. Unsigned; returns the new owner.
-    pub fn execute_recovery(env: Env, owner: Address) -> Result<Address, ContractError> {
-        require_initialized(&env)?;
-        recovery::execute_recovery(&env, &owner)
-    }
-
-    /// Cancels a pending recovery. Signed by the current owner.
-    pub fn cancel_recovery(env: Env, owner: Address) -> Result<(), ContractError> {
-        require_initialized(&env)?;
-        recovery::cancel_recovery(&env, &owner)
-    }
-
-    pub fn get_recovery(env: Env, owner: Address) -> Option<Recovery> {
-        storage::get_recovery(&env, &owner)
+    /// Reverse lookup: returns the Folder name owned by `owner`, or `None`.
+    pub fn reverse(env: Env, owner: Address) -> Option<String> {
+        storage::get_owner_folder(&env, &owner)
     }
 
     // ── Template Registry ─────────────────────────────────────────────────────
@@ -369,6 +390,43 @@ impl FolderContract {
         storage::get_user_template(&env, &owner)
     }
 
+    pub fn submit_template(
+        env: Env,
+        designer: Address,
+        metadata_uri: String,
+    ) -> Result<u32, ContractError> {
+        require_initialized(&env)?;
+        template_registry::submit_template(&env, &designer, &metadata_uri)
+    }
+
+    pub fn approve_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        template_id: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::approve_submission(&env, &admin, submission_id, template_id)
+    }
+
+    pub fn reject_submission(
+        env: Env,
+        admin: Address,
+        submission_id: u32,
+        reason_code: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::reject_submission(&env, &admin, submission_id, reason_code)
+    }
+
+    pub fn get_template_designer(env: Env, template_id: u32) -> Option<Address> {
+        storage::get_template_designer(&env, template_id)
+    }
+
+    pub fn get_template_usage(env: Env, template_id: u32) -> u32 {
+        storage::get_template_usage(&env, template_id)
+    }
+
     // ── Portfolio NFT ─────────────────────────────────────────────────────────
 
     pub fn mint_portfolio(
@@ -398,23 +456,42 @@ impl FolderContract {
         nft_mint::verify_portfolio(&env, &owner)
     }
 
-    /// `true` only if `ipfs_cid` is exactly the owner's current portfolio CID.
-    /// `InvalidCID` for a malformed CID; `false` when there is no portfolio.
-    pub fn verify_portfolio_cid(
-        env: Env,
-        owner: Address,
-        ipfs_cid: String,
-    ) -> Result<bool, ContractError> {
-        nft_mint::verify_portfolio_cid(&env, &owner, &ipfs_cid)
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    /// Returns the client-facing validation rules and limits. Pure read: no
+    /// state is written and no TTL is extended.
+    pub fn get_limits(env: Env) -> Limits {
+        Limits {
+            min_folder_label_len: constants::MIN_FOLDER_LABEL_LEN,
+            max_folder_name_len: constants::MAX_FOLDER_NAME_LEN,
+            folder_suffix: String::from_bytes(&env, constants::FOLDER_SUFFIX),
+            min_ipfs_cid_len: constants::MIN_IPFS_CID_LEN,
+            max_ipfs_cid_len: constants::MAX_IPFS_CID_LEN,
+            metadata_uri_scheme: String::from_bytes(&env, constants::METADATA_URI_SCHEME),
+            max_metadata_uri_len: constants::MAX_METADATA_URI_LEN,
+            max_templates: constants::MAX_TEMPLATES,
+            max_admins: constants::MAX_ADMINS,
+            day_in_ledgers: constants::DAY_IN_LEDGERS,
+            persistent_bump_amount: constants::PERSISTENT_BUMP_AMOUNT,
+            persistent_lifetime_threshold: constants::PERSISTENT_LIFETIME_THRESHOLD,
+            instance_bump_amount: constants::INSTANCE_BUMP_AMOUNT,
+            instance_lifetime_threshold: constants::INSTANCE_LIFETIME_THRESHOLD,
+        }
     }
 
-    /// `verify_portfolio_cid` for whoever currently owns `folder_name`.
-    /// `false` for an unclaimed, expired or released name.
-    pub fn verify_folder_portfolio(
-        env: Env,
-        folder_name: String,
-        ipfs_cid: String,
-    ) -> Result<bool, ContractError> {
-        nft_mint::verify_folder_portfolio(&env, &folder_name, &ipfs_cid)
+    // ── TTL maintenance ───────────────────────────────────────────────────────
+
+    /// Extends the TTL of all persistent keys belonging to `owner`. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_owner_ttl(env: Env, owner: Address) -> u32 {
+        storage::extend_owner_ttl(&env, &owner)
+    }
+
+    /// Extends the TTL of the template entry and the template list. Callable
+    /// without auth; does not modify any data. Returns the number of keys
+    /// extended (missing keys are skipped).
+    pub fn extend_template_ttl(env: Env, template_id: u32) -> u32 {
+        storage::extend_template_ttl(&env, template_id)
     }
 }

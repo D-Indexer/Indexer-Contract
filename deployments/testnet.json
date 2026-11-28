@@ -22,17 +22,26 @@
     {
       "template_id": 1,
       "metadata_uri": "ipfs://bafkreiejxg6d3gqvi3737mcwxkv4u7gismaraxgv5zfoqtfuc3nbdgve7i",
-      "tx_hash": "21b306ad910f33cf830c91e01811f6b25492c3374ab9ff396b6cdf7e8238d772"
+      "tx_hash": "21b306ad910f33cf830c91e01811f6b25492c3374ab9ff396b6cdf7e8238d772",
+      "ledger": 5647768
     },
     {
       "template_id": 2,
       "metadata_uri": "ipfs://bafkreibl5hwjqwglhrzjepbapjzko74h5zaec5mncnw4u4crn3pejeytgi",
-      "tx_hash": "b6e619d1a252fedef9371d725053f7540c840981a576f59b8b88cf4c889f3b3a"
+      "tx_hash": "b6e619d1a252fedef9371d725053f7540c840981a576f59b8b88cf4c889f3b3a",
+      "ledger": 5647772
     },
     {
       "template_id": 3,
       "metadata_uri": "ipfs://bafkreidb373xq4eldginonrutn4hrywugayklcoof2qjxgearzu36b4gg4",
-      "tx_hash": "8b8947da32125b095c9e87dbad96b42a1ca401e88a4c84f43dd4640ea5a83515"
+      "tx_hash": "8b8947da32125b095c9e87dbad96b42a1ca401e88a4c84f43dd4640ea5a83515",
+      "ledger": 5647774
     }
-  ]
+  ],
+  "ledgers": {
+    "upload_wasm": 5647727,
+    "deploy": 5647752,
+    "initialize": 5647760
+  },
+  "deploy_ledger": 5647752
 }
