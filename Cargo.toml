@@ -21,6 +21,9 @@ soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
 # Spike (#249): the monolith split into three cross-calling contracts.
 members = [".", "spike/folder-registry", "spike/folder-templates", "spike/folder-portfolio"]
 
+[workspace.dependencies]
+soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

@@ -158,6 +158,8 @@ Notes:
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
+| `get_portfolio_by_folder` | `folder_name: String` | `PortfolioNFT` for the Folder's owner | `InvalidFolderName` (9), `FolderNotFound` (4), `PortfolioNotFound` (5) |
+| `verify_folder` | `folder_name: String` | `bool`: whether the Folder resolves to a portfolio | `InvalidFolderName` (9), `FolderNotFound` (4) |
 
 ### Error codes
 

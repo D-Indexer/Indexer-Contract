@@ -129,6 +129,26 @@ pub fn get_portfolio(env: &Env, owner: &Address) -> Result<PortfolioNFT, Contrac
     storage::get_portfolio(env, owner)
 }
 
+/// Resolves a Folder name to its owner and returns that owner's portfolio.
+/// Equivalent to `get_folder` followed by `get_portfolio`.
+pub fn get_portfolio_by_folder(
+    env: &Env,
+    folder_name: &String,
+) -> Result<PortfolioNFT, ContractError> {
+    validation::require_valid_folder_name(folder_name)?;
+    let owner = storage::get_folder_owner(env, folder_name).ok_or(ContractError::FolderNotFound)?;
+    storage::get_portfolio(env, &owner)
+}
+
+/// Returns `true` when the Folder name is valid, claimed, and has a portfolio.
+pub fn verify_folder(env: &Env, folder_name: &String) -> Result<bool, ContractError> {
+    match get_portfolio_by_folder(env, folder_name) {
+        Ok(_) => Ok(true),
+        Err(ContractError::PortfolioNotFound) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 pub fn verify_portfolio(env: &Env, owner: &Address) -> Result<bool, ContractError> {
     match storage::get_portfolio(env, owner) {
         Ok(_) => Ok(true),
