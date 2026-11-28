@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::access_control::{require_admin, require_owner};
 use crate::constants::{MAX_PENDING_TEMPLATE_SUBMISSIONS, MAX_TEMPLATES};
@@ -40,6 +40,10 @@ pub fn plan_register_template(
     };
     storage::save_template_with_list(env, &template, list);
     events::template_registered(env, template_id, metadata_uri, admin);
+    if let Some(content_sha256) = content_sha256 {
+        storage::set_template_hash(env, template_id, content_sha256);
+        events::template_hash_registered(env, template_id, content_sha256);
+    }
     Ok(())
 }
 

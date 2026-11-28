@@ -71,6 +71,12 @@ pub struct TemplateRegistered {
     pub creator: Address,
 }
 
+#[contractevent(topics = ["tmpl_hash"], data_format = "vec")]
+pub struct TemplateHashRegistered {
+    pub template_id: u32,
+    pub content_sha256: BytesN<32>,
+}
+
 #[contractevent(topics = ["tmpl_set"], data_format = "vec")]
 pub struct TemplateAssigned {
     pub owner: Address,
@@ -248,6 +254,14 @@ pub fn template_registered(env: &Env, template_id: u32, metadata_uri: &String, c
         template_id,
         metadata_uri: metadata_uri.clone(),
         creator: creator.clone(),
+    }
+    .publish(env);
+}
+
+pub fn template_hash_registered(env: &Env, template_id: u32, content_sha256: &BytesN<32>) {
+    TemplateHashRegistered {
+        template_id,
+        content_sha256: content_sha256.clone(),
     }
     .publish(env);
 }

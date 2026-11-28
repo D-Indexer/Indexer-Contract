@@ -8,6 +8,7 @@
 | `Initialized` | instance | `bool` | 1 |
 | `AdminList` | instance | `Vec<Address>` | `MAX_ADMINS` = 10 |
 | `Template(u32)` | persistent | `Template` | `MAX_TEMPLATES` = 256 |
+| `TemplateHash(u32)` | persistent | `BytesN<32>` | Optional; set by `register_template_with_hash` |
 | `TemplateList` | persistent | `Vec<u32>` | `MAX_TEMPLATES` = 256 |
 | `FolderOwner(String)` | persistent | `Address` | one per owner |
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
@@ -41,6 +42,7 @@ Constants are in [`src/constants.rs`](../src/constants.rs). One day is about 17,
 `env.deployer().update_current_contract_wasm`. It replaces the contract **code** only:
 
 - Instance storage (`Initialized`, `AdminList`) and every persistent entry (`Template`,
+  `TemplateHash`,
   `TemplateList`, `FolderOwner`, `OwnerFolder`, `UserTemplate`, `Portfolio`) are preserved
   unchanged. No migration step is needed for a code-only upgrade.
 - The admin list is read from storage, so the same admins keep control after the upgrade.

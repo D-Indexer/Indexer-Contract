@@ -110,6 +110,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
@@ -145,6 +146,9 @@ jobs:
             echo "$META"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify recorded testnet deployment
+        run: make verify-deployment NETWORK=testnet
 
       - name: Report wasm hash
         run: |

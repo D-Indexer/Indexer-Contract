@@ -54,10 +54,12 @@ pub const MAX_METADATA_URI_LEN: u32 = 256;
 /// Maximum number of registered templates. Bounds the size of the
 /// persistent template ID list returned by `list_templates`.
 pub const MAX_TEMPLATES: u32 = 256;
+/// Maximum number of template records returned by one paged list call.
+pub const MAX_TEMPLATE_PAGE_SIZE: u32 = 25;
 
 /// Contract version reported by `version()`. Bump on every upgrade that
 /// changes behavior or storage layout.
-pub const CONTRACT_VERSION: u32 = 1;
+pub const CONTRACT_VERSION: u32 = 2;
 
 /// Maximum number of admins. The admin list lives in instance storage, which
 /// is loaded on every invocation, so it must stay small.

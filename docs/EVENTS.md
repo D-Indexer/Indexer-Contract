@@ -34,7 +34,8 @@ Compatibility rules:
 | `adm_cx` | `AdminChangeCancelled` | `admin: Address`, `op_id: u32`, `target: Address` | `cancel_admin_change` |
 | `upgraded` | `ContractUpgraded` | `admin: Address`, `new_wasm_hash: BytesN<32>` | `upgrade` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
-| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
+| `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template`, `register_template_with_hash` |
+| `tmpl_hash` | `TemplateHashRegistered` | `template_id: u32`, `content_sha256: BytesN<32>` | `register_template_with_hash` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
 | `port_mint` | `PortfolioMinted` | `owner: Address`, `template_id: u32`, `ipfs_cid: String` | `mint_portfolio` |
 | `port_upd` | `PortfolioUpdated` | `owner: Address`, `ipfs_cid: String` | `update_portfolio` |
@@ -61,6 +62,9 @@ Compatibility rules:
 - **New:** `init`, `adm_add`, `adm_rm`. Before this, admin changes emitted nothing.
 - **Appended:** `creator` as the third field of `tmpl_reg`. Decoders that read the first two
   fields keep working.
+- **New:** `tmpl_hash` is emitted separately by `register_template_with_hash`; `tmpl_reg` retains
+  its existing payload so existing decoders need no changes. Its `content_sha256` is stored under
+  `TemplateHash(template_id)` and is also readable with `get_template_hash`.
 - **Semantics:**
   - `mint_portfolio` now also sets the owner's selected template. It emits only `port_mint`, so
     treat `port_mint.template_id` as the owner's current template.
@@ -79,6 +83,7 @@ Compatibility rules:
 | `rec_init` / `rec_appr` / `rec_cancel` | Track the pending recovery (for owner and guardian notifications) |
 | `rec_exec` | Re-key the identity: move the Folder name, portfolio and template selection from `owner` to `new_owner` and drop every record of `owner` |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
+| `tmpl_hash` | Cache `template_id → content_sha256`; hash the fetched metadata response bytes with SHA-256 and compare the lowercase hex digest with this value (or `get_template_hash`) before accepting the metadata |
 | `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
 | `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
 | `port_upd` | Update the portfolio's `ipfs_cid`; use `previous_cid` to detect gaps (see below) |

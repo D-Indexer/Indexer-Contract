@@ -6,7 +6,7 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, IntoVal, String, Val, Vec,
+    Address, BytesN, Env, Event as _, IntoVal, String, Val, Vec,
 };
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
@@ -572,6 +572,35 @@ fn test_register_and_get_template() {
 }
 
 #[test]
+fn test_template_hash_registration_and_lookup() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+    let digest = BytesN::from_array(&t.env, &[42; 32]);
+
+    t.client()
+        .register_template_with_hash(&t.admin, &1, &uri, &digest);
+
+    assert_eq!(t.client().get_template_hash(&1), Some(digest.clone()));
+    assert_eq!(t.client().get_template_hash(&2), None);
+    assert_eq!(
+        t.env.events().all().filter_by_contract(&t.contract_id),
+        [
+            TemplateRegistered {
+                template_id: 1,
+                metadata_uri: uri,
+                creator: t.admin.clone(),
+            }
+            .to_xdr(&t.env, &t.contract_id),
+            TemplateHashRegistered {
+                template_id: 1,
+                content_sha256: digest,
+            }
+            .to_xdr(&t.env, &t.contract_id),
+        ]
+    );
+}
+
+#[test]
 fn test_get_missing_template_rejected() {
     let t = TestEnv::new();
 
@@ -648,6 +677,46 @@ fn test_list_templates() {
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().register_template(&t.admin, &2u32, &uri);
     assert_eq!(t.client().list_templates().len(), 2);
+}
+
+#[test]
+fn test_list_templates_page_covers_registry_without_overlap() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    for id in 1..=60 {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+
+    let first = t.client().list_templates_page(&0, &25);
+    let second = t.client().list_templates_page(&25, &25);
+    let third = t.client().list_templates_page(&50, &25);
+
+    assert_eq!(first.len(), 25);
+    assert_eq!(second.len(), 25);
+    assert_eq!(third.len(), 10);
+    for (offset, template) in first.iter().chain(second.iter()).chain(third.iter()).enumerate() {
+        assert_eq!(template.template_id, offset as u32 + 1);
+    }
+}
+
+#[test]
+fn test_list_templates_page_boundaries_and_limits() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    );
+    for id in 1..=3 {
+        t.client().register_template(&t.admin, &id, &uri);
+    }
+
+    assert_eq!(t.client().list_templates_page(&3, &1).len(), 0);
+    assert_eq!(t.client().list_templates_page(&4, &1).len(), 0);
+    assert_eq!(t.client().list_templates_page(&0, &0).len(), 0);
+    assert_eq!(t.client().list_templates_page(&0, &u32::MAX).len(), 3);
 }
 
 #[test]

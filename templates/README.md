@@ -9,17 +9,19 @@ Each file corresponds to a `template_id` and is pinned to IPFS. The resulting CI
 | File | Purpose |
 |---|---|
 | `<id>.json` | Template metadata for `template_id = <id>` |
-| `manifest.json` | `template_id` → CID / `metadata_uri` registered by `scripts/deploy.sh` |
+| `manifest.json` | `template_id` → CID, `metadata_uri` and metadata SHA-256 registered by `scripts/deploy.sh` |
 
 The CID of each file is a CIDv1 (raw codec, sha2-256), identical to what
 `ipfs add --cid-version 1 templates/<id>.json` produces. Recompute or verify:
 
 ```bash
-python3 scripts/template_cids.py templates/1.json
-python3 scripts/template_cids.py --check   # verifies manifest.json
+python3 scripts/template_cids.py templates/1.json  # prints CID and sha256 of exact file bytes
+python3 scripts/template_cids.py --check           # verifies both against manifest.json
 ```
 
 `deploy.sh` refuses to register templates if the manifest does not match the files.
+The SHA-256 is stored on-chain separately from the `Template` record and can be retrieved with
+`get_template_hash`; backends should compare it against the SHA-256 of the bytes fetched from IPFS.
 
 > **Pinning:** the CIDs are content hashes of the committed files. They are
 > only retrievable from IPFS once someone pins those exact files, e.g.

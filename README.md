@@ -72,6 +72,9 @@ make check                # fmt-check, cargo check, clippy -D warnings, tests, w
 
 # End-to-end check against deployments/testnet.json
 ./scripts/smoke-testnet.sh
+
+# Rebuild the recorded source commit and verify its deployed WASM hash
+make verify-deployment NETWORK=testnet
 ```
 
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers identities, overrides and mainnet.
@@ -206,7 +209,9 @@ Notes:
 | `get_folder` | `folder_name: String` | owner `Address` | `FolderNotFound` (4) |
 | `get_identity` | `owner: Address` | Folder name `String` | `FolderNotFound` (4) |
 | `get_template` | `template_id: u32` | `Template { template_id, metadata_uri, creator }` | `InvalidTemplateID` (17), `TemplateNotFound` (6) |
+| `get_template_hash` | `template_id: u32` | `Option<BytesN<32>>` | — |
 | `list_templates` | — | `Vec<u32>` of registered IDs, in registration order | — |
+| `list_templates_page` | `start: u32, limit: u32` | Up to 25 `Template` records, indexed in registration order | — |
 | `get_claim_fee` | — | `Option<ClaimFee { token, amount, treasury }>` | — |
 | `get_price_tiers` | — | `PriceTiers { by_len: Vec<(u32, i128)> }` | — |
 | `claim_commitment` | `owner: Address, folder_name: String, salt: BytesN<32>` | `BytesN<32>` commitment for `commit_claim` | — |
