@@ -2,5 +2,5 @@
 .env
 *.wasm
 !*.optimized.wasm
-!tests/fixtures/wasm/*.wasm
-deployments/local.json
+__pycache__/
+/deploy-out

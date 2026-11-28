@@ -1,0 +1,55 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  STELLAR_CLI_VERSION: 28.1.0
+  STELLAR_CLI_SHA256: c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462
+
+jobs:
+  errors-json:
+    name: attach errors.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustup show active-toolchain
+
+      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
+        run: |
+          ./scripts/install-stellar-cli.sh "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Verify errors.json is current
+        run: python3 scripts/errors_json.py --check
+
+      - name: Build release wasm without a cache
+        run: make build-optimized
+
+      - name: Verify release metadata
+        run: |
+          META="$(stellar contract info meta --wasm target/stellar/indexer_contract.wasm)"
+          echo "$META"
+          echo "$META" | grep -Fq "source_repo"
+          echo "$META" | grep -Fq "github:D-Indexer/Indexer-Contract"
+          sha256sum target/stellar/indexer_contract.wasm
+
+      - name: Upload release wasm
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" target/stellar/indexer_contract.wasm --clobber
+
+      - name: Upload errors.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" errors.json --clobber
