@@ -1,0 +1,87 @@
+name: Testnet reset watchdog
+
+# Required secrets:
+#   TESTNET_DEPLOYER_SECRET  secret key (S...) of the deploy identity
+#   BOT_TOKEN                token allowed to push branches and open PRs/issues
+#                            (PRs opened with GITHUB_TOKEN do not trigger CI)
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      contract_id:
+        description: Override the contract ID to check (e.g. a non-existent one to test the flow)
+        required: false
+  pull_request:
+    paths:
+      - scripts/testnet-reset-check.sh
+      - scripts/tests/test-testnet-reset-check.sh
+
+permissions:
+  contents: read
+
+env:
+  STELLAR_CLI_VERSION: 28.1.0
+
+jobs:
+  script-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/tests/test-testnet-reset-check.sh
+
+  watchdog:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: testnet-redeploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
+        run: |
+          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP" stellar
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Check recorded contract
+        id: check
+        env:
+          CONTRACT_ID: ${{ inputs.contract_id }}
+        run: ./scripts/testnet-reset-check.sh
+
+      - name: Install pinned Rust toolchain
+        if: steps.check.outputs.exists == 'false'
+        run: rustup toolchain install && rustup show active-toolchain
+
+      - name: Redeploy
+        if: steps.check.outputs.exists == 'false'
+        env:
+          DEPLOYER_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
+          STELLAR_IDENTITY: folder-deployer
+        run: |
+          echo "$DEPLOYER_SECRET" | stellar keys add folder-deployer --secret-key
+          ./scripts/deploy.sh testnet
+
+      - name: Open PR with the new deployment record
+        if: steps.check.outputs.exists == 'false'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.BOT_TOKEN }}
+          branch: bot/testnet-redeploy-${{ github.run_id }}
+          add-paths: deployments/testnet.json
+          commit-message: "chore(testnet): redeploy after testnet reset"
+          title: "chore(testnet): redeploy after testnet reset"
+          body: |
+            Contract `${{ steps.check.outputs.contract_id }}` no longer exists on testnet.
+            Redeployed with `scripts/deploy.sh testnet` in run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
+
+      - name: Open issue
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Testnet reset detected: contract redeployed" \
+            --body "Contract \`${{ steps.check.outputs.contract_id }}\` was missing from testnet and has been redeployed as \`$(jq -r .contract_id deployments/testnet.json)\`. Merge the bot PR and update the frontend/backend config. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

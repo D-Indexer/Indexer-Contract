@@ -1,7 +1,7 @@
 {
   "generators": {
     "address": 4,
-    "nonce": 1,
+    "nonce": 0,
     "mux_id": 0
   },
   "auth": [
@@ -58,9 +58,9 @@
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
-    "min_persistent_entry_ttl": 1,
-    "min_temp_entry_ttl": 1,
-    "max_entry_ttl": 100,
+    "min_persistent_entry_ttl": 4096,
+    "min_temp_entry_ttl": 16,
+    "max_entry_ttl": 6312000,
     "ledger_entries": [
       {
         "entry": {
@@ -87,7 +87,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 99
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -114,7 +114,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 99
+        "live_until": 2073600
       },
       {
         "entry": {
@@ -235,7 +235,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 0
+        "live_until": 4095
       },
       {
         "entry": {
@@ -246,7 +246,7 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
               "key": {
                 "ledger_key_nonce": {
-                  "nonce": "1"
+                  "nonce": "0"
                 }
               },
               "durability": "temporary",
@@ -255,7 +255,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 99
+        "live_until": 100
       },
       {
         "entry": {
@@ -269,7 +269,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 0
+        "live_until": 4095
       },
       {
         "entry": {

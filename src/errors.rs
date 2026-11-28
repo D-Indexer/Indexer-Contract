@@ -68,28 +68,46 @@ pub enum ContractError {
     /// The contract treasury holds less than the requested amount.
     /// User message: The treasury does not hold enough funds for this withdrawal.
     InsufficientBalance = 21,
-    /// No queued admin change has the given op ID.
-    /// User message: That admin change could not be found.
-    AdminChangeNotFound = 22,
-    /// The queued admin change is still inside its timelock.
-    /// User message: That admin change cannot be executed yet.
-    AdminChangeNotReady = 23,
-    /// The pending admin change queue is full.
-    /// User message: Too many admin changes are pending. Try again later.
-    AdminChangeQueueFull = 24,
-    /// The Folder's lease has expired and it is in its grace period.
-    /// User message: This Folder has expired. The owner can still renew it.
-    FolderExpired = 25,
-    /// The price tier table is unsorted, too long or has invalid entries.
-    /// User message: The price tiers are not valid.
-    InvalidPriceTiers = 26,
-    /// The configured fee is negative.
-    /// User message: The fee is not valid.
-    InvalidFee = 27,
-    /// Leases are not enabled on this contract.
+    /// The address is blocked from contract write paths.
+    /// User message: This address is blocked.
+    AddressBlocked = 22,
+    /// An admin address cannot be blocked.
+    /// User message: An administrator cannot be blocked.
+    CannotBlockAdmin = 23,
+    /// The portfolio flag is outside the supported range.
+    /// User message: That portfolio flag is not valid.
+    InvalidPortfolioFlag = 24,
+    /// The template submission does not exist.
+    /// User message: That template submission could not be found.
+    SubmissionNotFound = 25,
+    /// The pending template submission queue is full.
+    /// User message: The template submission queue is full.
+    SubmissionQueueFull = 26,
+    /// The folder lease configuration is invalid.
+    /// User message: The Folder lease configuration is not valid.
+    InvalidLeaseConfig = 27,
+    /// Folder renewal is not available.
+    /// User message: Folder renewal is not available.
+    InvalidRenewal = 28,
+    /// Folder leases are disabled.
     /// User message: Folder leases are not enabled.
-    LeasesDisabled = 28,
-    /// The renewal is not possible (zero periods, permanent Folder or overflow).
-    /// User message: This Folder cannot be renewed.
-    InvalidRenewal = 29,
+    LeasesDisabled = 29,
+    /// Folder name pricing tiers are invalid.
+    /// User message: The Folder pricing configuration is not valid.
+    InvalidPriceTiers = 30,
+    /// Folder claim fee configuration is invalid.
+    /// User message: The Folder claim fee is not valid.
+    InvalidFee = 31,
+    /// Folder has expired and is past the grace period.
+    /// User message: That Folder has expired.
+    FolderExpired = 32,
+    /// The admin timelock queue is full.
+    /// User message: The admin change queue is full.
+    AdminChangeQueueFull = 33,
+    /// The requested admin change is not pending.
+    /// User message: That admin change could not be found.
+    AdminChangeNotFound = 34,
+    /// The admin change timelock has not elapsed.
+    /// User message: That admin change is not ready yet.
+    AdminChangeNotReady = 35,
 }

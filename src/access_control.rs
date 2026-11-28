@@ -22,6 +22,32 @@ pub fn require_owner(env: &Env, owner: &Address) -> Result<(), ContractError> {
     Ok(())
 }
 
+pub fn add_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), ContractError> {
+    require_admin(env, caller)?;
+    if storage::is_admin(env, new_admin) {
+        return Err(ContractError::AdminAlreadyExists);
+    }
+    if storage::admin_count(env) >= MAX_ADMINS {
+        return Err(ContractError::TooManyAdmins);
+    }
+    storage::add_admin_entry(env, new_admin);
+    events::admin_added(env, caller, new_admin);
+    Ok(())
+}
+
+pub fn remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(), ContractError> {
+    require_admin(env, caller)?;
+    if !storage::is_admin(env, target) {
+        return Err(ContractError::AdminNotFound);
+    }
+    if storage::admin_count(env) == 1 {
+        return Err(ContractError::CannotRemoveLastAdmin);
+    }
+    storage::remove_admin_entry(env, target);
+    events::admin_removed(env, caller, target);
+    Ok(())
+}
+
 /// Queues an admin change and returns its op ID. The change becomes
 /// executable once `ADMIN_TIMELOCK_LEDGERS` ledgers have elapsed.
 pub fn queue_admin_change(
@@ -120,4 +146,31 @@ fn apply_remove_admin(env: &Env, caller: &Address, target: &Address) -> Result<(
     storage::remove_admin_entry(env, target);
     events::admin_removed(env, caller, target);
     Ok(())
+}
+
+/// Lets an admin remove themselves. Refuses when the remaining admin count
+/// would drop below `MIN_ADMINS_AFTER_RESIGN`. Emits `adm_rm` with
+/// `admin == target == caller`.
+pub fn resign_admin(env: &Env, admin: &Address) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    let mut admins = storage::get_admins(env);
+    let mut found_index: Option<u32> = None;
+    for i in 0..admins.len() {
+        if admins.get(i) == Some(admin.clone()) {
+            found_index = Some(i);
+            break;
+        }
+    }
+    match found_index {
+        Some(i) => {
+            if admins.len() <= MIN_ADMINS_AFTER_RESIGN {
+                return Err(ContractError::AdminQuorumTooLow);
+            }
+            admins.remove(i);
+            storage::save_admins(env, &admins);
+            events::admin_removed(env, admin, admin);
+            Ok(())
+        }
+        None => Err(ContractError::AdminNotFound),
+    }
 }
