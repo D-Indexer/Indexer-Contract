@@ -36,6 +36,9 @@ fn lease_state(env: &Env, folder_name: &String) -> LeaseState {
 
 pub fn claim_folder(env: &Env, owner: &Address, folder_name: &String) -> Result<(), ContractError> {
     require_owner(env, owner)?;
+    if storage::is_blocked(env, owner) {
+        return Err(ContractError::AddressBlocked);
+    }
     claim(env, owner, owner, folder_name)
 }
 
@@ -48,6 +51,9 @@ pub fn sponsored_claim(
 ) -> Result<(), ContractError> {
     sponsor.require_auth();
     require_owner(env, owner)?;
+    if storage::is_blocked(env, owner) || storage::is_blocked(env, sponsor) {
+        return Err(ContractError::AddressBlocked);
+    }
     claim(env, sponsor, owner, folder_name)?;
     events::claim_sponsored(env, sponsor, owner, folder_name);
     Ok(())
@@ -93,6 +99,9 @@ fn claim(
 /// current expiry. Allowed before expiry and during the grace period.
 pub fn renew_folder(env: &Env, owner: &Address, periods: u32) -> Result<u64, ContractError> {
     require_owner(env, owner)?;
+    if storage::is_blocked(env, owner) {
+        return Err(ContractError::AddressBlocked);
+    }
     let lease = storage::get_lease_config(env).ok_or(ContractError::LeasesDisabled)?;
     if periods == 0 {
         return Err(ContractError::InvalidRenewal);

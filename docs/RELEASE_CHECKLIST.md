@@ -1,6 +1,9 @@
 # Release Checklist
 
 - [ ] `make check` passes and CI is green on the release commit.
+- [ ] `Cargo.toml` version matches the `v*` tag; pushing the tag runs the `Release` workflow,
+      which publishes the optimized wasm, `SHA256SUMS`, interface JSON, SBOM and a signed build
+      provenance attestation (`gh attestation verify indexer_contract.wasm --repo D-Indexer/Indexer-Contract`).
 - [ ] `make wasm-hash` matches the hash in the CI job summary for the same commit.
 - [ ] `python3 scripts/template_cids.py --check` passes, and the template files are pinned on IPFS.
 - [ ] `errors.json` is current (`make errors-json`); the release workflow attaches it.

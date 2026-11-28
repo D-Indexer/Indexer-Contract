@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+mkdir -p target/stellar && printf 'mock wasm' >target/stellar/indexer_contract.wasm

@@ -28,6 +28,7 @@ jobs:
   checks:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -39,6 +40,10 @@ jobs:
         run: rustup toolchain install && rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: host-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          cache-targets: true
+          cache-all-crates: true
 
       - name: Check formatting
         run: cargo fmt --check
@@ -49,8 +54,11 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
-      - name: Shell script syntax
-        run: make script-check
+      - name: Shell script syntax and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          make script-check
+          shellcheck scripts/deploy.sh
 
       - name: errors.json matches src/errors.rs
         run: |
@@ -60,12 +68,16 @@ jobs:
       - name: Template CIDs match committed files
         run: python3 scripts/template_cids.py --check
 
-      - name: TTL monitor unit tests
+      - name: Deployment records match deployments/schema.json
+        run: python3 scripts/validate_deployments.py
+
+      - name: Script unit tests (TTL monitor, deploy.sh with mocked stellar, schema, ledger backfill)
         run: python3 -m unittest discover -s scripts/tests
 
   supply-chain:
     name: cargo-deny / renovate config / workflow audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -90,6 +102,7 @@ jobs:
   wasm:
     name: optimized wasm build
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     needs: checks
@@ -102,6 +115,10 @@ jobs:
         run: rustup toolchain install && rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: wasm32v1-none-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          cache-targets: true
+          cache-all-crates: true
 
       - name: Install Stellar CLI ${{ env.STELLAR_CLI_VERSION }}
         run: |
@@ -109,7 +126,25 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Build optimized wasm
-        run: make build-optimized
+        run: |
+          START="$(date +%s)"
+          make build-optimized
+          ELAPSED="$(( $(date +%s) - START ))"
+          echo "WASM_BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          echo "- optimized wasm build: ${ELAPSED}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert and report build metadata
+        run: |
+          META="$(stellar contract info meta --wasm target/stellar/indexer_contract.wasm)"
+          echo "$META"
+          echo "$META" | grep -Fq "source_repo"
+          echo "$META" | grep -Fq "github:D-Indexer/Indexer-Contract"
+          {
+            echo "### Contract build metadata"
+            echo '```text'
+            echo "$META"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report wasm hash
         run: |
@@ -160,6 +195,7 @@ jobs:
   smoke-testnet:
     name: testnet smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     needs: wasm

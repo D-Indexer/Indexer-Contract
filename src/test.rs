@@ -6,15 +6,17 @@ use soroban_sdk::{
         storage::{Instance as _, Persistent as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
-    Address, Env, Event as _, String,
+    Address, Env, Event as _, IntoVal, String, Val, Vec,
 };
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::xdr::ToXdr;
 
 use crate::constants::{
     DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
     PERSISTENT_BUMP_AMOUNT,
-};
-use crate::errors::ContractError;
+};use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::storage;
 use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
@@ -143,10 +145,10 @@ fn test_owner_cannot_claim_second_folder() {
 fn test_short_folder_name_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "ab");
+    let name = String::from_str(&t.env, "ab.folder");
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooShort);
 }
 
 #[test]
@@ -159,7 +161,7 @@ fn test_long_folder_name_rejected() {
     );
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooLong);
 }
 
 #[test]
@@ -183,6 +185,56 @@ fn test_folder_suffix_required() {
 }
 
 #[test]
+fn test_punycode_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "xn--abc.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_double_hyphen_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ab--c.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_single_hyphen_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "a-b-c.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
+}
+
+#[test]
+fn test_numeric_only_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "007.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_alphanumeric_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "agent007.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
+}
+
+#[test]
 fn test_get_missing_folder_rejected() {
     let t = TestEnv::new();
     let name = String::from_str(&t.env, "missing.folder");
@@ -198,6 +250,222 @@ fn test_get_missing_identity_rejected() {
 
     let res = t.client().try_get_identity(&user);
     expect_contract_error(res, ContractError::FolderNotFound);
+}
+
+// ── Relayed submission (fee source != owner) ─────────────────────────────────
+
+/// Builds the argument vector the contract sees for `claim_folder(owner, name)`.
+fn claim_folder_args(env: &Env, owner: &Address, name: &String) -> Vec<Val> {
+    (owner.clone(), name.clone()).into_val(env)
+}
+
+/// Builds the argument vector the contract sees for `mint_portfolio(owner, id, cid)`.
+fn mint_portfolio_args(env: &Env, owner: &Address, template_id: u32, cid: &String) -> Vec<Val> {
+    (owner.clone(), template_id, cid.clone()).into_val(env)
+}
+
+/// Authorizes `owner` for a single contract invocation, as the owner's wallet would
+/// when signing a SorobanAuthorizationEntry for a relayer to submit.
+///
+/// `live_until_ledger` is the ledger sequence the signature stays valid through;
+/// the test ledger is moved past it to model an expired entry.
+fn authorize_owner(
+    t: &TestEnv,
+    owner: &Address,
+    fn_name: &str,
+    args: Vec<Val>,
+    live_until_ledger: u32,
+) {
+    t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: owner,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &t.contract_id,
+            fn_name,
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: t.env.ledger().timestamp(),
+        protocol_version: t.env.ledger().protocol_version(),
+        sequence_number: t.env.ledger().sequence(),
+        network_id: soroban_sdk::BytesN::from_array(&t.env, &[0u8; 32]).into(),
+        base_reserve: 0,
+        min_temp_entry_ttl: 1,
+        min_persistent_entry_ttl: 1,
+        max_entry_ttl: live_until_ledger,
+    });
+}
+
+#[test]
+fn test_relayed_claim_folder_with_owner_auth_entry() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let relayer = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "relayed.folder");
+
+    // Only the owner signs; the relayer pays the fee and submits.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &name),
+        100,
+    );
+    t.client().claim_folder(&owner, &name);
+
+    assert_eq!(t.client().get_folder(&name), owner);
+    assert_eq!(t.client().get_identity(&owner), name);
+    // The relayer never gains ownership.
+    assert_ne!(t.client().get_folder(&name), relayer);
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_owner_auth_entry() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "relayed-mint.folder");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &cid),
+        100,
+    );
+    t.client().mint_portfolio(&owner, &1u32, &cid);
+
+    let nft = t.client().get_portfolio(&owner);
+    assert_eq!(nft.owner, owner);
+    assert_eq!(nft.template_id, 1u32);
+    assert_eq!(nft.ipfs_cid, cid);
+}
+
+#[test]
+fn test_relayed_claim_folder_with_expired_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "expired.folder");
+
+    // Auth entry signed for a ledger window that has already passed.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &name),
+        10,
+    );
+    t.env.ledger().set_sequence_number(11);
+
+    let res = t.client().try_claim_folder(&owner, &name);
+    assert!(res.is_err(), "expired auth entry must not authorize");
+    assert!(t.client().try_get_folder(&name).is_err());
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_expired_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "expired-mint.folder");
+    let cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &cid),
+        10,
+    );
+    t.env.ledger().set_sequence_number(11);
+
+    let res = t.client().try_mint_portfolio(&owner, &1u32, &cid);
+    assert!(res.is_err(), "expired auth entry must not authorize");
+    assert!(t.client().try_get_portfolio(&owner).is_err());
+}
+
+#[test]
+fn test_relayed_claim_folder_with_wrong_args_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let signed_name = String::from_str(&t.env, "signed.folder");
+    let submitted_name = String::from_str(&t.env, "swapped.folder");
+
+    // Owner signed for `signed.folder`; the relayer submits a different name.
+    authorize_owner(
+        &t,
+        &owner,
+        "claim_folder",
+        claim_folder_args(&t.env, &owner, &signed_name),
+        100,
+    );
+
+    let res = t.client().try_claim_folder(&owner, &submitted_name);
+    assert!(res.is_err(), "auth entry for other args must not authorize");
+    assert!(t.client().try_get_folder(&submitted_name).is_err());
+}
+
+#[test]
+fn test_relayed_mint_portfolio_with_wrong_args_auth_entry_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "wrong-args-mint.folder");
+    let signed_cid = String::from_str(
+        &t.env,
+        "bafkreif3kqdiv2uf7kt6jb2tacbtm27jsyrzbl4cfzghd3y2zjydhsb6my",
+    );
+    let submitted_cid = String::from_str(
+        &t.env,
+        "bafkreie33ewzcjvpo3gldpvqgevtoy4oaygkqri3cwxqr6o6lsqc4jqvwu",
+    );
+
+    t.client().claim_folder(&owner, &name);
+
+    // Owner signed for `signed_cid`; the relayer submits a different CID.
+    authorize_owner(
+        &t,
+        &owner,
+        "mint_portfolio",
+        mint_portfolio_args(&t.env, &owner, 1u32, &signed_cid),
+        100,
+    );
+
+    let res = t.client().try_mint_portfolio(&owner, &1u32, &submitted_cid);
+    assert!(res.is_err(), "auth entry for other args must not authorize");
+    assert!(t.client().try_get_portfolio(&owner).is_err());
+}
+
+#[test]
+fn test_relayed_claim_folder_without_owner_auth_fails() {
+    let t = TestEnv::new();
+    let owner = Address::generate(&t.env);
+    let relayer = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "no-auth.folder");
+
+    // Only the relayer signs; the owner never authorized the invocation.
+    t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &relayer,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &t.contract_id,
+            fn_name: "claim_folder",
+            args: claim_folder_args(&t.env, &owner, &name),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let res = t.client().try_claim_folder(&owner, &name);
+    assert!(res.is_err(), "relayer signature must not stand in for the owner");
+    assert!(t.client().try_get_folder(&name).is_err());
 }
 
 #[test]
@@ -435,6 +703,242 @@ fn test_get_missing_portfolio_rejected() {
 
     let res = t.client().try_get_portfolio(&user);
     expect_contract_error(res, ContractError::PortfolioNotFound);
+}
+
+// ── Archival and restore behaviour of persistent entries ─────────────────────
+
+/// Advances the ledger far enough that every persistent entry written so far
+/// has expired, then asserts the entry is gone from the live ledger.
+fn archive_persistent(t: &TestEnv, key: &DataKey) {
+    t.env.ledger().set_sequence_number(PERSISTENT_BUMP_AMOUNT + 1);
+    assert!(
+        !t.env.storage().persistent().has(key),
+        "persistent entry should be archived"
+    );
+}
+
+fn template_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety",
+    )
+}
+
+fn portfolio_cid(env: &Env) -> String {
+    String::from_str(
+        env,
+        "bafkreib37qtjlfhpmsjcr2nhjovqb4cc57er2wwmn67oggryf2anii4i7y",
+    )
+}
+
+#[test]
+fn test_persistent_ttl_below_max_entry_ttl() {
+    // The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
+    // the requested lifetime exact.
+    assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400);
+    assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD);
+}
+
+#[test]
+fn test_folder_owner_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "archive.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    // The archived entry is not silently recreated: reads report it missing.
+    let res = t.client().try_get_folder(&name);
+    expect_contract_error(res, ContractError::FolderNotFound);
+    assert!(!t.env.storage().persistent().has(&key));
+}
+
+#[test]
+fn test_folder_owner_restore_prevents_reclaim() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let other = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "restore.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+    archive_persistent(&t, &key);
+
+    // Restoring the entry (as `stellar contract restore` does) brings the
+    // claim back, so the name is still taken.
+    t.env.storage().persistent().set(&key, &user);
+    assert_eq!(t.client().get_folder(&name), user);
+
+    let res = t.client().try_claim_folder(&other, &name);
+    expect_contract_error(res, ContractError::FolderNameTaken);
+}
+
+#[test]
+fn test_owner_folder_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "identity.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::OwnerFolder(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_identity(&user);
+    expect_contract_error(res, ContractError::FolderNotFound);
+}
+
+#[test]
+fn test_template_archived_after_ttl() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::Template(1u32);
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_template(&1u32);
+    expect_contract_error(res, ContractError::TemplateNotFound);
+}
+
+#[test]
+fn test_template_restore_keeps_registration() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::Template(1u32);
+    archive_persistent(&t, &key);
+
+    t.env.storage().persistent().set(
+        &key,
+        &crate::types::Template {
+            template_id: 1u32,
+            metadata_uri: uri.clone(),
+            creator: t.admin.clone(),
+        },
+    );
+
+    assert_eq!(t.client().get_template(&1u32).metadata_uri, uri);
+    // Re-registering a restored template is still rejected.
+    let res = t.client().try_register_template(&t.admin, &1u32, &uri);
+    expect_contract_error(res, ContractError::TemplateAlreadyExists);
+}
+
+#[test]
+fn test_template_list_archived_after_ttl() {
+    let t = TestEnv::new();
+    let uri = template_uri(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let key = DataKey::TemplateList;
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    // A missing list degrades to empty rather than trapping.
+    assert_eq!(t.client().list_templates().len(), 0);
+}
+
+#[test]
+fn test_portfolio_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "nft.folder");
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+
+    let key = DataKey::Portfolio(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    let res = t.client().try_get_portfolio(&user);
+    expect_contract_error(res, ContractError::PortfolioNotFound);
+    assert!(!t.client().verify_portfolio(&user));
+}
+
+#[test]
+fn test_portfolio_restore_prevents_remint() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "remint.folder");
+    let cid = portfolio_cid(&t.env);
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let key = DataKey::Portfolio(user.clone());
+    archive_persistent(&t, &key);
+
+    t.env.storage().persistent().set(
+        &key,
+        &crate::types::PortfolioNFT {
+            owner: user.clone(),
+            template_id: 1u32,
+            ipfs_cid: cid.clone(),
+            minted_at: 0,
+        },
+    );
+
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
+    expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
+}
+
+#[test]
+fn test_user_template_archived_after_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "assigned.folder");
+
+    t.client().register_template(&t.admin, &1u32, &template_uri(&t.env));
+    t.client().claim_folder(&user, &name);
+    t.client().mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+
+    let key = DataKey::UserTemplate(user.clone());
+    assert!(t.env.storage().persistent().has(&key));
+
+    archive_persistent(&t, &key);
+
+    assert!(!t.env.storage().persistent().has(&key));
+}
+
+#[test]
+fn test_persistent_read_extends_ttl() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl.folder");
+
+    t.client().claim_folder(&user, &name);
+    let key = DataKey::FolderOwner(name.clone());
+
+    // Drop the entry close to expiry, then read it: the read must bump it back
+    // out to the full persistent lifetime.
+    t.env
+        .ledger()
+        .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1);
+    assert!(t.env.storage().persistent().has(&key));
+
+    assert_eq!(t.client().get_folder(&name), user);
+
+    t.env
+        .ledger()
+        .set_sequence_number(PERSISTENT_LIFETIME_THRESHOLD + 1 + DAY_IN_LEDGERS);
+    assert!(
+        t.env.storage().persistent().has(&key),
+        "read should have extended the entry TTL"
+    );
 }
 
 #[test]
@@ -698,7 +1202,7 @@ fn test_persistent_ttl_fits_network_max_entry_ttl() {
     t.client().claim_folder(&user, &name);
 
     // The requested extension is applied exactly, not clamped by the host.
-    let ttl = t.persistent_ttl(&DataKey::FolderOwner(name));
+    let ttl = t.persistent_ttl(&storage::folder_owner_key(&t.env, &name));
     assert_eq!(ttl, PERSISTENT_BUMP_AMOUNT);
 }
 
@@ -713,9 +1217,98 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
     t.client().get_folder(&name);
     // Still above the threshold, so no rent is spent re-extending it.
     assert_eq!(
-        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        t.persistent_ttl(&storage::folder_owner_key(&t.env, &name)),
         PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
     );
+}
+
+#[test]
+fn test_extend_owner_ttl_extends_all_owner_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-owner.folder");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    );
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+    t.client().set_user_template(&user, &1u32);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let keys = [
+        DataKey::OwnerFolder(user.clone()),
+        DataKey::FolderOwner(name.clone()),
+        DataKey::UserTemplate(user.clone()),
+        DataKey::Portfolio(user.clone()),
+    ];
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    for key in keys.iter() {
+        assert!(t.persistent_ttl(key) < PERSISTENT_BUMP_AMOUNT);
+    }
+
+    let extended = t.client().extend_owner_ttl(&user);
+    assert_eq!(extended, 4);
+    for key in keys.iter() {
+        assert_eq!(t.persistent_ttl(key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    // Data is untouched.
+    assert_eq!(t.client().get_identity(&user), name);
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+}
+
+#[test]
+fn test_extend_owner_ttl_skips_missing_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    assert_eq!(t.client().extend_owner_ttl(&user), 0);
+
+    let name = String::from_str(&t.env, "ttl-partial.folder");
+    t.client().claim_folder(&user, &name);
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert_eq!(t.client().extend_owner_ttl(&user), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::OwnerFolder(user.clone())),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+}
+
+#[test]
+fn test_extend_template_ttl_extends_template_keys() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert!(t.persistent_ttl(&DataKey::Template(1)) < PERSISTENT_BUMP_AMOUNT);
+
+    assert_eq!(t.client().extend_template_ttl(&1u32), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::Template(1)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::TemplateList),
+        PERSISTENT_BUMP_AMOUNT
+    );
+
+    // Missing template is skipped without an error.
+    assert_eq!(t.client().extend_template_ttl(&404u32), 1);
 }
 
 // ── Template storage ────────────────────────────────────────────────────────
@@ -765,6 +1358,172 @@ fn test_template_registry_is_bounded() {
     let res = client.try_register_template(&admin, &(MAX_TEMPLATES + 1), &uri);
     expect_contract_error(res, ContractError::TemplateLimitReached);
     assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
+}
+
+// ── Golden event fixtures ───────────────────────────────────────────────────
+
+/// Fixed addresses keep the golden XDR fixtures deterministic across runs.
+const GOLDEN_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const GOLDEN_OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+const GOLDEN_NEW_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACZ7M";
+
+fn golden_env() -> (Env, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FolderContract, ());
+    let admin = Address::from_str(&env, GOLDEN_ADMIN);
+    let owner = Address::from_str(&env, GOLDEN_OWNER);
+    let new_admin = Address::from_str(&env, GOLDEN_NEW_ADMIN);
+    (env, contract_id, admin, owner, new_admin)
+}
+
+fn golden_cid(env: &Env) -> String {
+    String::from_str(
+        env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    )
+}
+
+fn golden_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG/1.json",
+    )
+}
+
+/// Triggers every contract event and returns `(topic, topics_xdr_b64, data_xdr_b64)`.
+fn golden_events() -> std::vec::Vec<(std::string::String, std::string::String, std::string::String)> {
+    let (env, contract_id, admin, owner, new_admin) = golden_env();
+    let client = FolderContractClient::new(&env, &contract_id);
+    let cid = golden_cid(&env);
+    let uri = golden_uri(&env);
+
+    client.initialize(&admin);
+    client.add_admin(&admin, &new_admin);
+    client.remove_admin(&admin, &new_admin);
+    client.claim_folder(&owner, &String::from_str(&env, "golden.folder"));
+    client.register_template(&admin, &1, &uri);
+    client.set_user_template(&owner, &1);
+    client.mint_portfolio(&owner, &1, &cid);
+    client.update_portfolio(&owner, &cid);
+
+    let mut out = std::vec::Vec::new();
+    for (topics, data) in env.events().all().filter_by_contract(&contract_id) {
+        let topic = topics.get(0).unwrap();
+        let topic_str = match topic {
+            soroban_sdk::xdr::ScVal::Symbol(sym) => {
+                std::string::String::from_utf8(sym.0.to_vec()).unwrap()
+            }
+            _ => panic!("unexpected topic type"),
+        };
+        out.push((
+            topic_str,
+            base64_encode(&topics.to_xdr(&env)),
+            base64_encode(&data.to_xdr(&env)),
+        ));
+    }
+    out
+}
+
+fn base64_encode(bytes: &soroban_sdk::Bytes) -> std::string::String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = std::string::String::new();
+    let mut chunk = [0u8; 3];
+    let mut n = 0;
+    for byte in bytes.iter() {
+        chunk[n] = byte;
+        n += 1;
+        if n == 3 {
+            out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+            out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+            out.push(ALPHABET[(((chunk[1] & 0x0f) << 2) | (chunk[2] >> 6)) as usize] as char);
+            out.push(ALPHABET[(chunk[2] & 0x3f) as usize] as char);
+            n = 0;
+        }
+    }
+    if n == 1 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[((chunk[0] & 0x03) << 4) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if n == 2 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+        out.push(ALPHABET[((chunk[1] & 0x0f) << 2) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn fixture_path(topic: &str) -> std::string::String {
+    std::format!("{}/fixtures/events/{}.json", env!("CARGO_MANIFEST_DIR"), topic)
+}
+
+fn fixture_json(topics_b64: &str, data_b64: &str, decoded: &str) -> std::string::String {
+    std::format!(
+        "{{\n  \"topics_xdr_b64\": \"{}\",\n  \"data_xdr_b64\": \"{}\",\n  \"decoded\": {}\n}}\n",
+        topics_b64,
+        data_b64,
+        decoded
+    )
+}
+
+/// Regenerates `fixtures/events/<topic>.json`. Run with
+/// `UPDATE_EVENT_FIXTURES=1 cargo test golden_event_fixtures` to refresh them.
+#[test]
+fn golden_event_fixtures() {
+    let update = std::env::var("UPDATE_EVENT_FIXTURES").is_ok();
+    let events = golden_events();
+    assert_eq!(events.len(), 8, "every event topic must be covered");
+
+    for (topic, topics_b64, data_b64) in events {
+        let decoded = std::format!(
+            "{{\"topics_xdr_b64\": \"{}\", \"data_xdr_b64\": \"{}\"}}",
+            topics_b64, data_b64
+        );
+        let expected = fixture_json(&topics_b64, &data_b64, &decoded);
+        let path = fixture_path(&topic);
+        if update {
+            std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
+            std::fs::write(&path, expected.as_bytes()).unwrap();
+        } else {
+            let actual = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("missing fixture {path}; run UPDATE_EVENT_FIXTURES=1"));
+            assert_eq!(actual, expected, "fixture drift for {topic}");
+        }
+    }
+}
+
+/// Round-trips every committed fixture back through XDR decoding.
+#[test]
+fn golden_event_fixtures_round_trip() {
+    let env = Env::default();
+    let dir = std::format!("{}/fixtures/events", env!("CARGO_MANIFEST_DIR"));
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let topics_b64 = extract_json_field(&raw, "topics_xdr_b64");
+        let data_b64 = extract_json_field(&raw, "data_xdr_b64");
+        let topics = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &topics_b64).unwrap();
+        let data = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &data_b64).unwrap();
+        assert_eq!(topics.to_xdr_base64(&env), topics_b64);
+        assert_eq!(data.to_xdr_base64(&env), data_b64);
+        count += 1;
+    }
+    assert_eq!(count, 8, "expected one fixture per event topic");
+}
+
+fn extract_json_field(raw: &str, field: &str) -> std::string::String {
+    let key = std::format!("\"{field}\": \"");
+    let start = raw.find(&key).unwrap_or_else(|| panic!("missing {field}")) + key.len();
+    let rest = &raw[start..];
+    let end = rest.find('"').unwrap();
+    std::string::String::from(&rest[..end])
 }
 
 // ── Admin management ────────────────────────────────────────────────────────
@@ -924,6 +1683,14 @@ fn test_set_user_template_updates_minted_portfolio() {
 const VALID_CIDV1_RAW: &str = "bafkreicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV1_DAG_PB: &str = "bafybeicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV0: &str = "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce";
+/// Real CIDv0 vectors (sha2-256 multihash, base58btc).
+const VALID_CIDV0_VECTORS: [&str; 5] = [
+    "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH",
+    "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o",
+    "QmZULkCELmmk5XNfCgTnCyFgAVxBRBXyDHGGMVoLFLiXEN",
+];
 
 #[test]
 fn test_folder_label_rules() {
@@ -1018,6 +1785,44 @@ fn test_cid_format_rules() {
 }
 
 #[test]
+fn test_cidv0_multihash_vectors() {
+    let (t, user) = minted_env();
+    for good in VALID_CIDV0_VECTORS {
+        let cid = String::from_str(&t.env, good);
+        t.client().update_portfolio(&user, &cid);
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+    // Corrupted vectors: changed digest byte, wrong multihash prefix, and
+    // characters outside the base58btc alphabet.
+    let mut corrupted: std::vec::Vec<std::string::String> = std::vec::Vec::new();
+    for good in VALID_CIDV0_VECTORS {
+        let mut chars: std::vec::Vec<char> = good.chars().collect();
+        let last = chars.len() - 1;
+        chars[last] = if chars[last] == 'a' { 'b' } else { 'a' };
+        corrupted.push(chars.into_iter().collect());
+    }
+    // Decodes to a multihash whose function code is not sha2-256.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5p",
+    ));
+    // Decodes to a multihash whose digest length byte is not 0x20.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5n",
+    ));
+    // Invalid base58btc characters (`0`, `O`, `I`, `l`).
+    corrupted.push(std::string::String::from("Qm") + &"0".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"O".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"I".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"l".repeat(44));
+    for bad in corrupted {
+        let res = t
+            .client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, &bad));
+        expect_contract_error(res, ContractError::InvalidCID);
+    }
+}
+
+#[test]
 fn test_metadata_uri_format_rules() {
     let t = TestEnv::new();
     let with = |suffix: &str| std::string::String::from("ipfs://") + suffix;
@@ -1077,26 +1882,6 @@ fn test_each_write_requires_the_right_signer() {
     assert_single_auth(&t, &t.admin, "add_admin");
     t.client().remove_admin(&other_admin, &t.admin);
     assert_single_auth(&t, &other_admin, "remove_admin");
-
-    let uri = String::from_str(
-        &t.env,
-        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
-    );
-    t.client().register_template(&other_admin, &1u32, &uri);
-    assert_single_auth(&t, &other_admin, "register_template");
-
-    let user = Address::generate(&t.env);
-    t.client()
-        .claim_folder(&user, &String::from_str(&t.env, "signer.folder"));
-    assert_single_auth(&t, &user, "claim_folder");
-    t.client().set_user_template(&user, &1u32);
-    assert_single_auth(&t, &user, "set_user_template");
-    t.client()
-        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
-    assert_single_auth(&t, &user, "mint_portfolio");
-    t.client()
-        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
-    assert_single_auth(&t, &user, "update_portfolio");
 }
 
 #[test]
@@ -1449,4 +2234,182 @@ fn budget_report() {
     t.client()
         .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
     report(&t, "update_portfolio");
+}
+
+#[test]
+fn test_address_blocklist_write_paths_and_unblock() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    let user = Address::generate(&t.env);
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_claim_folder(&user, &String::from_str(&t.env, "blocked.folder")),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "blocked.folder"));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
+
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client().try_set_user_template(&user, &1u32),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client().set_user_template(&user, &1u32);
+
+    expect_contract_error(
+        t.client().try_block_address(&t.admin, &t.admin, &1u32),
+        ContractError::CannotBlockAdmin,
+    );
+}
+
+#[test]
+fn test_portfolio_flag_set_clear_and_persist_across_update() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let owner = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&owner, &String::from_str(&t.env, "flagged.folder"));
+    t.client()
+        .mint_portfolio(&owner, &1u32, &String::from_str(&t.env, VALID_CIDV0));
+
+    t.client().set_portfolio_flag(&t.admin, &owner, &1u32, &9u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
+    t.client()
+        .update_portfolio(&owner, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
+
+    t.client().set_portfolio_flag(&t.admin, &owner, &0u32, &10u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 0u32);
+    expect_contract_error(
+        t.client().try_set_portfolio_flag(
+            &Address::generate(&t.env),
+            &owner,
+            &2u32,
+            &1u32,
+        ),
+        ContractError::Unauthorized,
+    );
+}
+
+#[test]
+fn test_template_submission_lifecycle_cap_and_usage() {
+    let t = TestEnv::new();
+    let designer = Address::generate(&t.env);
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    let submission_id = t.client().submit_template(&designer, &uri);
+    t.client()
+        .approve_submission(&t.admin, &submission_id, &1u32);
+    assert_eq!(
+        t.client().get_template_designer(&1u32),
+        Some(designer.clone())
+    );
+    let duplicate_id = t.client().submit_template(
+        &designer,
+        &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/duplicate.json",
+        ),
+    );
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &duplicate_id, &1u32),
+        ContractError::TemplateAlreadyExists,
+    );
+
+    let rejected_id = t
+        .client()
+        .submit_template(&designer, &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/template.json",
+        ));
+    t.client().reject_submission(&t.admin, &rejected_id, &3u32);
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &rejected_id, &2u32),
+        ContractError::SubmissionNotFound,
+    );
+
+    for i in 0u32..49u32 {
+        let uri = String::from_str(
+            &t.env,
+            &std::format!(
+                "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/{}.json",
+                i
+            ),
+        );
+        t.client().submit_template(&designer, &uri);
+    }
+    expect_contract_error(
+        t.client().try_submit_template(
+            &designer,
+            &String::from_str(
+                &t.env,
+                "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/cap.json",
+            ),
+        ),
+        ContractError::SubmissionQueueFull,
+    );
+
+    let owner1 = Address::generate(&t.env);
+    let owner2 = Address::generate(&t.env);
+    let owner3 = Address::generate(&t.env);
+    for (owner, name) in [
+        (owner1.clone(), "usage1.folder"),
+        (owner2.clone(), "usage2.folder"),
+        (owner3.clone(), "usage3.folder"),
+    ] {
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, name));
+        t.client().set_user_template(&owner, &1u32);
+    }
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
+    t.client().set_user_template(&owner1, &1u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
+
+    let uri2 = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/second.json",
+    );
+    t.client().register_template(&t.admin, &2u32, &uri2);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
 }
