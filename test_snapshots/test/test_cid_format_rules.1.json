@@ -466,6 +466,30 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "EventDigest"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bytes": "473d2e732f94ebc1f07bd7dfceeb33f58f1540d0bb7ff3c367fe4c51d8cfcdd8"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "EventSeq"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "7"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Initialized"
                           }
                         ]

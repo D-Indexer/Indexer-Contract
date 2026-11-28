@@ -1579,6 +1579,7 @@ fn test_initialize_emits_event_and_exposes_admins() {
         t.env.events().all().filter_by_contract(&t.contract_id),
         [ContractInitialized {
             admin: t.admin.clone(),
+            seq: 1,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );
@@ -1696,6 +1697,7 @@ fn test_template_registered_event_includes_creator() {
             template_id: 7,
             metadata_uri: uri,
             creator: t.admin.clone(),
+            seq: 2,
         }
         .to_xdr(&t.env, &t.contract_id)]
     );

@@ -1,10 +1,12 @@
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 use crate::access_control::require_owner;
+use crate::constants::{DEFAULT_CONTENT_SCHEMA, MAX_PORTFOLIOS_PER_OWNER};
 use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
 use crate::storage;
+use crate::template_registry::{require_schema_supported, require_template_allowed};
 use crate::types::PortfolioNFT;
 use crate::validation;
 
@@ -33,10 +35,17 @@ pub fn plan_mint_portfolio(
     if storage::load_portfolio(env, owner).is_some() {
         return Err(ContractError::PortfolioAlreadyMinted);
     }
+    // Slot 0 is always available, so extra slots get one less than the cap.
+    let mut extra_slots = storage::get_extra_slots(env, owner);
+    if slot != 0 && extra_slots.len() >= MAX_PORTFOLIOS_PER_OWNER - 1 {
+        return Err(ContractError::PortfolioLimitReached);
+    }
 
     validation::require_valid_template_id(template_id)?;
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
+    require_template_allowed(env, template_id, owner)?;
+    require_schema_supported(env, template_id, content_schema)?;
 
     Ok(MintPortfolioPlan {
         nft: PortfolioNFT {

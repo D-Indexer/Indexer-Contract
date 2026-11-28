@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::constants::{
     CLAIM_COMMIT_TTL, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
