@@ -1954,7 +1954,7 @@ fn test_each_write_requires_the_right_signer() {
 
     let other_admin = Address::generate(&t.env);
     t.client().add_admin(&t.admin, &other_admin);
-    assert_single_auth(&t, &t.admin, "add_admin");
+    assert_single_auth(&t, &t.admin, "execute_admin_change");
     t.client().remove_admin(&other_admin, &t.admin);
     assert_single_auth(&t, &other_admin, "remove_admin");
 }

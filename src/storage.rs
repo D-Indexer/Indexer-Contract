@@ -72,9 +72,10 @@ pub fn set_config(env: &Env, config: &Config) -> Result<(), ContractError> {
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 /// Returns the admin list. Membership is stored per admin under
-/// `Admin(Address)`; the legacy `AdminList` vector is migrated on first read.
+/// `Admin(Address) -> slot` with the reverse `AdminSlot(slot) -> Address`, so
+/// the list can be enumerated; the legacy `AdminList` vector is migrated on
+/// first read.
 pub fn get_admins(env: &Env) -> Vec<Address> {
-    migrate_admin_list(env);
     let count = admin_count(env);
     let mut admins = Vec::new(env);
     let mut i = 0u32;
@@ -164,10 +165,11 @@ pub fn save_admins(env: &Env, admins: &Vec<Address>) {
 fn migrate_admin_list(env: &Env) {
     let legacy: Option<Vec<Address>> = env.storage().instance().get(&DataKey::AdminList);
     if let Some(admins) = legacy {
+        // Remove first: `add_admin_entry` re-enters this function.
+        env.storage().instance().remove(&DataKey::AdminList);
         for admin in admins.iter() {
             add_admin_entry(env, &admin);
         }
-        env.storage().instance().remove(&DataKey::AdminList);
     }
 }
 
