@@ -7,7 +7,8 @@
 | `initialize` | `admin` (the first admin) |
 | `add_admin`, `remove_admin`, `register_template` | `admin` argument, which must be in the admin list |
 | `claim_folder`, `set_user_template`, `mint_portfolio`, `update_portfolio` | `owner` |
-| All `get_*`, `list_templates`, `verify_portfolio` | none |
+| `set_payment_address`, `clear_payment_address`, `set_record`, `remove_record` | `owner`, who must hold a Folder |
+| All `get_*`, `list_templates`, `verify_portfolio`, `resolve_payment` | none |
 
 Tests assert the exact signer for every write and check that writes fail when nobody has signed
 (`test_each_write_requires_the_right_signer`, `test_writes_fail_without_signature`).
@@ -29,6 +30,10 @@ Tests assert the exact signer for every write and check that writes fail when no
   case, discard the contract. A constructor-based fix is tracked in [#138](https://github.com/D-Indexer/Indexer-Contract/issues/138).
 - **Single-signature admins.** Any one admin can add or remove other admins. Use multisig accounts
   as admins until two-step admin addition ([#140](https://github.com/D-Indexer/Indexer-Contract/issues/140)) or a threshold is implemented.
+- **Payment routing follows the owner key.** `resolve_payment` returns whatever address the
+  Folder owner last set. Anyone who controls the owner key can redirect payments to themselves,
+  so wallets should resolve right before paying and never cache the result. The payment address
+  itself has no rights over the Folder.
 - **No upgrade path.** The contract has no `upgrade` entry point. A new version is a new
   contract ID.
 

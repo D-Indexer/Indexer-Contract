@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 use crate::constants::{
     CLAIM_COMMIT_TTL, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
@@ -291,9 +291,25 @@ pub fn save_template_with_list(env: &Env, template: &Template, mut list: Vec<u32
         list.push_back(id);
         env.storage()
             .persistent()
-            .set(&DataKey::TemplateList, &list);
+            .set(&page_key, &list.slice(start..end));
+        extend_persistent(env, &page_key);
+        start = end;
     }
-    extend_persistent(env, &DataKey::TemplateList);
+    env.storage()
+        .persistent()
+        .set(&DataKey::TemplateCount, &count);
+    extend_persistent(env, &DataKey::TemplateCount);
+    env.storage().persistent().remove(&DataKey::TemplateList);
+    count
+}
+
+/// Number of registered templates, read from the counter or, before
+/// migration, from the legacy list.
+pub fn get_template_count(env: &Env) -> u32 {
+    match get_template_count_entry(env) {
+        Some(count) => count,
+        None => get_legacy_template_list(env).map_or(0, |list| list.len()),
+    }
 }
 
 /// Read-only getter: does not extend the TTL (see `get_folder_owner`).

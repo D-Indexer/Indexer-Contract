@@ -88,6 +88,7 @@ pub enum DataKey {
     OwnerFolder(Address),
     // template_registry: template_id -> Template
     Template(u32),
+    // Legacy template ID list, migrated lazily to TemplateCount/TemplatePage.
     TemplateList,
     // user template selection: owner -> template_id
     UserTemplate(Address),
