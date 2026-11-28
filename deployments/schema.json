@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/D-Indexer/Indexer-Contract/deployments/schema.json",
+  "title": "Folder contract deployment record",
+  "description": "Written by scripts/deploy.sh to deployments/<network>.json.",
+  "type": "object",
+  "required": [
+    "network",
+    "rpc_url",
+    "network_passphrase",
+    "contract_id",
+    "wasm_hash",
+    "admin",
+    "deployed_at",
+    "source_commit",
+    "toolchain",
+    "deploy_ledger",
+    "transactions",
+    "ledgers",
+    "templates"
+  ],
+  "properties": {
+    "network": { "enum": ["testnet", "mainnet"] },
+    "rpc_url": { "type": "string", "pattern": "^https?://" },
+    "network_passphrase": { "type": "string", "minLength": 1 },
+    "contract_id": { "$ref": "#/$defs/contract_id" },
+    "wasm_hash": { "$ref": "#/$defs/hash" },
+    "admin": { "$ref": "#/$defs/account" },
+    "deployer": { "$ref": "#/$defs/account" },
+    "deployed_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "toolchain": {
+      "type": "object",
+      "required": ["stellar_cli", "rustc"],
+      "properties": {
+        "stellar_cli": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 }
+      }
+    },
+    "explorer": { "type": "string", "pattern": "^https://" },
+    "deploy_ledger": { "$ref": "#/$defs/ledger" },
+    "transactions": {
+      "type": "object",
+      "required": ["upload_wasm", "deploy", "initialize"],
+      "properties": {
+        "upload_wasm": { "type": "string", "pattern": "^([0-9a-f]{64}|already-uploaded)$" },
+        "deploy": { "$ref": "#/$defs/hash" },
+        "initialize": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "ledgers": {
+      "description": "Ledger each transaction in `transactions` was included in (null when no tx was sent).",
+      "type": "object",
+      "required": ["upload_wasm", "deploy", "initialize"],
+      "properties": {
+        "upload_wasm": { "$ref": "#/$defs/optional_ledger" },
+        "deploy": { "$ref": "#/$defs/ledger" },
+        "initialize": { "$ref": "#/$defs/ledger" }
+      }
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["template_id", "metadata_uri", "tx_hash", "ledger"],
+        "properties": {
+          "template_id": { "type": "integer", "minimum": 0 },
+          "metadata_uri": { "type": "string", "pattern": "^ipfs://" },
+          "tx_hash": { "type": "string", "pattern": "^([0-9a-f]{64}|already-registered)$" },
+          "ledger": { "$ref": "#/$defs/optional_ledger" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "contract_id": { "type": "string", "pattern": "^C[A-Z2-7]{55}$" },
+    "account": { "type": "string", "pattern": "^G[A-Z2-7]{55}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "ledger": { "type": "integer", "minimum": 1 },
+    "optional_ledger": { "type": ["integer", "null"], "minimum": 1 }
+  }
+}
