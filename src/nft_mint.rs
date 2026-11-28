@@ -3,6 +3,7 @@ use soroban_sdk::{Address, Env, String};
 use crate::access_control::require_owner;
 use crate::errors::ContractError;
 use crate::events;
+use crate::identity_map;
 use crate::storage;
 use crate::types::PortfolioNFT;
 use crate::validation;
@@ -21,12 +22,15 @@ pub fn plan_mint_portfolio(
     ipfs_cid: &String,
 ) -> Result<MintPortfolioPlan, ContractError> {
     require_owner(env, owner)?;
+    if storage::is_blocked(env, owner) {
+        return Err(ContractError::AddressBlocked);
+    }
 
     // Must have claimed a Folder name before minting
-    storage::get_owner_folder(env, owner).ok_or(ContractError::FolderNotFound)?;
+    identity_map::get_identity(env, owner)?;
 
-    // Prevent double-mint
-    if storage::portfolio_exists(env, owner) {
+    // Prevent double-mint (single read, also refreshes the entry's TTL)
+    if storage::load_portfolio(env, owner).is_some() {
         return Err(ContractError::PortfolioAlreadyMinted);
     }
 
@@ -48,13 +52,20 @@ pub fn plan_mint_portfolio(
 pub fn apply_mint_portfolio(env: &Env, plan: &MintPortfolioPlan) {
     storage::save_portfolio(env, &plan.nft);
     // Keep the user's template selection consistent with the minted portfolio.
-    storage::set_user_template(env, &plan.nft.owner, plan.nft.template_id);
-    events::portfolio_minted(
-        env,
-        &plan.nft.owner,
-        plan.nft.template_id,
-        &plan.nft.ipfs_cid,
-    );
+    if storage::get_user_template(env, owner).is_none() {
+        let usage = storage::get_template_usage(env, template_id);
+        storage::set_template_usage(env, template_id, usage.saturating_add(1));
+    } else if let Some(old_id) = storage::get_user_template(env, owner) {
+        if old_id != template_id {
+            let old_usage = storage::get_template_usage(env, old_id);
+            storage::set_template_usage(env, old_id, old_usage.saturating_sub(1));
+            let new_usage = storage::get_template_usage(env, template_id);
+            storage::set_template_usage(env, template_id, new_usage.saturating_add(1));
+        }
+    }
+    storage::set_user_template(env, owner, template_id);
+    events::portfolio_minted(env, owner, template_id, ipfs_cid);
+    Ok(())
 }
 
 pub fn mint_portfolio(
@@ -82,6 +93,9 @@ pub fn plan_update_portfolio(
     ipfs_cid: &String,
 ) -> Result<UpdatePortfolioPlan, ContractError> {
     require_owner(env, owner)?;
+    if storage::is_blocked(env, owner) {
+        return Err(ContractError::AddressBlocked);
+    }
 
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     let mut nft = storage::get_portfolio(env, owner)?;

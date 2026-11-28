@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/folder-validation", "crates/folder-validation-js"]
+resolver = "2"
+
 [package]
 name = "indexer-contract"
 version = "0.1.0"
@@ -5,13 +9,17 @@ edition = "2021"
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["alloc"] }
+soroban-sdk = { version = "=29.0.1", features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
+
+[workspace]
+# Spike (#249): the monolith split into three cross-calling contracts.
+members = [".", "spike/folder-registry", "spike/folder-templates", "spike/folder-portfolio"]
 
 [profile.release]
 opt-level = "z"
