@@ -127,50 +127,98 @@
   },
   {
     "code": 22,
-    "name": "FolderExpired",
-    "description": "The Folder name's lease has expired and is in its grace period.",
-    "user_message": "This Folder name has expired. The owner can still renew it."
+    "name": "AdminChangeNotFound",
+    "description": "No queued admin change has the given op ID.",
+    "user_message": "That admin change does not exist."
   },
   {
     "code": 23,
-    "name": "InvalidPriceTiers",
-    "description": "The price tier table is malformed.",
-    "user_message": "The pricing tiers are not valid."
+    "name": "AdminChangeNotReady",
+    "description": "The queued admin change is still inside its timelock.",
+    "user_message": "That admin change cannot be executed yet."
   },
   {
     "code": 24,
-    "name": "InvalidFee",
-    "description": "The configured fee is negative.",
-    "user_message": "The fee is not valid."
+    "name": "AdminChangeQueueFull",
+    "description": "The admin change queue is full.",
+    "user_message": "Too many admin changes are pending. Execute or cancel one first."
   },
   {
     "code": 25,
-    "name": "LeasesDisabled",
-    "description": "Leases are not enabled on this contract.",
-    "user_message": "Folder names do not expire, so there is nothing to renew."
+    "name": "FolderExpired",
+    "description": "The Folder lease has expired and is in its grace period.",
+    "user_message": "This Folder has expired. Its owner can still renew it."
   },
   {
     "code": 26,
-    "name": "InvalidRenewal",
-    "description": "The renewal request is invalid (zero periods, permanent name, or overflow).",
-    "user_message": "This Folder name cannot be renewed that way."
+    "name": "InvalidPriceTiers",
+    "description": "The price tier table is malformed.",
+    "user_message": "The price tiers are not valid."
   },
   {
     "code": 27,
-    "name": "AdminChangeNotFound",
-    "description": "No queued admin change has the given op ID.",
-    "user_message": "That admin change could not be found."
+    "name": "InvalidRenewal",
+    "description": "A lease renewal request is invalid or overflows.",
+    "user_message": "This Folder cannot be renewed that way."
   },
   {
     "code": 28,
-    "name": "AdminChangeNotReady",
-    "description": "The queued admin change's timelock has not elapsed yet.",
-    "user_message": "That admin change is still timelocked."
+    "name": "LeasesDisabled",
+    "description": "Leases are not enabled.",
+    "user_message": "Folder leases are not enabled."
   },
   {
     "code": 29,
-    "name": "AdminChangeQueueFull",
-    "description": "The pending admin change queue is full.",
-    "user_message": "Too many admin changes are pending."
+    "name": "CommitmentNotFound",
+    "description": "No live claim commitment exists for the owner (never made, already revealed, or older than the reveal window).",
+    "user_message": "We could not find your reservation. Please reserve the name again."
+  },
+  {
+    "code": 30,
+    "name": "CommitmentMismatch",
+    "description": "The revealed name, salt and owner do not hash to the stored commitment.",
+    "user_message": "The name or secret does not match your reservation."
+  },
+  {
+    "code": 31,
+    "name": "RevealTooEarly",
+    "description": "The reveal came before `MIN_REVEAL_DELAY` ledgers had passed.",
+    "user_message": "Your reservation is not ready yet. Please wait a few seconds and try again."
+  },
+  {
+    "code": 32,
+    "name": "InvalidGuardians",
+    "description": "The guardian list or threshold is invalid (more than `MAX_GUARDIANS`, duplicates, the owner itself, or a threshold outside `1..=len`).",
+    "user_message": "The guardian settings are not valid."
+  },
+  {
+    "code": 33,
+    "name": "NotGuardian",
+    "description": "The caller is not a guardian of this owner.",
+    "user_message": "You are not a guardian of this Folder."
+  },
+  {
+    "code": 34,
+    "name": "RecoveryInProgress",
+    "description": "A recovery is already pending for this owner.",
+    "user_message": "A recovery is already in progress for this Folder."
+  },
+  {
+    "code": 35,
+    "name": "RecoveryNotFound",
+    "description": "No recovery is pending for this owner.",
+    "user_message": "There is no recovery in progress for this Folder."
+  },
+  {
+    "code": 36,
+    "name": "RecoveryNotReady",
+    "description": "The recovery lacks approvals or its delay has not passed.",
+    "user_message": "This recovery cannot be completed yet."
+  },
+  {
+    "code": 37,
+    "name": "AlreadyApproved",
+    "description": "The guardian already approved this recovery.",
+    "user_message": "You have already approved this recovery."
   }
 ]

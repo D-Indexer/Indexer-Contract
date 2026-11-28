@@ -1,0 +1,8 @@
+[package]
+name = "folder-validation"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Shared no_std validation rules for Folder names, IPFS CIDs and metadata URIs"
+
+[dependencies]

@@ -8,16 +8,16 @@ use soroban_sdk::{
     },
     Address, Env, Event as _, IntoVal, String, Val, Vec,
 };
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::xdr::ToXdr;
 
 use crate::constants::{
-    ADMIN_TIMELOCK_LEDGERS, DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD,
-    MAX_ADMINS, MAX_TEMPLATES, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD,
-};
-use crate::errors::ContractError;
-use crate::events::{
-    AdminAdded, AdminChangeExecuted, AdminRemoved, ContractInitialized, TemplateRegistered,
-};
-use crate::types::{AdminOp, CidEntry, DataKey};
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
+    PERSISTENT_BUMP_AMOUNT,
+};use crate::errors::ContractError;
+use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
+use crate::storage;
+use crate::types::DataKey;
 use crate::{FolderContract, FolderContractClient};
 
 struct TestEnv {
@@ -79,39 +79,34 @@ fn expect_contract_error<T>(
     assert_eq!(result.err(), Some(Ok(expected)));
 }
 
-type TryResult = Result<
-    Result<(), soroban_sdk::ConversionError>,
-    Result<ContractError, soroban_sdk::InvokeError>,
->;
-
-/// Queues an admin change as `admin`, waits out the timelock and executes it.
-/// Admin membership only changes through the timelocked queue.
-fn try_admin_change(t: &TestEnv, admin: &Address, op: AdminOp, target: &Address) -> TryResult {
-    let op_id = match t.client().try_queue_admin_change(admin, &op, target) {
-        Ok(Ok(id)) => id,
-        Ok(Err(e)) => return Ok(Err(e)),
-        Err(e) => return Err(e),
-    };
+/// Moves the ledger past `ADMIN_TIMELOCK_LEDGERS`.
+fn advance_past_timelock(t: &TestEnv) {
+    let seq = t.env.ledger().sequence();
     t.env
         .ledger()
-        .set_sequence_number(t.env.ledger().sequence() + ADMIN_TIMELOCK_LEDGERS);
-    t.client().try_execute_admin_change(admin, &op_id)
+        .set_sequence_number(seq + ADMIN_TIMELOCK_LEDGERS);
 }
 
-fn try_add_admin(t: &TestEnv, admin: &Address, new_admin: &Address) -> TryResult {
-    try_admin_change(t, admin, AdminOp::Add, new_admin)
+/// Queues an admin change, waits out the timelock and executes it.
+fn try_admin_change(
+    t: &TestEnv,
+    by: &Address,
+    op: AdminOp,
+    target: &Address,
+) -> Result<(), Result<ContractError, soroban_sdk::InvokeError>> {
+    let op_id = t.client().try_queue_admin_change(by, &op, target)?.unwrap();
+    advance_past_timelock(t);
+    t.client()
+        .try_execute_admin_change(by, &op_id)
+        .map(|r| r.unwrap())
 }
 
-fn try_remove_admin(t: &TestEnv, admin: &Address, target: &Address) -> TryResult {
-    try_admin_change(t, admin, AdminOp::Remove, target)
+fn add_admin(t: &TestEnv, by: &Address, target: &Address) {
+    try_admin_change(t, by, AdminOp::Add, target).unwrap();
 }
 
-fn add_admin(t: &TestEnv, admin: &Address, new_admin: &Address) {
-    try_add_admin(t, admin, new_admin).unwrap().unwrap();
-}
-
-fn remove_admin(t: &TestEnv, admin: &Address, target: &Address) {
-    try_remove_admin(t, admin, target).unwrap().unwrap();
+fn remove_admin(t: &TestEnv, by: &Address, target: &Address) {
+    try_admin_change(t, by, AdminOp::Remove, target).unwrap();
 }
 
 #[test]
@@ -195,10 +190,10 @@ fn test_owner_cannot_claim_second_folder() {
 fn test_short_folder_name_rejected() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "ab");
+    let name = String::from_str(&t.env, "ab.folder");
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooShort);
 }
 
 #[test]
@@ -211,7 +206,7 @@ fn test_long_folder_name_rejected() {
     );
 
     let res = t.client().try_claim_folder(&user, &name);
-    expect_contract_error(res, ContractError::InvalidFolderName);
+    expect_contract_error(res, ContractError::FolderNameTooLong);
 }
 
 #[test]
@@ -232,6 +227,56 @@ fn test_folder_suffix_required() {
 
     let res = t.client().try_claim_folder(&user, &name);
     expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_punycode_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "xn--abc.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_double_hyphen_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ab--c.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_single_hyphen_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "a-b-c.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
+}
+
+#[test]
+fn test_numeric_only_folder_name_rejected() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "007.folder");
+
+    let res = t.client().try_claim_folder(&user, &name);
+    expect_contract_error(res, ContractError::InvalidFolderName);
+}
+
+#[test]
+fn test_alphanumeric_folder_name_accepted() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "agent007.folder");
+
+    t.client().claim_folder(&user, &name);
+    assert_eq!(t.client().get_folder(&name), user);
 }
 
 #[test]
@@ -264,11 +309,44 @@ fn mint_portfolio_args(env: &Env, owner: &Address, template_id: u32, cid: &Strin
     (owner.clone(), template_id, cid.clone()).into_val(env)
 }
 
-/// Authorizes `owner` for a single contract invocation, as the owner's wallet would
-/// when signing a SorobanAuthorizationEntry for a relayer to submit.
-///
-/// `live_until_ledger` is the ledger sequence the signature stays valid through;
-/// the test ledger is moved past it to model an expired entry.
+/// Minimal custom account standing in for a wallet: accepts any signature, so
+/// the host's own auth-entry checks (args, nonce, expiration ledger) are the
+/// only thing under test.
+mod relay_account {
+    use soroban_sdk::{
+        auth::{Context, CustomAccountInterface},
+        contract, contractimpl,
+        crypto::Hash,
+        Env, Error, Vec,
+    };
+
+    #[contract]
+    pub struct AlwaysAuth;
+
+    #[contractimpl]
+    impl CustomAccountInterface for AlwaysAuth {
+        type Signature = ();
+        type Error = Error;
+
+        fn __check_auth(
+            _env: Env,
+            _signature_payload: Hash<32>,
+            _signature: (),
+            _auth_contexts: Vec<Context>,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+}
+
+/// Registers a custom-account owner for the relayed-submission tests.
+fn relay_owner(t: &TestEnv) -> Address {
+    t.env.register(relay_account::AlwaysAuth, ())
+}
+
+/// Installs the SorobanAuthorizationEntry an owner's wallet would sign for a
+/// relayer to submit: a single contract invocation, valid through
+/// `live_until_ledger`. Disables auth mocking for the next invocation.
 fn authorize_owner(
     t: &TestEnv,
     owner: &Address,
@@ -276,27 +354,48 @@ fn authorize_owner(
     args: Vec<Val>,
     live_until_ledger: u32,
 ) {
-    let mut info = t.env.ledger().get();
-    info.base_reserve = 0;
-    info.min_temp_entry_ttl = 1;
-    info.min_persistent_entry_ttl = 1;
-    info.max_entry_ttl = live_until_ledger;
-    t.env.ledger().set(info);
-    t.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: owner,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &t.contract_id,
-            fn_name,
-            args,
-            sub_invokes: &[],
+    use soroban_sdk::xdr::{
+        InvokeContractArgs, ScVal, SorobanAddressCredentials, SorobanAuthorizationEntry,
+        SorobanAuthorizedFunction, SorobanAuthorizedInvocation, SorobanCredentials,
+    };
+    use soroban_sdk::TryFromVal;
+
+    let args: std::vec::Vec<ScVal> = args
+        .iter()
+        .map(|v| ScVal::try_from_val(&t.env, &v).unwrap())
+        .collect();
+    let entry = SorobanAuthorizationEntry {
+        credentials: SorobanCredentials::Address(SorobanAddressCredentials {
+            address: owner.into(),
+            nonce: t.env.ledger().sequence() as i64,
+            signature_expiration_ledger: live_until_ledger,
+            signature: ScVal::Void,
+        }),
+        root_invocation: SorobanAuthorizedInvocation {
+            function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
+                contract_address: (&t.contract_id).into(),
+                function_name: fn_name.try_into().unwrap(),
+                args: args.try_into().unwrap(),
+            }),
+            sub_invocations: Default::default(),
         },
     }]);
+    t.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: t.env.ledger().timestamp(),
+        protocol_version: t.env.ledger().protocol_version(),
+        sequence_number: t.env.ledger().sequence(),
+        network_id: soroban_sdk::BytesN::from_array(&t.env, &[0u8; 32]).into(),
+        base_reserve: 0,
+        min_temp_entry_ttl: 1,
+        min_persistent_entry_ttl: 1,
+        max_entry_ttl: live_until_ledger,
+    });
 }
 
 #[test]
 fn test_relayed_claim_folder_with_owner_auth_entry() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let relayer = Address::generate(&t.env);
     let name = String::from_str(&t.env, "relayed.folder");
 
@@ -319,7 +418,7 @@ fn test_relayed_claim_folder_with_owner_auth_entry() {
 #[test]
 fn test_relayed_mint_portfolio_with_owner_auth_entry() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let name = String::from_str(&t.env, "relayed-mint.folder");
     let cid = String::from_str(
         &t.env,
@@ -329,6 +428,8 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
     t.client().claim_folder(&owner, &name);
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
 
     authorize_owner(
         &t,
@@ -348,7 +449,7 @@ fn test_relayed_mint_portfolio_with_owner_auth_entry() {
 #[test]
 fn test_relayed_claim_folder_with_expired_auth_entry_fails() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let name = String::from_str(&t.env, "expired.folder");
 
     // Auth entry signed for a ledger window that has already passed.
@@ -369,7 +470,7 @@ fn test_relayed_claim_folder_with_expired_auth_entry_fails() {
 #[test]
 fn test_relayed_mint_portfolio_with_expired_auth_entry_fails() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let name = String::from_str(&t.env, "expired-mint.folder");
     let cid = String::from_str(
         &t.env,
@@ -377,6 +478,8 @@ fn test_relayed_mint_portfolio_with_expired_auth_entry_fails() {
     );
 
     t.client().claim_folder(&owner, &name);
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
 
     authorize_owner(
         &t,
@@ -395,7 +498,7 @@ fn test_relayed_mint_portfolio_with_expired_auth_entry_fails() {
 #[test]
 fn test_relayed_claim_folder_with_wrong_args_auth_entry_fails() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let signed_name = String::from_str(&t.env, "signed.folder");
     let submitted_name = String::from_str(&t.env, "swapped.folder");
 
@@ -416,7 +519,7 @@ fn test_relayed_claim_folder_with_wrong_args_auth_entry_fails() {
 #[test]
 fn test_relayed_mint_portfolio_with_wrong_args_auth_entry_fails() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let name = String::from_str(&t.env, "wrong-args-mint.folder");
     let signed_cid = String::from_str(
         &t.env,
@@ -428,6 +531,8 @@ fn test_relayed_mint_portfolio_with_wrong_args_auth_entry_fails() {
     );
 
     t.client().claim_folder(&owner, &name);
+    t.client()
+        .register_template(&t.admin, &1u32, &template_uri(&t.env));
 
     // Owner signed for `signed_cid`; the relayer submits a different CID.
     authorize_owner(
@@ -446,7 +551,7 @@ fn test_relayed_mint_portfolio_with_wrong_args_auth_entry_fails() {
 #[test]
 fn test_relayed_claim_folder_without_owner_auth_fails() {
     let t = TestEnv::new();
-    let owner = Address::generate(&t.env);
+    let owner = relay_owner(&t);
     let relayer = Address::generate(&t.env);
     let name = String::from_str(&t.env, "no-auth.folder");
 
@@ -707,16 +812,30 @@ fn test_get_missing_portfolio_rejected() {
 }
 
 // ── Archival and restore behaviour of persistent entries ─────────────────────
+//
+// Since protocol 23 the network restores archived entries automatically when a
+// transaction touches them, and SDK 23+ emulates that in tests (see
+// `soroban_sdk::_migrating::v23_archived_testing`). These tests therefore pin
+// the exact TTL each write sets and check that archival never frees a name,
+// template or portfolio: once restored, every invariant still holds.
 
-/// Advances the ledger far enough that every persistent entry written so far
-/// has expired, then asserts the entry is gone from the live ledger.
+impl TestEnv {
+    fn has_persistent(&self, key: &DataKey) -> bool {
+        self.env.as_contract(&self.contract_id, || {
+            self.env.storage().persistent().has(key)
+        })
+    }
+}
+
+/// Asserts the entry was written with the full persistent lifetime, then
+/// moves the ledger past it so the next access is an automatic restore.
 fn archive_persistent(t: &TestEnv, key: &DataKey) {
-    let live_until = t.env.ledger().sequence() + t.persistent_ttl(key);
-    t.env.ledger().set_sequence_number(live_until + 1);
-    assert!(
-        !t.has_persistent(key),
-        "persistent entry should be archived"
-    );
+    assert!(t.has_persistent(key));
+    assert_eq!(t.persistent_ttl(key), PERSISTENT_BUMP_AMOUNT);
+    let seq = t.env.ledger().sequence();
+    t.env
+        .ledger()
+        .set_sequence_number(seq + PERSISTENT_BUMP_AMOUNT + 1);
 }
 
 fn template_uri(env: &Env) -> String {
@@ -733,87 +852,48 @@ fn portfolio_cid(env: &Env) -> String {
     )
 }
 
-// The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
-// the requested lifetime exact.
-const _: () = assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400);
-const _: () = assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD);
-
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_folder_owner_archived_after_ttl() {
-    let t = TestEnv::new();
-    let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "archive.folder");
-
-    t.client().claim_folder(&user, &name);
-    let key = DataKey::FolderOwner(name.clone());
-    assert!(t.has_persistent(&key));
-
-    archive_persistent(&t, &key);
-
-    // The archived entry is not silently recreated: reads report it missing.
-    let res = t.client().try_get_folder(&name);
-    expect_contract_error(res, ContractError::FolderNotFound);
-    assert!(!t.has_persistent(&key));
+fn test_persistent_ttl_below_max_entry_ttl() {
+    // The host clamps `extend_ttl` to `max_entry_ttl`; staying below it keeps
+    // the requested lifetime exact.
+    const { assert!(PERSISTENT_BUMP_AMOUNT < 3_110_400) };
+    const { assert!(PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD) };
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_folder_owner_restore_prevents_reclaim() {
+fn test_folder_name_survives_archival() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
     let other = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "restore.folder");
+    let name = String::from_str(&t.env, "archive.folder");
 
     t.client().claim_folder(&user, &name);
-    let key = DataKey::FolderOwner(name.clone());
-    archive_persistent(&t, &key);
+    archive_persistent(&t, &DataKey::FolderOwner(name.clone()));
 
-    // Restoring the entry (as `stellar contract restore` does) brings the
-    // claim back, so the name is still taken.
-    t.set_persistent(&key, &user);
+    // The restored claim still resolves and the name cannot be re-claimed.
     assert_eq!(t.client().get_folder(&name), user);
-
     let res = t.client().try_claim_folder(&other, &name);
     expect_contract_error(res, ContractError::FolderNameTaken);
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_owner_folder_archived_after_ttl() {
+fn test_identity_survives_archival() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
     let name = String::from_str(&t.env, "identity.folder");
 
     t.client().claim_folder(&user, &name);
-    let key = DataKey::OwnerFolder(user.clone());
-    assert!(t.has_persistent(&key));
+    archive_persistent(&t, &DataKey::OwnerFolder(user.clone()));
 
-    archive_persistent(&t, &key);
-
-    let res = t.client().try_get_identity(&user);
-    expect_contract_error(res, ContractError::FolderNotFound);
+    assert_eq!(t.client().get_identity(&user), name);
+    let res = t
+        .client()
+        .try_claim_folder(&user, &String::from_str(&t.env, "second.folder"));
+    expect_contract_error(res, ContractError::FolderAlreadyClaimed);
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_template_archived_after_ttl() {
-    let t = TestEnv::new();
-    let uri = template_uri(&t.env);
-
-    t.client().register_template(&t.admin, &1u32, &uri);
-    let key = DataKey::Template(1u32);
-    assert!(t.has_persistent(&key));
-
-    archive_persistent(&t, &key);
-
-    let res = t.client().try_get_template(&1u32);
-    expect_contract_error(res, ContractError::TemplateNotFound);
-}
-
-#[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_template_restore_keeps_registration() {
+fn test_template_survives_archival() {
     let t = TestEnv::new();
     let uri = template_uri(&t.env);
 
@@ -831,61 +911,30 @@ fn test_template_restore_keeps_registration() {
     );
 
     assert_eq!(t.client().get_template(&1u32).metadata_uri, uri);
-    // Re-registering a restored template is still rejected.
     let res = t.client().try_register_template(&t.admin, &1u32, &uri);
     expect_contract_error(res, ContractError::TemplateAlreadyExists);
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_template_list_archived_after_ttl() {
+fn test_template_list_survives_archival() {
     let t = TestEnv::new();
-    let uri = template_uri(&t.env);
-
-    t.client().register_template(&t.admin, &1u32, &uri);
-    let key = DataKey::TemplateList;
-    assert!(t.has_persistent(&key));
-
-    archive_persistent(&t, &key);
-
-    // A missing list degrades to empty rather than trapping.
-    assert_eq!(t.client().list_templates().len(), 0);
-}
-
-#[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_portfolio_archived_after_ttl() {
-    let t = TestEnv::new();
-    let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "nft.folder");
-
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
-    t.client().claim_folder(&user, &name);
-    t.client()
-        .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    archive_persistent(&t, &DataKey::TemplateList);
 
-    let key = DataKey::Portfolio(user.clone());
-    assert!(t.has_persistent(&key));
-
-    archive_persistent(&t, &key);
-
-    let res = t.client().try_get_portfolio(&user);
-    expect_contract_error(res, ContractError::PortfolioNotFound);
-    assert!(!t.client().verify_portfolio(&user));
+    assert_eq!(t.client().list_templates(), soroban_sdk::vec![&t.env, 1u32]);
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_portfolio_restore_prevents_remint() {
+fn test_portfolio_survives_archival() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "remint.folder");
     let cid = portfolio_cid(&t.env);
 
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
-    t.client().claim_folder(&user, &name);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "nft.folder"));
     t.client().mint_portfolio(&user, &1u32, &cid);
 
     let key = DataKey::Portfolio(user.clone());
@@ -902,29 +951,25 @@ fn test_portfolio_restore_prevents_remint() {
     );
 
     assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    assert!(t.client().verify_portfolio(&user));
     let res = t.client().try_mint_portfolio(&user, &1u32, &cid);
     expect_contract_error(res, ContractError::PortfolioAlreadyMinted);
 }
 
 #[test]
-#[ignore = "#182: the test host keeps expired persistent entries readable, so archival cannot be observed this way"]
-fn test_user_template_archived_after_ttl() {
+fn test_user_template_survives_archival() {
     let t = TestEnv::new();
     let user = Address::generate(&t.env);
-    let name = String::from_str(&t.env, "assigned.folder");
 
     t.client()
         .register_template(&t.admin, &1u32, &template_uri(&t.env));
-    t.client().claim_folder(&user, &name);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "assigned.folder"));
     t.client()
         .mint_portfolio(&user, &1u32, &portfolio_cid(&t.env));
+    archive_persistent(&t, &DataKey::UserTemplate(user.clone()));
 
-    let key = DataKey::UserTemplate(user.clone());
-    assert!(t.has_persistent(&key));
-
-    archive_persistent(&t, &key);
-
-    assert!(!t.has_persistent(&key));
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
 }
 
 #[test]
@@ -977,14 +1022,14 @@ fn test_duplicate_admin_add_rejected() {
     let new_admin = Address::generate(&t.env);
 
     add_admin(&t, &t.admin, &new_admin);
-    let res = try_add_admin(&t, &t.admin, &new_admin);
+    let res = try_admin_change(&t, &t.admin, AdminOp::Add, &new_admin);
     expect_contract_error(res, ContractError::AdminAlreadyExists);
 }
 
 #[test]
 fn test_cannot_remove_last_admin() {
     let t = TestEnv::new();
-    let res = try_remove_admin(&t, &t.admin, &t.admin);
+    let res = try_admin_change(&t, &t.admin, AdminOp::Remove, &t.admin);
     expect_contract_error(res, ContractError::CannotRemoveLastAdmin);
 }
 
@@ -995,7 +1040,7 @@ fn test_remove_unknown_admin_rejected() {
     let unknown = Address::generate(&t.env);
 
     add_admin(&t, &t.admin, &new_admin);
-    let res = try_remove_admin(&t, &t.admin, &unknown);
+    let res = try_admin_change(&t, &t.admin, AdminOp::Remove, &unknown);
     expect_contract_error(res, ContractError::AdminNotFound);
 }
 
@@ -1215,7 +1260,7 @@ fn test_persistent_ttl_fits_network_max_entry_ttl() {
     t.client().claim_folder(&user, &name);
 
     // The requested extension is applied exactly, not clamped by the host.
-    let ttl = t.persistent_ttl(&DataKey::FolderOwner(name));
+    let ttl = t.persistent_ttl(&storage::folder_owner_key(&t.env, &name));
     assert_eq!(ttl, PERSISTENT_BUMP_AMOUNT);
 }
 
@@ -1230,9 +1275,98 @@ fn test_persistent_ttl_not_rebumped_above_threshold() {
     t.client().get_folder(&name);
     // Still above the threshold, so no rent is spent re-extending it.
     assert_eq!(
-        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        t.persistent_ttl(&storage::folder_owner_key(&t.env, &name)),
         PERSISTENT_BUMP_AMOUNT - 10 * DAY_IN_LEDGERS
     );
+}
+
+#[test]
+fn test_extend_owner_ttl_extends_all_owner_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    let name = String::from_str(&t.env, "ttl-owner.folder");
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    let cid = String::from_str(
+        &t.env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    );
+
+    t.client().register_template(&t.admin, &1u32, &uri);
+    t.client().claim_folder(&user, &name);
+    t.client().set_user_template(&user, &1u32);
+    t.client().mint_portfolio(&user, &1u32, &cid);
+
+    let keys = [
+        DataKey::OwnerFolder(user.clone()),
+        DataKey::FolderOwner(name.clone()),
+        DataKey::UserTemplate(user.clone()),
+        DataKey::Portfolio(user.clone()),
+    ];
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    for key in keys.iter() {
+        assert!(t.persistent_ttl(key) < PERSISTENT_BUMP_AMOUNT);
+    }
+
+    let extended = t.client().extend_owner_ttl(&user);
+    assert_eq!(extended, 4);
+    for key in keys.iter() {
+        assert_eq!(t.persistent_ttl(key), PERSISTENT_BUMP_AMOUNT);
+    }
+
+    // Data is untouched.
+    assert_eq!(t.client().get_identity(&user), name);
+    assert_eq!(t.client().get_user_template(&user), Some(1u32));
+    assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+}
+
+#[test]
+fn test_extend_owner_ttl_skips_missing_keys() {
+    let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    assert_eq!(t.client().extend_owner_ttl(&user), 0);
+
+    let name = String::from_str(&t.env, "ttl-partial.folder");
+    t.client().claim_folder(&user, &name);
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert_eq!(t.client().extend_owner_ttl(&user), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::OwnerFolder(user.clone())),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::FolderOwner(name)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+}
+
+#[test]
+fn test_extend_template_ttl_extends_template_keys() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37y42yh43acwyegety",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+
+    t.advance_ledgers(40 * DAY_IN_LEDGERS);
+    assert!(t.persistent_ttl(&DataKey::Template(1)) < PERSISTENT_BUMP_AMOUNT);
+
+    assert_eq!(t.client().extend_template_ttl(&1u32), 2);
+    assert_eq!(
+        t.persistent_ttl(&DataKey::Template(1)),
+        PERSISTENT_BUMP_AMOUNT
+    );
+    assert_eq!(
+        t.persistent_ttl(&DataKey::TemplateList),
+        PERSISTENT_BUMP_AMOUNT
+    );
+
+    // Missing template is skipped without an error.
+    assert_eq!(t.client().extend_template_ttl(&404u32), 1);
 }
 
 // ── Template storage ────────────────────────────────────────────────────────
@@ -1284,6 +1418,172 @@ fn test_template_registry_is_bounded() {
     assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
 }
 
+// ── Golden event fixtures ───────────────────────────────────────────────────
+
+/// Fixed addresses keep the golden XDR fixtures deterministic across runs.
+const GOLDEN_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const GOLDEN_OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+const GOLDEN_NEW_ADMIN: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACZ7M";
+
+fn golden_env() -> (Env, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FolderContract, ());
+    let admin = Address::from_str(&env, GOLDEN_ADMIN);
+    let owner = Address::from_str(&env, GOLDEN_OWNER);
+    let new_admin = Address::from_str(&env, GOLDEN_NEW_ADMIN);
+    (env, contract_id, admin, owner, new_admin)
+}
+
+fn golden_cid(env: &Env) -> String {
+    String::from_str(
+        env,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    )
+}
+
+fn golden_uri(env: &Env) -> String {
+    String::from_str(
+        env,
+        "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG/1.json",
+    )
+}
+
+/// Triggers every contract event and returns `(topic, topics_xdr_b64, data_xdr_b64)`.
+fn golden_events() -> std::vec::Vec<(std::string::String, std::string::String, std::string::String)> {
+    let (env, contract_id, admin, owner, new_admin) = golden_env();
+    let client = FolderContractClient::new(&env, &contract_id);
+    let cid = golden_cid(&env);
+    let uri = golden_uri(&env);
+
+    client.initialize(&admin);
+    client.add_admin(&admin, &new_admin);
+    client.remove_admin(&admin, &new_admin);
+    client.claim_folder(&owner, &String::from_str(&env, "golden.folder"));
+    client.register_template(&admin, &1, &uri);
+    client.set_user_template(&owner, &1);
+    client.mint_portfolio(&owner, &1, &cid);
+    client.update_portfolio(&owner, &cid);
+
+    let mut out = std::vec::Vec::new();
+    for (topics, data) in env.events().all().filter_by_contract(&contract_id) {
+        let topic = topics.get(0).unwrap();
+        let topic_str = match topic {
+            soroban_sdk::xdr::ScVal::Symbol(sym) => {
+                std::string::String::from_utf8(sym.0.to_vec()).unwrap()
+            }
+            _ => panic!("unexpected topic type"),
+        };
+        out.push((
+            topic_str,
+            base64_encode(&topics.to_xdr(&env)),
+            base64_encode(&data.to_xdr(&env)),
+        ));
+    }
+    out
+}
+
+fn base64_encode(bytes: &soroban_sdk::Bytes) -> std::string::String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = std::string::String::new();
+    let mut chunk = [0u8; 3];
+    let mut n = 0;
+    for byte in bytes.iter() {
+        chunk[n] = byte;
+        n += 1;
+        if n == 3 {
+            out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+            out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+            out.push(ALPHABET[(((chunk[1] & 0x0f) << 2) | (chunk[2] >> 6)) as usize] as char);
+            out.push(ALPHABET[(chunk[2] & 0x3f) as usize] as char);
+            n = 0;
+        }
+    }
+    if n == 1 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[((chunk[0] & 0x03) << 4) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if n == 2 {
+        out.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        out.push(ALPHABET[(((chunk[0] & 0x03) << 4) | (chunk[1] >> 4)) as usize] as char);
+        out.push(ALPHABET[((chunk[1] & 0x0f) << 2) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn fixture_path(topic: &str) -> std::string::String {
+    std::format!("{}/fixtures/events/{}.json", env!("CARGO_MANIFEST_DIR"), topic)
+}
+
+fn fixture_json(topics_b64: &str, data_b64: &str, decoded: &str) -> std::string::String {
+    std::format!(
+        "{{\n  \"topics_xdr_b64\": \"{}\",\n  \"data_xdr_b64\": \"{}\",\n  \"decoded\": {}\n}}\n",
+        topics_b64,
+        data_b64,
+        decoded
+    )
+}
+
+/// Regenerates `fixtures/events/<topic>.json`. Run with
+/// `UPDATE_EVENT_FIXTURES=1 cargo test golden_event_fixtures` to refresh them.
+#[test]
+fn golden_event_fixtures() {
+    let update = std::env::var("UPDATE_EVENT_FIXTURES").is_ok();
+    let events = golden_events();
+    assert_eq!(events.len(), 8, "every event topic must be covered");
+
+    for (topic, topics_b64, data_b64) in events {
+        let decoded = std::format!(
+            "{{\"topics_xdr_b64\": \"{}\", \"data_xdr_b64\": \"{}\"}}",
+            topics_b64, data_b64
+        );
+        let expected = fixture_json(&topics_b64, &data_b64, &decoded);
+        let path = fixture_path(&topic);
+        if update {
+            std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
+            std::fs::write(&path, expected.as_bytes()).unwrap();
+        } else {
+            let actual = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("missing fixture {path}; run UPDATE_EVENT_FIXTURES=1"));
+            assert_eq!(actual, expected, "fixture drift for {topic}");
+        }
+    }
+}
+
+/// Round-trips every committed fixture back through XDR decoding.
+#[test]
+fn golden_event_fixtures_round_trip() {
+    let env = Env::default();
+    let dir = std::format!("{}/fixtures/events", env!("CARGO_MANIFEST_DIR"));
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let topics_b64 = extract_json_field(&raw, "topics_xdr_b64");
+        let data_b64 = extract_json_field(&raw, "data_xdr_b64");
+        let topics = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &topics_b64).unwrap();
+        let data = soroban_sdk::xdr::ScVal::from_xdr_base64(&env, &data_b64).unwrap();
+        assert_eq!(topics.to_xdr_base64(&env), topics_b64);
+        assert_eq!(data.to_xdr_base64(&env), data_b64);
+        count += 1;
+    }
+    assert_eq!(count, 8, "expected one fixture per event topic");
+}
+
+fn extract_json_field(raw: &str, field: &str) -> std::string::String {
+    let key = std::format!("\"{field}\": \"");
+    let start = raw.find(&key).unwrap_or_else(|| panic!("missing {field}")) + key.len();
+    let rest = &raw[start..];
+    let end = rest.find('"').unwrap();
+    std::string::String::from(&rest[..end])
+}
+
 // ── Admin management ────────────────────────────────────────────────────────
 
 #[test]
@@ -1324,7 +1624,7 @@ fn test_admin_changes_emit_events() {
                 op_id: 0,
                 target: new_admin.clone(),
             }
-            .to_xdr(&t.env, &t.contract_id),
+            .to_xdr(&t.env, &t.contract_id)
         ]
     );
 
@@ -1342,13 +1642,35 @@ fn test_admin_changes_emit_events() {
                 op_id: 1,
                 target: t.admin.clone(),
             }
-            .to_xdr(&t.env, &t.contract_id),
+            .to_xdr(&t.env, &t.contract_id)
         ]
     );
     assert_eq!(
         t.client().get_admins(),
         soroban_sdk::vec![&t.env, new_admin]
     );
+}
+
+#[test]
+fn test_admin_change_timelock() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+    let op_id = t
+        .client()
+        .queue_admin_change(&t.admin, &AdminOp::Add, &new_admin);
+
+    let seq = t.env.ledger().sequence();
+    t.env
+        .ledger()
+        .set_sequence_number(seq + ADMIN_TIMELOCK_LEDGERS - 1);
+    let res = t.client().try_execute_admin_change(&t.admin, &op_id);
+    expect_contract_error(res, ContractError::AdminChangeNotReady);
+
+    t.client().cancel_admin_change(&t.admin, &op_id);
+    advance_past_timelock(&t);
+    let res = t.client().try_execute_admin_change(&t.admin, &op_id);
+    expect_contract_error(res, ContractError::AdminChangeNotFound);
+    assert_eq!(t.client().get_admins().len(), 1);
 }
 
 #[test]
@@ -1359,7 +1681,7 @@ fn test_admin_list_is_bounded() {
     }
     assert_eq!(t.client().get_admins().len(), MAX_ADMINS);
 
-    let res = try_add_admin(&t, &t.admin, &Address::generate(&t.env));
+    let res = try_admin_change(&t, &t.admin, AdminOp::Add, &Address::generate(&t.env));
     expect_contract_error(res, ContractError::TooManyAdmins);
 }
 
@@ -1370,9 +1692,9 @@ fn test_removed_admin_loses_admin_rights() {
     add_admin(&t, &t.admin, &other);
     remove_admin(&t, &t.admin, &t.admin);
 
-    let res = try_add_admin(&t, &t.admin, &Address::generate(&t.env));
+    let res = try_admin_change(&t, &t.admin, AdminOp::Add, &Address::generate(&t.env));
     expect_contract_error(res, ContractError::Unauthorized);
-    let res = try_remove_admin(&t, &t.admin, &other);
+    let res = try_admin_change(&t, &t.admin, AdminOp::Remove, &other);
     expect_contract_error(res, ContractError::Unauthorized);
 }
 
@@ -1453,6 +1775,14 @@ fn test_set_user_template_updates_minted_portfolio() {
 const VALID_CIDV1_RAW: &str = "bafkreicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV1_DAG_PB: &str = "bafybeicu2xn7aesolgx3umlcnw3tozt4xibpu42wa2i34dg3bz6kxgy7y4";
 const VALID_CIDV0: &str = "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce";
+/// Real CIDv0 vectors (sha2-256 multihash, base58btc).
+const VALID_CIDV0_VECTORS: [&str; 5] = [
+    "QmU3p6RJzZsp4ZTsi6JWeCDxD3JPinVgsZB2uRUS6APEce",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH",
+    "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o",
+    "QmZULkCELmmk5XNfCgTnCyFgAVxBRBXyDHGGMVoLFLiXEN",
+];
 
 #[test]
 fn test_folder_label_rules() {
@@ -1547,6 +1877,44 @@ fn test_cid_format_rules() {
 }
 
 #[test]
+fn test_cidv0_multihash_vectors() {
+    let (t, user) = minted_env();
+    for good in VALID_CIDV0_VECTORS {
+        let cid = String::from_str(&t.env, good);
+        t.client().update_portfolio(&user, &cid);
+        assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
+    }
+    // Corrupted vectors: changed digest byte, wrong multihash prefix, and
+    // characters outside the base58btc alphabet.
+    let mut corrupted: std::vec::Vec<std::string::String> = std::vec::Vec::new();
+    for good in VALID_CIDV0_VECTORS {
+        let mut chars: std::vec::Vec<char> = good.chars().collect();
+        let last = chars.len() - 1;
+        chars[last] = if chars[last] == 'a' { 'b' } else { 'a' };
+        corrupted.push(chars.into_iter().collect());
+    }
+    // Decodes to a multihash whose function code is not sha2-256.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5p",
+    ));
+    // Decodes to a multihash whose digest length byte is not 0x20.
+    corrupted.push(std::string::String::from(
+        "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5n",
+    ));
+    // Invalid base58btc characters (`0`, `O`, `I`, `l`).
+    corrupted.push(std::string::String::from("Qm") + &"0".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"O".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"I".repeat(44));
+    corrupted.push(std::string::String::from("Qm") + &"l".repeat(44));
+    for bad in corrupted {
+        let res = t
+            .client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, &bad));
+        expect_contract_error(res, ContractError::InvalidCID);
+    }
+}
+
+#[test]
 fn test_metadata_uri_format_rules() {
     let t = TestEnv::new();
     let with = |suffix: &str| std::string::String::from("ipfs://") + suffix;
@@ -1602,36 +1970,10 @@ fn test_each_write_requires_the_right_signer() {
     assert_single_auth(&t, &t.admin, "initialize");
 
     let other_admin = Address::generate(&t.env);
-    let op_id = t
-        .client()
-        .queue_admin_change(&t.admin, &AdminOp::Add, &other_admin);
-    assert_single_auth(&t, &t.admin, "queue_admin_change");
-    t.env
-        .ledger()
-        .set_sequence_number(t.env.ledger().sequence() + ADMIN_TIMELOCK_LEDGERS);
-    t.client().execute_admin_change(&t.admin, &op_id);
+    t.client().add_admin(&t.admin, &other_admin);
     assert_single_auth(&t, &t.admin, "execute_admin_change");
-    remove_admin(&t, &other_admin, &t.admin);
-    assert_single_auth(&t, &other_admin, "execute_admin_change");
-    let uri = String::from_str(
-        &t.env,
-        &(std::string::String::from("ipfs://") + VALID_CIDV1_RAW),
-    );
-    t.client().register_template(&other_admin, &1u32, &uri);
-    assert_single_auth(&t, &other_admin, "register_template");
-
-    let user = Address::generate(&t.env);
-    t.client()
-        .claim_folder(&user, &String::from_str(&t.env, "signer.folder"));
-    assert_single_auth(&t, &user, "claim_folder");
-    t.client().set_user_template(&user, &1u32);
-    assert_single_auth(&t, &user, "set_user_template");
-    t.client()
-        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV1_RAW));
-    assert_single_auth(&t, &user, "mint_portfolio");
-    t.client()
-        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV0));
-    assert_single_auth(&t, &user, "update_portfolio");
+    t.client().remove_admin(&other_admin, &t.admin);
+    assert_single_auth(&t, &other_admin, "remove_admin");
 }
 
 #[test]
@@ -1655,7 +1997,7 @@ fn test_writes_fail_without_signature() {
         .client()
         .try_register_template(&t.admin, &2u32, &uri)
         .is_err());
-    assert!(try_add_admin(&t, &t.admin, &Address::generate(&t.env)).is_err());
+    assert!(try_admin_change(&t, &t.admin, AdminOp::Add, &Address::generate(&t.env)).is_err());
     assert_eq!(
         t.client().get_portfolio(&user).ipfs_cid,
         String::from_str(&t.env, VALID_CIDV1_RAW)
@@ -1959,10 +2301,13 @@ fn budget_report() {
     t.client().initialize(&t.admin);
     report(&t, "initialize");
     let other = Address::generate(&t.env);
-    add_admin(&t, &t.admin, &other);
-    report(&t, "add_admin");
-    remove_admin(&t, &t.admin, &other);
-    report(&t, "remove_admin");
+    let op_id = t
+        .client()
+        .queue_admin_change(&t.admin, &AdminOp::Add, &other);
+    report(&t, "queue_admin_change");
+    advance_past_timelock(&t);
+    t.client().execute_admin_change(&t.admin, &op_id);
+    report(&t, "execute_admin_change");
     let uri = String::from_str(
         &t.env,
         &(std::string::String::from("ipfs://") + VALID_CIDV0),
@@ -1983,327 +2328,180 @@ fn budget_report() {
     report(&t, "update_portfolio");
 }
 
-// ── Atomic onboarding (claim_and_mint) ──────────────────────────────────────
+#[test]
+fn test_address_blocklist_write_paths_and_unblock() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
 
-mod onboarding {
-    use super::*;
-    use crate::events::{FolderClaimed, PortfolioMinted};
-
-    fn setup() -> (TestEnv, Address) {
-        let t = TestEnv::new();
+    let user = Address::generate(&t.env);
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
         t.client()
-            .register_template(&t.admin, &1u32, &template_uri(&t.env));
-        let owner = Address::generate(&t.env);
-        (t, owner)
-    }
+            .try_claim_folder(&user, &String::from_str(&t.env, "blocked.folder")),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .claim_folder(&user, &String::from_str(&t.env, "blocked.folder"));
 
-    fn name(t: &TestEnv, s: &str) -> String {
-        String::from_str(&t.env, s)
-    }
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .mint_portfolio(&user, &1u32, &String::from_str(&t.env, VALID_CIDV0));
 
-    /// No identity, portfolio or template-selection key exists for `owner`,
-    /// and `folder_name` is unowned.
-    fn assert_untouched(t: &TestEnv, owner: &Address, folder_name: &String) {
-        assert!(!t.has_persistent(&DataKey::FolderOwner(folder_name.clone())));
-        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
-        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
-        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
-    }
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client()
+            .try_update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW)),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client()
+        .update_portfolio(&user, &String::from_str(&t.env, VALID_CIDV1_RAW));
 
-    #[test]
-    fn claim_and_mint_happy_path_emits_claim_then_mint() {
-        let (t, owner) = setup();
-        let folder = name(&t, "onboard.folder");
-        let cid = name(&t, VALID_CIDV1_RAW);
+    t.client().block_address(&t.admin, &user, &7u32);
+    expect_contract_error(
+        t.client().try_set_user_template(&user, &1u32),
+        ContractError::AddressBlocked,
+    );
+    t.client().unblock_address(&t.admin, &user);
+    t.client().set_user_template(&user, &1u32);
 
-        t.client().claim_and_mint(&owner, &folder, &1u32, &cid);
-
-        assert_eq!(
-            t.env.events().all().filter_by_contract(&t.contract_id),
-            [
-                FolderClaimed {
-                    owner: owner.clone(),
-                    folder_name: folder.clone(),
-                    fee_paid: 0,
-                }
-                .to_xdr(&t.env, &t.contract_id),
-                PortfolioMinted {
-                    owner: owner.clone(),
-                    template_id: 1,
-                    ipfs_cid: cid.clone(),
-                }
-                .to_xdr(&t.env, &t.contract_id),
-            ]
-        );
-        assert_eq!(t.client().get_folder(&folder), owner);
-        assert_eq!(t.client().get_identity(&owner), folder);
-        let nft = t.client().get_portfolio(&owner);
-        assert_eq!(nft.template_id, 1);
-        assert_eq!(nft.ipfs_cid, cid);
-        assert_eq!(t.client().get_user_template(&owner), Some(1));
-    }
-
-    #[test]
-    fn claim_and_mint_requires_exactly_one_owner_signature() {
-        let (t, owner) = setup();
-        t.client().claim_and_mint(
-            &owner,
-            &name(&t, "signed.folder"),
-            &1u32,
-            &name(&t, VALID_CIDV0),
-        );
-        assert_single_auth(&t, &owner, "claim_and_mint");
-    }
-
-    #[test]
-    fn claim_and_mint_fails_without_signature() {
-        let (t, owner) = setup();
-        let folder = name(&t, "nosig.folder");
-        t.env.set_auths(&[]);
-        assert!(t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0))
-            .is_err());
-        assert_untouched(&t, &owner, &folder);
-    }
-
-    #[test]
-    fn bad_name_leaves_no_state() {
-        let (t, owner) = setup();
-        let folder = name(&t, "Bad Name.folder");
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0));
-        expect_contract_error(res, ContractError::InvalidFolderName);
-        assert_untouched(&t, &owner, &folder);
-    }
-
-    #[test]
-    fn taken_name_leaves_no_state() {
-        let (t, owner) = setup();
-        let folder = name(&t, "taken.folder");
-        let first = Address::generate(&t.env);
-        t.client().claim_folder(&first, &folder);
-
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, VALID_CIDV0));
-        expect_contract_error(res, ContractError::FolderNameTaken);
-        assert_eq!(t.client().get_folder(&folder), first);
-        assert!(!t.has_persistent(&DataKey::OwnerFolder(owner.clone())));
-        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
-        assert!(!t.has_persistent(&DataKey::UserTemplate(owner.clone())));
-    }
-
-    #[test]
-    fn bad_cid_leaves_no_state() {
-        let (t, owner) = setup();
-        let folder = name(&t, "badcid.folder");
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &1u32, &name(&t, "not-a-cid"));
-        expect_contract_error(res, ContractError::InvalidCID);
-        assert_untouched(&t, &owner, &folder);
-    }
-
-    #[test]
-    fn unknown_template_leaves_no_state() {
-        let (t, owner) = setup();
-        let folder = name(&t, "notmpl.folder");
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &7u32, &name(&t, VALID_CIDV0));
-        expect_contract_error(res, ContractError::TemplateNotFound);
-        assert_untouched(&t, &owner, &folder);
-
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &folder, &0u32, &name(&t, VALID_CIDV0));
-        expect_contract_error(res, ContractError::InvalidTemplateID);
-        assert_untouched(&t, &owner, &folder);
-    }
-
-    #[test]
-    fn owner_with_a_folder_is_rejected() {
-        let (t, owner) = setup();
-        t.client().claim_folder(&owner, &name(&t, "first.folder"));
-        let second = name(&t, "second.folder");
-        let res = t
-            .client()
-            .try_claim_and_mint(&owner, &second, &1u32, &name(&t, VALID_CIDV0));
-        expect_contract_error(res, ContractError::FolderAlreadyClaimed);
-        assert!(!t.has_persistent(&DataKey::FolderOwner(second)));
-        assert!(!t.has_persistent(&DataKey::Portfolio(owner.clone())));
-    }
-
-    #[test]
-    fn claim_and_mint_requires_initialization() {
-        let t = uninitialized_env();
-        let owner = Address::generate(&t.env);
-        let res = t.client().try_claim_and_mint(
-            &owner,
-            &name(&t, "early.folder"),
-            &1u32,
-            &name(&t, VALID_CIDV0),
-        );
-        expect_contract_error(res, ContractError::NotInitialized);
-    }
+    expect_contract_error(
+        t.client().try_block_address(&t.admin, &t.admin, &1u32),
+        ContractError::CannotBlockAdmin,
+    );
 }
 
-// ── Portfolio CID history ───────────────────────────────────────────────────
+#[test]
+fn test_portfolio_flag_set_clear_and_persist_across_update() {
+    let t = TestEnv::new();
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    t.client().register_template(&t.admin, &1u32, &uri);
+    let owner = Address::generate(&t.env);
+    t.client()
+        .claim_folder(&owner, &String::from_str(&t.env, "flagged.folder"));
+    t.client()
+        .mint_portfolio(&owner, &1u32, &String::from_str(&t.env, VALID_CIDV0));
 
-mod cid_history {
-    use super::*;
-    use crate::constants::MAX_CID_HISTORY;
+    t.client().set_portfolio_flag(&t.admin, &owner, &1u32, &9u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
+    t.client()
+        .update_portfolio(&owner, &String::from_str(&t.env, VALID_CIDV1_RAW));
+    assert_eq!(t.client().get_portfolio_flag(&owner), 1u32);
 
-    /// A valid, distinct base32 CIDv1 for each `i`: `VALID_CIDV1_RAW` with the
-    /// last two characters replaced by base32 digits of `i`.
-    fn cid(t: &TestEnv, i: u32) -> String {
-        const B32: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
-        let mut s = std::string::String::from(&VALID_CIDV1_RAW[..VALID_CIDV1_RAW.len() - 2]);
-        s.push(B32[(i / 32 % 32) as usize] as char);
-        s.push(B32[(i % 32) as usize] as char);
-        String::from_str(&t.env, &s)
-    }
-
-    /// Minted owner whose history holds `cid(0)` at timestamp 1_000.
-    fn minted(t: &TestEnv) -> Address {
-        let owner = Address::generate(&t.env);
-        t.env.ledger().set_timestamp(1_000);
-        t.client()
-            .register_template(&t.admin, &1u32, &template_uri(&t.env));
-        t.client()
-            .claim_folder(&owner, &String::from_str(&t.env, "history.folder"));
-        t.client().mint_portfolio(&owner, &1u32, &cid(t, 0));
-        owner
-    }
-
-    #[test]
-    fn unminted_owner_has_empty_history() {
-        let t = TestEnv::new();
-        let owner = Address::generate(&t.env);
-        assert_eq!(t.client().get_portfolio_history(&owner).len(), 0);
-    }
-
-    #[test]
-    fn mint_records_first_entry() {
-        let t = TestEnv::new();
-        let owner = minted(&t);
-        let history = t.client().get_portfolio_history(&owner);
-        assert_eq!(
-            history,
-            soroban_sdk::vec![
-                &t.env,
-                CidEntry {
-                    cid: cid(&t, 0),
-                    at: 1_000
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn claim_and_mint_records_first_entry() {
-        let t = TestEnv::new();
-        t.client()
-            .register_template(&t.admin, &1u32, &template_uri(&t.env));
-        let owner = Address::generate(&t.env);
-        t.client().claim_and_mint(
+    t.client().set_portfolio_flag(&t.admin, &owner, &0u32, &10u32);
+    assert_eq!(t.client().get_portfolio_flag(&owner), 0u32);
+    expect_contract_error(
+        t.client().try_set_portfolio_flag(
+            &Address::generate(&t.env),
             &owner,
-            &String::from_str(&t.env, "atomic.folder"),
+            &2u32,
             &1u32,
-            &cid(&t, 5),
+        ),
+        ContractError::Unauthorized,
+    );
+}
+
+#[test]
+fn test_template_submission_lifecycle_cap_and_usage() {
+    let t = TestEnv::new();
+    let designer = Address::generate(&t.env);
+    let uri = String::from_str(
+        &t.env,
+        "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/template.json",
+    );
+    let submission_id = t.client().submit_template(&designer, &uri);
+    t.client()
+        .approve_submission(&t.admin, &submission_id, &1u32);
+    assert_eq!(
+        t.client().get_template_designer(&1u32),
+        Some(designer.clone())
+    );
+    let duplicate_id = t.client().submit_template(
+        &designer,
+        &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/duplicate.json",
+        ),
+    );
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &duplicate_id, &1u32),
+        ContractError::TemplateAlreadyExists,
+    );
+
+    let rejected_id = t
+        .client()
+        .submit_template(&designer, &String::from_str(
+            &t.env,
+            "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/template.json",
+        ));
+    t.client().reject_submission(&t.admin, &rejected_id, &3u32);
+    expect_contract_error(
+        t.client()
+            .try_approve_submission(&t.admin, &rejected_id, &2u32),
+        ContractError::SubmissionNotFound,
+    );
+
+    for i in 0u32..49u32 {
+        let uri = String::from_str(
+            &t.env,
+            &std::format!(
+                "ipfs://bafkreic43yhrfghud56rzc4qpi3jskt2kezclitblplogb57dkiutmdlia/{}.json",
+                i
+            ),
         );
-        let history = t.client().get_portfolio_history(&owner);
-        assert_eq!(history.len(), 1);
-        assert_eq!(history.get(0).unwrap().cid, cid(&t, 5));
+        t.client().submit_template(&designer, &uri);
     }
+    expect_contract_error(
+        t.client().try_submit_template(
+            &designer,
+            &String::from_str(
+                &t.env,
+                "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/cap.json",
+            ),
+        ),
+        ContractError::SubmissionQueueFull,
+    );
 
-    #[test]
-    fn twelve_updates_keep_the_last_ten_in_order() {
-        let t = TestEnv::new();
-        let owner = minted(&t);
-        for i in 1..=12u32 {
-            t.env.ledger().set_timestamp(1_000 + i as u64 * 60);
-            t.client().update_portfolio(&owner, &cid(&t, i));
-            assert!(t.client().get_portfolio_history(&owner).len() <= MAX_CID_HISTORY);
-        }
-
-        // 13 CIDs were written (mint + 12 updates); the last 10 remain.
-        let history = t.client().get_portfolio_history(&owner);
-        assert_eq!(history.len(), MAX_CID_HISTORY);
-        for (pos, entry) in history.iter().enumerate() {
-            let i = pos as u32 + 3;
-            assert_eq!(entry.cid, cid(&t, i));
-            assert_eq!(entry.at, 1_000 + i as u64 * 60);
-        }
-        // The newest history entry is always the current CID.
-        assert_eq!(
-            history.last().unwrap().cid,
-            t.client().get_portfolio(&owner).ipfs_cid
-        );
+    let owner1 = Address::generate(&t.env);
+    let owner2 = Address::generate(&t.env);
+    let owner3 = Address::generate(&t.env);
+    for (owner, name) in [
+        (owner1.clone(), "usage1.folder"),
+        (owner2.clone(), "usage2.folder"),
+        (owner3.clone(), "usage3.folder"),
+    ] {
+        t.client()
+            .claim_folder(&owner, &String::from_str(&t.env, name));
+        t.client().set_user_template(&owner, &1u32);
     }
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
+    t.client().set_user_template(&owner1, &1u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 3u32);
 
-    #[test]
-    fn rejected_update_does_not_append() {
-        let t = TestEnv::new();
-        let owner = minted(&t);
-        let res = t
-            .client()
-            .try_update_portfolio(&owner, &String::from_str(&t.env, "bad"));
-        expect_contract_error(res, ContractError::InvalidCID);
-        assert_eq!(t.client().get_portfolio_history(&owner).len(), 1);
-    }
-
-    #[test]
-    fn history_follows_persistent_ttl_policy() {
-        let t = TestEnv::new();
-        let owner = minted(&t);
-        let key = DataKey::PortfolioHistory(owner.clone());
-        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
-
-        // A read below the threshold re-extends it, like every other entry.
-        t.advance_ledgers(PERSISTENT_BUMP_AMOUNT - PERSISTENT_LIFETIME_THRESHOLD + 1);
-        assert!(t.persistent_ttl(&key) < PERSISTENT_LIFETIME_THRESHOLD);
-        t.client().get_portfolio_history(&owner);
-        assert_eq!(t.persistent_ttl(&key), PERSISTENT_BUMP_AMOUNT);
-    }
-
-    /// Write-byte cost of `update_portfolio` with a near-empty vs. a full
-    /// history. Printed with `-- --nocapture`; the numbers are in the PR and
-    /// docs/STORAGE.md. The bound keeps a regression from going unnoticed.
-    #[test]
-    fn full_history_write_cost() {
-        let t = TestEnv::new();
-        let owner = minted(&t);
-
-        t.client().update_portfolio(&owner, &cid(&t, 1));
-        let small = t.env.cost_estimate().resources();
-
-        for i in 2..=MAX_CID_HISTORY + 1 {
-            t.client().update_portfolio(&owner, &cid(&t, i));
-        }
-        let full = t.env.cost_estimate().resources();
-        let history_xdr = {
-            use soroban_sdk::xdr::ToXdr;
-            t.client()
-                .get_portfolio_history(&owner)
-                .to_xdr(&t.env)
-                .len()
-        };
-        std::println!(
-            "CID_HISTORY update_portfolio write_bytes: 2-entry history={} full ({MAX_CID_HISTORY}) \
-             history={} delta={}; full history value XDR={history_xdr} bytes",
-            small.write_bytes,
-            full.write_bytes,
-            full.write_bytes - small.write_bytes,
-        );
-        // A full history changes the bytes written, never the entry count.
-        assert_eq!(full.write_entries, small.write_entries);
-        assert!(
-            full.write_bytes < 2_048,
-            "full-history update wrote {} bytes",
-            full.write_bytes
-        );
-    }
+    let uri2 = String::from_str(
+        &t.env,
+        "ipfs://bafkreibtrcmlf7jk35nxe3at537pcpocgdjplvoi37u42yh43acwyegety/second.json",
+    );
+    t.client().register_template(&t.admin, &2u32, &uri2);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
+    t.client().set_user_template(&owner1, &2u32);
+    assert_eq!(t.client().get_template_usage(&1u32), 2u32);
+    assert_eq!(t.client().get_template_usage(&2u32), 1u32);
 }
