@@ -1,0 +1,13 @@
+{
+  "name": "indexer-contract",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "target": "dev",
+    "options": ["--platform=linux/amd64"]
+  },
+  "remoteUser": "builder",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "postCreateCommand": "make check"
+}
