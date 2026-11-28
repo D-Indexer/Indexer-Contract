@@ -83,7 +83,6 @@ pub fn get_admins(env: &Env) -> Vec<Address> {
         if let Some(admin) = env.storage().instance().get(&DataKey::AdminIndex(i)) {
             admins.push_back(admin);
         }
-        i += 1;
     }
     admins
 }

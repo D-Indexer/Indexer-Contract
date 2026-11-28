@@ -18,6 +18,9 @@ mod errors;
 mod events;
 mod identity_map;
 mod nft_mint;
+// Premium pricing and lease logic (#246, #248) lost its public entry points
+// in a merge; the modules are kept compiling until they are re-wired.
+#[allow(dead_code)]
 mod pricing;
 mod recovery;
 mod storage;
@@ -31,6 +34,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, ContractExecutable, Env, String, Vec};
 
 use crate::errors::ContractError;
+use crate::types::AdminOp;
 use crate::types::ClaimFee;
 use crate::types::Template;
 use crate::types::{AdminOp, PortfolioNFT};

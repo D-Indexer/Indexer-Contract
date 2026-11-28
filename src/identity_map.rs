@@ -164,6 +164,7 @@ fn claim(
 
 /// Extends the owner's lease by `periods` lease periods, counted from the
 /// current expiry. Allowed before expiry and during the grace period.
+#[allow(dead_code)] // entry point dropped in a merge, see lib.rs
 pub fn renew_folder(env: &Env, owner: &Address, periods: u32) -> Result<u64, ContractError> {
     require_owner(env, owner)?;
     if storage::is_blocked(env, owner) {
@@ -213,6 +214,7 @@ pub fn get_identity(env: &Env, owner: &Address) -> Result<String, ContractError>
     }
 }
 
+#[allow(dead_code)] // entry point dropped in a merge, see lib.rs
 pub fn get_folder_expiry(env: &Env, folder_name: &String) -> Option<u64> {
     storage::get_folder_expiry(env, folder_name)
 }
