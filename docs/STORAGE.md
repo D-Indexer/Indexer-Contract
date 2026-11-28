@@ -13,6 +13,10 @@
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner |
+| `Treasury` | instance | `Address` | 1 |
+| `TemplatePrice(u32)` | persistent | `TemplatePrice` | `MAX_TEMPLATES` = 256 |
+
+`tools/ledger-keys` prints the RPC `LedgerKey` for each of these.
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now

@@ -1,0 +1,11 @@
+[package]
+name = "ledger-keys"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+indexer-contract = { path = "../..", features = ["lib"] }
+# `testutils` provides an off-chain `Env` for converting `DataKey` to XDR.
+soroban-sdk = { version = "=25.3.1", features = ["testutils"] }

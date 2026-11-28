@@ -34,10 +34,10 @@ cargo-check:
 	cargo check --locked
 
 clippy:
-	cargo clippy --all-targets --locked -- -D warnings
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 test:
-	cargo test --locked
+	cargo test --workspace --locked
 
 # soroban-sdk >= 26 only builds wasm through the Stellar CLI.
 build-wasm:

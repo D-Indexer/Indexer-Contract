@@ -37,6 +37,7 @@ pub fn plan_mint_portfolio(
     validation::require_valid_template_id(template_id)?;
     validation::require_valid_ipfs_cid(ipfs_cid)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)?;
+    royalties::charge_on_switch(env, owner, template_id)?;
 
     Ok(MintPortfolioPlan {
         nft: PortfolioNFT {

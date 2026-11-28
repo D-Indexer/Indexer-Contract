@@ -145,6 +145,9 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
 | `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `set_treasury` | `admin: Address, treasury: Address` | `admin` (must be an admin) | `treas_set` | 2, 7 |
+| `set_template_price` | `admin: Address, template_id: u32, price: TemplatePrice` | `admin` (must be an admin) | `tmpl_price` | 2, 7, 17, 6, `InvalidRoyaltyShare` (20), `InvalidPrice` (21) |
+| `remove_template_price` | `admin: Address, template_id: u32` | `admin` (must be an admin) | `tmpl_price` | 2, 7, 17 |
 
 Notes:
 
@@ -285,6 +288,7 @@ that changes `src/events.rs` must update it.
 |---|---|
 | `src/lib.rs` | Public contract interface; delegates to the modules below |
 | `src/identity_map.rs`, `template_registry.rs`, `nft_mint.rs` | Folder names, templates, portfolios |
+| `src/royalties.rs` | Paid templates: price config and designer/treasury split |
 | `src/access_control.rs` | Admin and owner auth checks |
 | `src/storage.rs`, `src/constants.rs` | All ledger I/O, TTL policy, limits |
 | `src/validation.rs` | Folder name / CID / metadata URI / template ID rules |

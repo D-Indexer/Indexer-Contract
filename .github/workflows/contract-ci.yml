@@ -49,10 +49,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy (warnings denied)
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
       - name: Shell script syntax and shellcheck
         run: |
