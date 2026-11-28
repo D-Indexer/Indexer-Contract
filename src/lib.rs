@@ -368,6 +368,16 @@ impl FolderContract {
         template_registry::register_template(&env, &admin, template_id, &metadata_uri)
     }
 
+    /// Registers a batch of `(template_id, metadata_uri)` items atomically.
+    pub fn register_templates(
+        env: Env,
+        admin: Address,
+        items: Vec<(u32, String)>,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        template_registry::register_templates(&env, &admin, &items)
+    }
+
     pub fn get_template(env: Env, template_id: u32) -> Result<Template, ContractError> {
         template_registry::get_template(&env, template_id)
     }
@@ -446,6 +456,21 @@ impl FolderContract {
     ) -> Result<(), ContractError> {
         require_initialized(&env)?;
         nft_mint::update_portfolio(&env, &owner, &ipfs_cid)
+    }
+
+    /// Sets the minimum number of ledgers between portfolio updates per owner
+    /// (0 disables the limit, max `MAX_UPDATE_INTERVAL_LEDGERS`).
+    pub fn set_min_update_interval(
+        env: Env,
+        admin: Address,
+        ledgers: u32,
+    ) -> Result<(), ContractError> {
+        require_initialized(&env)?;
+        nft_mint::set_min_update_interval(&env, &admin, ledgers)
+    }
+
+    pub fn get_min_update_interval(env: Env) -> u32 {
+        storage::get_min_update_interval(&env)
     }
 
     pub fn get_portfolio(env: Env, owner: Address) -> Result<PortfolioNFT, ContractError> {

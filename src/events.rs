@@ -429,3 +429,11 @@ pub fn contract_upgraded(env: &Env, admin: &Address, wasm_hash: &BytesN<32>) {
     }
     .publish(env);
 }
+
+pub fn update_interval_set(env: &Env, admin: &Address, ledgers: u32) {
+    UpdateIntervalSet {
+        admin: admin.clone(),
+        ledgers,
+    }
+    .publish(env);
+}

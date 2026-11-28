@@ -75,6 +75,9 @@ events-schema:
 events-schema-check:
 	python3 scripts/events_schema.py --check
 
+preflight-test:
+	./scripts/tests/test-mainnet-preflight.sh
+
 snapshot-list:
 	@find test_snapshots -type f | sort
 

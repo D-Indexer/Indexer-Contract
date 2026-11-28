@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, String};
 
-use crate::access_control::require_owner;
+use crate::access_control::{require_admin, require_owner};
+use crate::constants::MAX_UPDATE_INTERVAL_LEDGERS;
 use crate::errors::ContractError;
 use crate::events;
 use crate::identity_map;
@@ -64,6 +65,8 @@ pub fn apply_mint_portfolio(env: &Env, plan: &MintPortfolioPlan) {
         }
     }
     storage::set_user_template(env, owner, template_id);
+    // Mint isn't rate-limited, but it starts the owner's update interval.
+    storage::set_last_update(env, owner, storage::get_min_update_interval(env));
     events::portfolio_minted(env, owner, template_id, ipfs_cid);
     Ok(())
 }

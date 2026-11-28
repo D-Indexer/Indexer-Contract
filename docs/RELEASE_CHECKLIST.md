@@ -16,3 +16,6 @@
 - [ ] Mainnet only: the admin is a multisig account, the deploy identity is dedicated, and the
       mainnet readiness issue ([#127](https://github.com/D-Indexer/Indexer-Contract/issues/127))
       is closed.
+- [ ] Mainnet only: `./scripts/mainnet-preflight.sh deployments/mainnet.json` reports
+      **Overall: PASS** (multisig admins, wasm matches the tagged release, template CIDs
+      retrievable, TTLs above the minimum, no admin is the deployer, CI green). It is read-only.

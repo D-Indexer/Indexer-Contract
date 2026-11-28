@@ -1,0 +1,19 @@
+{
+  "name": "indexer-contract-ts-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bindings": "stellar contract bindings typescript --wasm ../../target/stellar/indexer_contract.wasm --output-dir bindings --overwrite && cd bindings && npm install --no-audit --no-fund && npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "bindings": "file:./bindings"
+  },
+  "devDependencies": {
+    "@stellar/stellar-sdk": "16.4.1",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

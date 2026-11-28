@@ -65,6 +65,11 @@ case "$NETWORK" in
     DEFAULT_RPC_URL="https://soroban-testnet.stellar.org"
     PASSPHRASE="Test SDF Network ; September 2015"
     ;;
+  local)
+    DEFAULT_RPC_URL="http://localhost:8000/rpc"
+    PASSPHRASE="Standalone Network ; February 2017"
+    FRIENDBOT_URL="${FRIENDBOT_URL:-http://localhost:8000/friendbot}"
+    ;;
   mainnet)
     DEFAULT_RPC_URL="https://mainnet.sorobanrpc.com"
     PASSPHRASE="Public Global Stellar Network ; September 2015"
@@ -137,6 +142,12 @@ run_stellar() {
 
 ensure_identity() {
   local name="$1"
+  if [[ "$NETWORK" == "local" ]]; then
+    stellar keys address "$name" >/dev/null 2>&1 || stellar keys generate "$name" >/dev/null
+    echo "==> Funding '$name' via local Friendbot"
+    curl -sSf "$FRIENDBOT_URL?addr=$(stellar keys address "$name")" >/dev/null 2>&1 || true
+    return
+  fi
   if ! stellar keys address "$name" >/dev/null 2>&1; then
     [[ "$NETWORK" == "testnet" ]] || die "identity '$name' not found; create it with 'stellar keys add $name'"
     echo "==> Creating identity '$name' and funding it via Friendbot"

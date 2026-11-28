@@ -144,7 +144,7 @@ extends the instance TTL. Reads have no signer and emit nothing.
 | `cancel_recovery` | `owner: Address` | `owner` | `rec_cancel` | 2, 35 |
 | `set_user_template` | `owner: Address, template_id: u32` | `owner` | `tmpl_set` | 2, `FolderNotFound` (4), 17, `TemplateNotFound` (6) |
 | `mint_portfolio` | `owner: Address, template_id: u32, ipfs_cid: String` | `owner` | `port_mint` | 2, 4, `PortfolioAlreadyMinted` (13), 17, `InvalidCID` (8), 6 |
-| `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5) |
+| `update_portfolio` | `owner: Address, ipfs_cid: String` | `owner` | `port_upd` | 2, 8, `PortfolioNotFound` (5), `UpdateTooSoon` (20) |
 
 Notes:
 
@@ -218,6 +218,7 @@ Notes:
 | `get_guardians` | `owner: Address` | `Option<GuardianConfig { guardians, threshold }>` | — |
 | `get_recovery` | `owner: Address` | `Option<Recovery { new_owner, approvals, initiated_ledger }>` | — |
 | `get_user_template` | `owner: Address` | `Option<u32>` | — |
+| `get_min_update_interval` | — | `u32` ledgers between updates per owner (0 = no limit) | — |
 | `get_portfolio` | `owner: Address` | `PortfolioNFT { owner, template_id, ipfs_cid, minted_at }` | `PortfolioNotFound` (5) |
 | `verify_portfolio` | `owner: Address` | `bool`: whether the owner has a portfolio | — |
 | `get_portfolio_by_folder` | `folder_name: String` | `PortfolioNFT` for the Folder's owner | `InvalidFolderName` (9), `FolderNotFound` (4), `PortfolioNotFound` (5) |

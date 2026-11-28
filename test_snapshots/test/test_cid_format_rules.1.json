@@ -221,6 +221,33 @@
               "key": {
                 "vec": [
                   {
+                    "symbol": "LastUpdate"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  }
+                ]
+              },
+              "durability": "temporary",
+              "val": {
+                "u32": 36
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 48
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
                     "symbol": "OwnerFolder"
                   },
                   {
@@ -561,7 +588,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312023
       },
       {
         "entry": {
@@ -581,7 +608,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312011
       },
       {
         "entry": {
@@ -621,7 +648,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 6312035
       },
       {
         "entry": {

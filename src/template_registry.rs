@@ -43,6 +43,44 @@ pub fn plan_register_template(
     Ok(())
 }
 
+/// Registers up to `MAX_BATCH_REGISTER` templates atomically: every item is
+/// validated before any is written, so one invalid item writes nothing.
+/// Emits one `tmpl_reg` per item, in input order.
+pub fn register_templates(
+    env: &Env,
+    admin: &Address,
+    items: &Vec<(u32, String)>,
+) -> Result<(), ContractError> {
+    require_admin(env, admin)?;
+    let count = items.len();
+    if count == 0 || count > MAX_BATCH_REGISTER {
+        return Err(ContractError::InvalidBatchSize);
+    }
+    let mut seen: Vec<u32> = Vec::new(env);
+    for (template_id, metadata_uri) in items.iter() {
+        validation::require_valid_template_id(template_id)?;
+        validation::require_valid_metadata_uri(&metadata_uri)?;
+        if seen.contains(template_id) || storage::get_template(env, template_id).is_some() {
+            return Err(ContractError::TemplateAlreadyExists);
+        }
+        seen.push_back(template_id);
+    }
+    if storage::get_template_list(env).len() + count > MAX_TEMPLATES {
+        return Err(ContractError::TemplateLimitReached);
+    }
+
+    for (template_id, metadata_uri) in items.iter() {
+        let template = Template {
+            template_id,
+            metadata_uri: metadata_uri.clone(),
+            creator: admin.clone(),
+        };
+        storage::save_template(env, &template);
+        events::template_registered(env, template_id, &metadata_uri, admin);
+    }
+    Ok(())
+}
+
 pub fn get_template(env: &Env, template_id: u32) -> Result<Template, ContractError> {
     validation::require_valid_template_id(template_id)?;
     storage::get_template(env, template_id).ok_or(ContractError::TemplateNotFound)

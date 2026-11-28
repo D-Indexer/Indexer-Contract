@@ -7,12 +7,14 @@
 |---|---|---|---|
 | `Initialized` | instance | `bool` | 1 |
 | `AdminList` | instance | `Vec<Address>` | `MAX_ADMINS` = 10 |
+| `MinUpdateInterval` | instance | `u32` (unset = 12) | 1 |
 | `Template(u32)` | persistent | `Template` | `MAX_TEMPLATES` = 256 |
 | `TemplateList` | persistent | `Vec<u32>` | `MAX_TEMPLATES` = 256 |
 | `FolderOwner(String)` | persistent | `Address` | one per owner |
 | `OwnerFolder(Address)` | persistent | `String` | one per owner |
 | `UserTemplate(Address)` | persistent | `u32` | one per owner |
 | `Portfolio(Address)` | persistent | `PortfolioNFT` | one per owner |
+| `LastUpdate(Address)` | temporary | `u32` ledger of last mint/update | one per owner; TTL = update interval, so it expires instead of paying rent |
 
 Instance storage is a single ledger entry that every invocation loads, so it holds only small,
 bounded values. Templates used to live there and could have grown it without limit. They are now

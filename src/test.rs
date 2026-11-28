@@ -3,7 +3,7 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{
-        storage::{Instance as _, Persistent as _},
+        storage::{Instance as _, Persistent as _, Temporary as _},
         Address as _, AuthorizedFunction, Events as _, Ledger as _,
     },
     Address, Env, Event as _, IntoVal, String, Val, Vec,
@@ -12,7 +12,8 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 
 use crate::constants::{
-    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS, MAX_TEMPLATES,
+    DAY_IN_LEDGERS, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD, MAX_ADMINS,
+    MAX_BATCH_REGISTER, MAX_TEMPLATES, MAX_UPDATE_INTERVAL_LEDGERS, MIN_UPDATE_INTERVAL_LEDGERS,
     PERSISTENT_BUMP_AMOUNT,
 };use crate::errors::ContractError;
 use crate::events::{AdminAdded, AdminRemoved, ContractInitialized, TemplateRegistered};
@@ -43,6 +44,15 @@ impl TestEnv {
     fn client(&self) -> FolderContractClient<'_> {
         FolderContractClient::new(&self.env, &self.contract_id)
     }
+}
+
+/// Moves the ledger past the default portfolio update interval.
+fn skip_update_interval(env: &Env) {
+    advance_ledgers(env, MIN_UPDATE_INTERVAL_LEDGERS);
+}
+
+fn advance_ledgers(env: &Env, ledgers: u32) {
+    env.ledger().with_mut(|li| li.sequence_number += ledgers);
 }
 
 fn uninitialized_env() -> TestEnv {
@@ -716,6 +726,7 @@ fn test_update_portfolio() {
     t.client().register_template(&t.admin, &1u32, &uri);
     t.client().claim_folder(&user, &name);
     t.client().mint_portfolio(&user, &1u32, &cid1);
+    skip_update_interval(&t.env);
     t.client().update_portfolio(&user, &cid2);
 
     assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid2);
@@ -1854,6 +1865,7 @@ fn test_cid_format_rules() {
     }
     for good in [VALID_CIDV0, VALID_CIDV1_RAW, VALID_CIDV1_DAG_PB] {
         let cid = String::from_str(&t.env, good);
+        skip_update_interval(&t.env);
         t.client().update_portfolio(&user, &cid);
         assert_eq!(t.client().get_portfolio(&user).ipfs_cid, cid);
     }
