@@ -68,34 +68,46 @@ pub enum ContractError {
     /// The contract treasury holds less than the requested amount.
     /// User message: The treasury does not hold enough funds for this withdrawal.
     InsufficientBalance = 21,
-    /// The Folder lease has expired and is in its grace period.
-    /// User message: This Folder has expired. The owner can still renew it.
-    FolderExpired = 22,
-    /// The price tier table is malformed.
-    /// User message: The price tiers are not valid.
-    InvalidPriceTiers = 23,
-    /// The lease feature is disabled.
+    /// The address is blocked from contract write paths.
+    /// User message: This address is blocked.
+    AddressBlocked = 22,
+    /// An admin address cannot be blocked.
+    /// User message: An administrator cannot be blocked.
+    CannotBlockAdmin = 23,
+    /// The portfolio flag is outside the supported range.
+    /// User message: That portfolio flag is not valid.
+    InvalidPortfolioFlag = 24,
+    /// The template submission does not exist.
+    /// User message: That template submission could not be found.
+    SubmissionNotFound = 25,
+    /// The pending template submission queue is full.
+    /// User message: The template submission queue is full.
+    SubmissionQueueFull = 26,
+    /// The folder lease configuration is invalid.
+    /// User message: The Folder lease configuration is not valid.
+    InvalidLeaseConfig = 27,
+    /// Folder renewal is not available.
+    /// User message: Folder renewal is not available.
+    InvalidRenewal = 28,
+    /// Folder leases are disabled.
     /// User message: Folder leases are not enabled.
-    LeasesDisabled = 24,
-    /// The renewal request is invalid or would overflow.
-    /// User message: This Folder cannot be renewed.
-    InvalidRenewal = 25,
-    /// No queued admin change has the given ID.
-    /// User message: That admin change does not exist.
-    AdminChangeNotFound = 26,
-    /// The queued admin change is still inside its timelock.
-    /// User message: That admin change cannot be executed yet.
-    AdminChangeNotReady = 27,
-    /// The admin change queue is full.
-    /// User message: Too many admin changes are already queued.
-    AdminChangeQueueFull = 28,
-    /// The portfolio's current CID does not match the expected CID.
-    /// User message: This portfolio was changed elsewhere. Reload it and try again.
-    StaleUpdate = 29,
-    /// The delegate is the owner itself, or its expiry ledger is in the past.
-    /// User message: That delegate setting is not valid.
-    InvalidDelegate = 30,
-    /// The portfolio delegate's authorization has expired.
-    /// User message: This delegate's access has expired. Ask the owner to renew it.
-    DelegateExpired = 31,
+    LeasesDisabled = 29,
+    /// Folder name pricing tiers are invalid.
+    /// User message: The Folder pricing configuration is not valid.
+    InvalidPriceTiers = 30,
+    /// Folder claim fee configuration is invalid.
+    /// User message: The Folder claim fee is not valid.
+    InvalidFee = 31,
+    /// Folder has expired and is past the grace period.
+    /// User message: That Folder has expired.
+    FolderExpired = 32,
+    /// The admin timelock queue is full.
+    /// User message: The admin change queue is full.
+    AdminChangeQueueFull = 33,
+    /// The requested admin change is not pending.
+    /// User message: That admin change could not be found.
+    AdminChangeNotFound = 34,
+    /// The admin change timelock has not elapsed.
+    /// User message: That admin change is not ready yet.
+    AdminChangeNotReady = 35,
 }

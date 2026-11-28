@@ -112,7 +112,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "execute_admin_change",
+              "function_name": "cancel_admin_change",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -246,7 +246,7 @@
   ],
   "ledger": {
     "protocol_version": 29,
-    "sequence_number": 34560,
+    "sequence_number": 17280,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -279,7 +279,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -306,7 +306,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -366,51 +366,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PortfolioMeta"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "revision"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "updated_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -462,7 +418,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -490,7 +446,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -517,7 +473,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 2108160
+        "live_until": 2090880
       },
       {
         "entry": {
@@ -541,7 +497,7 @@
                             "symbol": "Admin"
                           },
                           {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                           }
                         ]
                       },
@@ -553,10 +509,40 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "Admin"
+                          },
+                          {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "AdminAt"
                           },
                           {
                             "u32": 0
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "AdminAt"
+                          },
+                          {
+                            "u32": 1
                           }
                         ]
                       },
@@ -573,7 +559,7 @@
                         ]
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 2
                       }
                     },
                     {
@@ -699,7 +685,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {
@@ -719,7 +705,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {
@@ -759,7 +745,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {
@@ -779,7 +765,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {
@@ -799,7 +785,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {
@@ -819,7 +805,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6346559
+        "live_until": 6329279
       },
       {
         "entry": {

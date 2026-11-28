@@ -35,18 +35,19 @@ pub fn fee_for_label_len(tiers: &PriceTiers, base_fee: i128, label_len: u32) -> 
     base_fee
 }
 
-/// Fee for one claim (or one lease period) of a valid Folder name. Zero when
-/// no claim fee is configured. Price tiers override the flat claim fee amount
-/// for short labels.
+/// Fee for one claim (or one lease period) of a valid Folder name: the
+/// matching price tier, otherwise the configured `ClaimFee.amount`. Zero when
+/// no fee is configured or the fee is disabled (`amount == 0`).
 pub fn quote_claim(env: &Env, folder_name: &String) -> Result<i128, ContractError> {
     validation::require_valid_folder_name(folder_name)?;
-    let Some(fee) = storage::get_claim_fee(env) else {
+    let Some(config) = storage::get_claim_fee(env) else {
         return Ok(0);
     };
-    let label_len = folder_name.len() - FOLDER_SUFFIX.len() as u32;
+    // The name was validated above, so it is longer than the suffix.
+    let label_len = folder_name.len().saturating_sub(FOLDER_SUFFIX.len() as u32);
     Ok(fee_for_label_len(
         &storage::get_price_tiers(env),
-        fee.amount,
+        config.amount,
         label_len,
     ))
 }
@@ -57,12 +58,8 @@ pub fn charge(env: &Env, payer: &Address, amount: i128) -> i128 {
     if amount <= 0 {
         return 0;
     }
-    match storage::get_claim_fee(env) {
-        Some(fee) => {
-            token::Client::new(env, &fee.token).transfer(payer, &fee.treasury, &amount);
-            amount
-        }
-        None => 0,
+    if let Some(config) = storage::get_claim_fee(env) {
+        token::Client::new(env, &config.token).transfer(payer, &config.treasury, &amount);
     }
 }
 

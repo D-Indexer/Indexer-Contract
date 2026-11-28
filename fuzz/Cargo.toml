@@ -1,0 +1,32 @@
+[package]
+name = "indexer-contract-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+soroban-sdk = { version = "=25.3.1", features = ["testutils"] }
+
+[dependencies.indexer-contract]
+path = ".."
+
+[[bin]]
+name = "fuzz_validation"
+path = "fuzz_targets/fuzz_validation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_entrypoints"
+path = "fuzz_targets/fuzz_entrypoints.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

@@ -4,6 +4,11 @@ Events are typed Soroban `#[contractevent]` structs in [`src/events.rs`](../src/
 backend indexer (`Indexer-Backend`) depends on this file. Update it in the same PR as any change
 to `src/events.rs`.
 
+The machine-readable schema is [`events.schema.json`](../events.schema.json), generated from
+`src/events.rs` by [`scripts/events_schema.py`](../scripts/events_schema.py). Regenerate it with
+`make events-schema`; `make events-schema-check` (part of `make check` and CI) fails when the
+committed file is stale. Do not edit the schema by hand.
+
 ## Encoding
 
 Every event has:
@@ -22,8 +27,12 @@ Compatibility rules:
 | Topic | Struct | Data (in order) | Emitted by |
 |---|---|---|---|
 | `init` | `ContractInitialized` | `admin: Address` | `initialize` |
-| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `add_admin` |
-| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `remove_admin` |
+| `adm_add` | `AdminAdded` | `admin: Address` (caller), `new_admin: Address` | `execute_admin_change` (`Add`) |
+| `adm_rm` | `AdminRemoved` | `admin: Address` (caller), `target: Address` | `execute_admin_change` (`Remove`) |
+| `adm_q` | `AdminChangeQueued` | `admin: Address`, `op_id: u32`, `target: Address`, `eta_ledger: u32` | `queue_admin_change` |
+| `adm_ex` | `AdminChangeExecuted` | `admin: Address`, `op_id: u32`, `target: Address` | `execute_admin_change` |
+| `adm_cx` | `AdminChangeCancelled` | `admin: Address`, `op_id: u32`, `target: Address` | `cancel_admin_change` |
+| `upgraded` | `ContractUpgraded` | `admin: Address`, `new_wasm_hash: BytesN<32>` | `upgrade` |
 | `folder_cl` | `FolderClaimed` | `owner: Address`, `folder_name: String`, `fee_paid: i128` | `claim_folder` |
 | `tmpl_reg` | `TemplateRegistered` | `template_id: u32`, `metadata_uri: String`, `creator: Address` | `register_template` |
 | `tmpl_set` | `TemplateAssigned` | `owner: Address`, `template_id: u32` | `set_user_template` |
@@ -34,6 +43,12 @@ Compatibility rules:
 | `dlg_clr` | `DelegateCleared` | `owner: Address`, `delegate: Address` | `clear_portfolio_delegate` |
 | `fee_set` | `ClaimFeeSet` | `admin: Address`, `token: Address`, `amount: i128`, `treasury: Address` | `set_claim_fee` |
 | `withdraw` | `Withdrawn` | `admin: Address`, `token: Address`, `to: Address`, `amount: i128` | `withdraw` |
+| `blk_add` | `AddressBlocked` | `admin: Address`, `address: Address`, `reason_code: u32` | `block_address` |
+| `blk_rm` | `AddressUnblocked` | `admin: Address`, `address: Address` | `unblock_address` |
+| `port_flag` | `PortfolioFlagSet` | `admin: Address`, `owner: Address`, `flag: u32`, `reason_code: u32` | `set_portfolio_flag` |
+| `tmpl_sub` | `TemplateSubmitted` | `submission_id: u32`, `designer: Address`, `metadata_uri: String` | `submit_template` |
+| `tmpl_appr` | `TemplateSubmissionApproved` | `admin: Address`, `submission_id: u32`, `template_id: u32` | `approve_submission` |
+| `tmpl_rej` | `TemplateSubmissionRejected` | `admin: Address`, `submission_id: u32`, `reason_code: u32` | `reject_submission` |
 
 ### Changes in the portfolio delegate update
 
@@ -93,17 +108,48 @@ Compatibility rules:
 | `folder_cl` | Upsert identity `owner ↔ folder_name` (a re-claim of an expired name replaces the previous owner) |
 | `claim_spon` | Record the sponsor of the claim |
 | `folder_rn` | Update the Folder's lease expiry |
+| `rec_init` / `rec_appr` / `rec_cancel` | Track the pending recovery (for owner and guardian notifications) |
+| `rec_exec` | Re-key the identity: move the Folder name, portfolio and template selection from `owner` to `new_owner` and drop every record of `owner` |
 | `tmpl_reg` | Cache template `template_id → metadata_uri, creator` and fetch the metadata from IPFS |
-| `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted (this also bumps the portfolio revision by 1) |
-| `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) with revision 0 and set the owner's template |
-| `port_upd` | Update the portfolio's `ipfs_cid` and store `revision`. If `revision` is more than the stored value + 1, an update was missed (a `tmpl_set` also counts as one): re-read with `get_portfolio` / `get_portfolio_meta`. Ignore a `port_upd` whose `revision` is not above the stored value (replay) |
-| `dlg_set` | Store the owner's delegate and `expires_ledger` (replaces any previous delegate) |
-| `dlg_clr` | Remove the owner's delegate |
-| `port_burn` | Remove the owner's delegate too, then delete (or tombstone) the owner's portfolio record. Keep the owner's identity and selected template: a burn does not touch them. A later `port_mint` for the same owner starts a new portfolio, so don't merge it with the burned one. Optionally unpin `last_ipfs_cid` |
+| `tmpl_set` | Set the owner's template and the portfolio's `template_id` if one is minted |
+| `port_mint` | Insert the portfolio (`owner`, `template_id`, `ipfs_cid`) and set the owner's template |
+| `port_upd` | Update the portfolio's `ipfs_cid`; use `previous_cid` to detect gaps (see below) |
+
+### Portfolio moderation flags
+
+`PortfolioFlag(owner)` is the authoritative on-chain moderation signal:
+
+- `0` means no flag. The key is removed.
+- `1` means hidden. Frontends should hide the portfolio content and do not delete its record.
+- `2` means under review. Frontends should keep it visible only when their review policy allows
+  it, and backends should retain the portfolio row for audit and recovery.
+
+The backend should consume `port_flag` by setting `get_portfolio_flag(owner)` semantics:
+`(admin, owner, flag, reason_code)`. An owner `update_portfolio` must not clear an existing flag.
 
 Ledger sequence, close time and tx hash come from the RPC `getEvents` envelope, so they aren't
 duplicated in event data. Use `ledger_closed_at` as the mint or update time. `minted_at` is also
 stored on-chain and returned by `get_portfolio`.
+
+## Gap detection for `port_upd`
+
+`port_upd` now carries `previous_cid` as its last data field: the CID that was stored on-chain
+immediately before this update. Positional decoders that read only `owner` and `ipfs_cid` keep
+working; the new field is appended, never inserted.
+
+Use it to detect missed events:
+
+- Keep the last CID you indexed per owner (from `port_mint.ipfs_cid` or the previous
+  `port_upd.ipfs_cid`).
+- On each `port_upd`, compare the stored CID with `previous_cid`:
+  - **equal** → the chain is contiguous; apply `ipfs_cid` and store it.
+  - **different** → at least one `port_upd` was missed (or the record is stale). Do not trust the
+    incremental state: re-read the portfolio with `get_portfolio(owner)` and re-sync, then log the
+    gap for the owner.
+- `previous_cid` is the CID before the write, so a self-update (same CID) yields
+  `previous_cid == ipfs_cid`; treat that as a no-op, not a gap.
+- Events are ordered per ledger; if several `port_upd` events for one owner land in the same
+  ledger, apply them in event order and check each `previous_cid` against the running value.
 
 ## Example (testnet)
 
