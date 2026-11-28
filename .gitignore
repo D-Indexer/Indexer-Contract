@@ -2,4 +2,5 @@
 .env
 *.wasm
 !*.optimized.wasm
-/bindings/ts
+__pycache__/
+/deploy-out
