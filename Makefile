@@ -1,8 +1,9 @@
-.PHONY: errors-json sdk-compat help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean
+.PHONY: errors-json sdk-compat help fmt fmt-check cargo-check clippy test build-wasm build-optimized optimize-wasm wasm-hash script-check snapshot-list check clean docker-build
 
 STELLAR_CLI_VERSION ?= 28.1.0
 WASM_OUT_DIR := target/stellar
 OPTIMIZED_WASM := $(WASM_OUT_DIR)/indexer_contract.wasm
+DOCKER_WASM := target/docker/indexer_contract.wasm
 
 help:
 	@echo "Available targets:"
@@ -20,6 +21,7 @@ help:
 	@echo "  snapshot-list List tracked Soroban auth snapshots"
 	@echo "  mutants       Run cargo-mutants with mutants.toml"
 	@echo "  check         Run local pre-PR gates"
+	@echo "  docker-build  Build optimized WASM in the pinned container -> $(DOCKER_WASM)"
 	@echo "  clean         Remove Cargo build artifacts"
 
 fmt:
@@ -57,6 +59,7 @@ wasm-hash: build-optimized
 
 script-check:
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
+	./scripts/test_smoke_guard.sh
 	python3 scripts/test_errors_json.py
 	python3 scripts/errors_json.py --check
 
@@ -90,6 +93,11 @@ snapshot-check:
 	}
 
 check: fmt-check cargo-check clippy test snapshot-check build-wasm script-check
+
+# Reproducible build in the pinned linux/amd64 image (see Dockerfile).
+docker-build:
+	DOCKER_BUILDKIT=1 docker build --platform linux/amd64 --target artifact --output type=local,dest=target/docker .
+	@sha256sum $(DOCKER_WASM)
 
 clean:
 	cargo clean

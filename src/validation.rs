@@ -27,19 +27,13 @@ fn with_bytes<R>(bytes: &Bytes, f: impl FnOnce(&[u8]) -> R) -> R {
 
 fn ends_with(bytes: &Bytes, suffix: &[u8]) -> bool {
     let len = bytes.len();
-    let suffix_len = suffix.len() as u32;
-    if len < suffix_len {
+    let Some(offset) = len.checked_sub(suffix.len() as u32) else {
         return false;
-    }
-    let offset = len - suffix_len;
-    let mut i = 0;
-    while i < suffix.len() {
-        if bytes.get(offset + i as u32) != Some(suffix[i]) {
-            return false;
-        }
-        i += 1;
-    }
-    true
+    };
+    suffix
+        .iter()
+        .zip(bytes.slice(offset..len).iter())
+        .all(|(s, b)| *s == b)
 }
 
 fn all_bytes(bytes: &Bytes, pred: fn(u8) -> bool) -> bool {
